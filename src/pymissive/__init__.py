@@ -1,3 +1,3 @@
-"""lib example - Example Python library with src/ structure."""
+"""Python Missive - Framework-agnostic messaging library."""
 
 __version__ = "0.1.0"

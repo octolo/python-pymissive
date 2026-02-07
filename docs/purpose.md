@@ -1,16 +1,17 @@
 ## Project Purpose
 
-**Geoaddress** is a Python library for address geocoding and reverse geocoding. It provides a unified interface to multiple geocoding providers (Nominatim, Google Maps, Mapbox, etc.) using ProviderKit for provider management.
+**python-missive** is a Python library for multi-channel message delivery. It provides a unified interface to multiple messaging providers (email, SMS, push notifications, postal mail, etc.) using ProviderKit for provider management.
 
 ### Core Functionality
 
 The library enables you to:
 
-1. **Search addresses** with multiple geocoding providers:
-   - Address geocoding (address → coordinates)
-   - Reverse geocoding (coordinates → address)
-   - Address validation and normalization
-   - Address autocomplete
+1. **Send messages across multiple channels** with various providers:
+   - Email messaging (transactional and marketing)
+   - SMS and voice calls
+   - Instant messaging (Telegram, Signal, Messenger, Slack, Teams)
+   - Push notifications (FCM, APN)
+   - Postal mail and registered letters (LRE)
 
 2. **Manage multiple providers** through ProviderKit:
    - Provider discovery and enumeration
@@ -18,80 +19,76 @@ The library enables you to:
    - Configuration management per provider
    - Dependency validation (API keys, packages)
 
-3. **Standardized address format**:
-   - Consistent address field structure across all providers
-   - Field descriptions for address components
-   - Support for international addresses
-   - Structured address data (address_line1, city, postal_code, country, etc.)
+3. **Unified provider interface**:
+   - Consistent API across all providers
+   - Service-based architecture
+   - Support for provider-specific features
+   - Standardized configuration
 
 ### Architecture
 
 The library uses a provider-based architecture built on ProviderKit:
 
-- Each geocoding service is implemented as a provider inheriting from `GeoaddressProvider`
-- `GeoaddressProvider` extends `ProviderBase` from ProviderKit
-- Providers are organized in the `providers/` directory
-- Common functionality is shared through the base `GeoaddressProvider` class
+- Each messaging service is implemented as a provider inheriting from base provider classes
+- Base provider classes extend `ProviderBase` from ProviderKit
+- Providers are organized in the `providers/` directory by category
+- Common functionality is shared through base provider mixins
 - Provider discovery and management is handled by ProviderKit
 
 ### Available Services
 
-All providers implement the following services:
+Providers implement services based on their capabilities:
 
-- **`addresses_autocomplete`**: Search for addresses by query string
-- **`reverse_geocode`**: Convert coordinates (lat/lon) to address
+- **Email providers**: `send_email`, `send_bulk_email`
+- **SMS providers**: `send_sms`, `send_bulk_sms`
+- **Voice providers**: `make_call`, `send_voice_message`
+- **Messaging providers**: `send_message`, `send_media`
+- **Push notification providers**: `send_notification`, `send_bulk_notification`
+- **Postal providers**: `send_letter`, `send_registered_letter`
 
 ### Supported Providers
 
-**Free providers** (no API key required):
-- **Nominatim**: OpenStreetMap-based geocoding
-- **Photon**: Komoot's OpenStreetMap geocoding service
+**Email providers**:
+- Django Email (uses Django's email backend)
+- SMTP (generic SMTP)
+- SendGrid
+- Mailgun
+- Amazon SES
+- Brevo (ex-Sendinblue)
+- Scaleway
 
-**Paid/API key providers**:
-- **Google Maps**: Google's geocoding API
-- **Mapbox**: Mapbox Geocoding API
-- **LocationIQ**: LocationIQ Geocoding API
-- **OpenCage**: OpenCage Geocoding API
-- **Geocode Earth**: Geocode Earth API
-- **Geoapify**: Geoapify Geocoding API
-- **Maps.co**: Maps.co Geocoding API
-- **HERE**: HERE Geocoding API
+**SMS & Voice providers**:
+- Twilio
+- Vonage (ex-Nexmo)
+- SMSPartner
 
-### Address Fields
+**Instant messaging providers**:
+- Telegram
+- Signal
+- Facebook Messenger
+- Slack
+- Microsoft Teams
 
-The library uses a standardized address format with the following fields:
+**Postal & registered letter providers**:
+- La Poste (French postal service)
+- Maileva
+- AR24 (registered electronic mail)
+- Certeurope
 
-- `text`: Full formatted address string
-- `reference`: Backend reference ID (place ID)
-- `address_line1`: Street number and name
-- `address_line2`: Building, apartment, floor (optional)
-- `address_line3`: Additional address info (optional)
-- `city`: City name
-- `postal_code`: Postal/ZIP code
-- `state`: State/region/province
-- `region`: Region or administrative area
-- `country`: Country name
-- `country_code`: ISO country code (e.g., FR, US, GB)
-- `municipality`: Municipality or local administrative unit
-- `neighbourhood`: Neighbourhood, quarter, or district
-- `address_type`: Address type or place type
-- `latitude`: Latitude coordinate (float)
-- `longitude`: Longitude coordinate (float)
-- `osm_id`: OpenStreetMap ID
-- `osm_type`: OpenStreetMap type
-- `confidence`: Confidence score (0-100%)
-- `relevance`: Relevance score (0-100%)
-- `backend`: Backend display name
-- `backend_name`: Simple backend name (e.g., nominatim)
-- `geoaddress_id`: Combined backend_name-reference ID
+**Push notification providers**:
+- FCM (Firebase Cloud Messaging)
+- APN (Apple Push Notification)
+- In-App Notifications
 
 ### Use Cases
 
-- Address search and autocomplete
-- Geocoding addresses to coordinates
-- Reverse geocoding coordinates to addresses
-- Address validation and normalization
-- Multi-provider address lookup with fallback
-- Address data standardization across different geocoding services
-- Integration with mapping and location-based applications
+- Multi-channel messaging infrastructure
+- Transactional emails and notifications
+- SMS alerts and 2FA codes
+- Push notifications for mobile apps
+- Team communication (Slack, Teams)
+- Postal mail for official documents
+- Registered letters for legal compliance
+- Multi-provider setup with automatic fallback
+- Integration with Django applications (via django-missive)
 

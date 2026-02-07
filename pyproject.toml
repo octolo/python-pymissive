@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "python-missive"
 version = "0.1.0"
-description = "Framework-agnostic utilities extracted from Django Missive."
+description = "Framework-agnostic messaging library for multi-channel communication."
 authors = [{ name = "Charl", email = "charl@example.com" }]
 readme = "README.md"
 requires-python = ">=3.10"
@@ -42,6 +42,10 @@ warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
 show_error_codes = true
+# Ignore archives directory (old code)
+exclude = [
+    "src/pymissive/archives/.*",
+]
 # Ignore mixin attribute errors (they are provided by BaseProvider)
 [[tool.mypy.overrides]]
 module = [

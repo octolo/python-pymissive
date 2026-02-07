@@ -19,10 +19,9 @@ For detailed information, refer to:
 - Ensure all public APIs have type hints and docstrings
 - Write tests for new functionality
 
-### Geoaddress-Specific Guidelines
+### Missive-Specific Guidelines
 
-- **Provider development**: All providers must inherit from `GeoaddressProvider` and implement required services
-- **Address format**: Always use the standardized address format defined in `GEOADDRESS_FIELDS_DESCRIPTIONS`
+- **Provider development**: All providers must inherit from the appropriate base class (EmailProvider, SMSProvider, etc.)
 - **ProviderKit integration**: Use ProviderKit for provider management, discovery, and configuration
 - **API keys**: Never hardcode API keys, use environment variables with provider-specific prefixes
 - **Error handling**: Handle API rate limits and failures gracefully with retry logic and fallback mechanisms
@@ -30,13 +29,11 @@ For detailed information, refer to:
 ### Provider Implementation Checklist
 
 When creating a new provider:
-- [ ] Inherit from `GeoaddressProvider`
+- [ ] Inherit from the appropriate base provider class
 - [ ] Define `name`, `display_name`, and `description`
 - [ ] Set `required_packages` if needed
 - [ ] Configure `config_keys` and `config_defaults`
-- [ ] Implement `addresses_autocomplete()` method
-- [ ] Implement `reverse_geocode()` method
-- [ ] Map provider response to standard geoaddress format
+- [ ] Implement required service methods
 - [ ] Handle errors gracefully
 - [ ] Add tests for the provider
 

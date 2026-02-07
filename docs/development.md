@@ -40,18 +40,18 @@
 
 ### Provider Development
 
-- **Provider inheritance**: All providers must inherit from `GeoaddressProvider` (which extends `ProviderBase` from ProviderKit)
+- **Provider inheritance**: All providers must inherit from the appropriate base provider class (e.g., `EmailProvider`, `SMSProvider`, `NotificationProvider`)
 - **Required attributes**: Providers must define `name`, `display_name`, and optionally `description`
-- **Service implementation**: Providers must implement the required services: `addresses_autocomplete`, `reverse_geocode`
+- **Service implementation**: Providers must implement the required service methods based on their category
 - **Configuration**: Use `config_keys` and `config_defaults` for provider configuration
 - **API keys**: Never hardcode API keys, use environment variables with the provider's `config_prefix`
 
-### Address Format Standardization
+### Message Handling
 
-- **Consistent fields**: All providers must return addresses in the standardized format defined by `GEOADDRESS_FIELDS_DESCRIPTIONS`
-- **Field mapping**: Each provider should map its native response format to the standard geoaddress format
-- **Missing fields**: Use `None` or empty strings for missing optional fields, never omit required fields
-- **Coordinate precision**: Store coordinates as floats with appropriate precision
+- **Consistent API**: All providers of the same category should provide consistent method signatures
+- **Error handling**: Handle provider-specific errors and translate them to standard exceptions
+- **Missing features**: Use appropriate fallbacks or raise clear exceptions for unsupported features
+- **Provider-specific options**: Support provider-specific options through kwargs when needed
 
 ### Error Handling
 

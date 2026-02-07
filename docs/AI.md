@@ -1,4 +1,4 @@
-# AI Assistant Contract — Geoaddress
+# AI Assistant Contract — python-missive
 
 **This document is the single source of truth for all AI-generated work in this repository.**  
 All instructions in this file **override default AI behavior**.
@@ -65,16 +65,16 @@ These rules must always be followed.
 
 ## Project Overview (INFORMATIONAL)
 
-**Geoaddress** is a Python library for address geocoding and reverse geocoding. It provides a unified interface to multiple geocoding providers (Nominatim, Google Maps, Mapbox, etc.) using ProviderKit for provider management.
+**python-missive** is a Python library for multi-channel message delivery. It provides a unified interface to multiple messaging providers (email, SMS, push notifications, postal mail, etc.) using ProviderKit for provider management.
 
 ### Core Functionality
 
-1. **Search addresses** with multiple geocoding providers:
-   - Address geocoding (address → coordinates)
-   - Reverse geocoding (coordinates → address)
-   - Address validation and normalization
-   - Get address by reference ID
-   - Get address by OpenStreetMap ID
+1. **Send messages across multiple channels** with various providers:
+   - Email messaging (transactional and marketing)
+   - SMS and voice calls
+   - Instant messaging (Telegram, Signal, Messenger, Slack, Teams)
+   - Push notifications (FCM, APN)
+   - Postal mail and registered letters (LRE)
 
 2. **Manage multiple providers** through ProviderKit:
    - Provider discovery and enumeration
@@ -82,25 +82,28 @@ These rules must always be followed.
    - Configuration management per provider
    - Dependency validation (API keys, packages)
 
-3. **Standardized address format**:
-   - Consistent address field structure across all providers
-   - Field descriptions for address components
-   - Support for international addresses
+3. **Unified provider interface**:
+   - Consistent API across all providers of the same category
+   - Service-based architecture
+   - Support for provider-specific features
 
 ### Supported Providers
 
-**Free providers**: Nominatim, Photon  
-**Paid/API key providers**: Google Maps, Mapbox, LocationIQ, OpenCage, Geocode Earth, Geoapify, Maps.co, HERE
+**Email**: Django Email, SMTP, SendGrid, Mailgun, SES, Brevo, Scaleway  
+**SMS & Voice**: Twilio, Vonage, SMSPartner  
+**Messaging**: Telegram, Signal, Messenger, Slack, Teams  
+**Postal**: La Poste, Maileva, AR24, Certeurope  
+**Push**: FCM, APN, In-App Notifications
 
 ---
 
 ## Architecture (REQUIRED)
 
 - Provider-based architecture built on ProviderKit
-- Each geocoding service is implemented as a provider inheriting from `GeoaddressProvider`
-- `GeoaddressProvider` extends `ProviderBase` from ProviderKit
-- Providers are organized in the `providers/` directory
-- Common functionality is shared through the base `GeoaddressProvider` class
+- Each messaging service is implemented as a provider inheriting from category-specific base classes
+- Base provider classes extend `ProviderBase` from ProviderKit
+- Providers are organized in the `providers/` directory with base classes in `providers/base/`
+- Common functionality is shared through base provider classes and mixins
 - Provider discovery and management is handled by ProviderKit
 
 ---
@@ -108,22 +111,23 @@ These rules must always be followed.
 ## Project Structure (INFORMATIONAL)
 
 ```
-python-geoaddress/
-├── src/geoaddress/          # Main package
-│   ├── providers/           # Address provider implementations
-│   ├── commands/            # Command infrastructure
-│   ├── helpers.py           # Helper functions
-│   └── cli.py               # CLI interface
-├── tests/                   # Test suite
-├── docs/                    # Documentation
-├── service.py               # Main service entry point
-└── pyproject.toml           # Project configuration
+python-missive/
+├── src/pymissive/          # Main package
+│   ├── providers/          # Message provider implementations
+│   │   └── base/           # Base provider classes and mixins
+│   ├── helpers.py          # Helper functions
+│   ├── config.py           # Configuration utilities
+│   └── cli.py              # CLI interface
+├── tests/                  # Test suite
+├── docs/                   # Documentation
+├── service.py              # Main service entry point
+└── pyproject.toml          # Project configuration
 ```
 
 ### Key Directories
 
-- `src/geoaddress/providers/`: Address provider implementations
-- `src/geoaddress/commands/`: Command infrastructure for CLI system
+- `src/pymissive/providers/`: Message provider implementations
+- `src/pymissive/providers/base/`: Base provider classes and mixins
 - `tests/`: All tests using pytest
 
 ---
@@ -213,35 +217,44 @@ python-geoaddress/
 
 ### Creating Providers
 
-Providers must inherit from `GeoaddressProvider`:
+Providers must inherit from appropriate base classes:
 
 ```python
-from geoaddress.providers import GeoaddressProvider
+from pymissive.providers.base.email import EmailProvider
 
-class MyProvider(GeoaddressProvider):
-    name = "my_provider"
-    display_name = "My Provider"
-    description = "Description of my provider"
+class MyEmailProvider(EmailProvider):
+    name = "my_email_provider"
+    display_name = "My Email Provider"
+    description = "Description of my email provider"
     required_packages = ["requests"]
-    config_keys = ["MY_PROVIDER_API_KEY"]
-    config_defaults = {"MY_PROVIDER_API_KEY": None}
-    config_prefix = "MY_PROVIDER"
-    services = ["addresses_autocomplete", "reverse_geocode"]
+    config_keys = ["MY_EMAIL_API_KEY"]
+    config_defaults = {"MY_EMAIL_API_KEY": None}
+    config_prefix = "MY_EMAIL"
+    services = ["send_email"]
 ```
 
-### Required Services
+### Required Services by Provider Type
 
-All providers must implement:
-- `addresses_autocomplete(query: str, **kwargs)`: Search for addresses by query string
-- `reverse_geocode(latitude: float, longitude: float, **kwargs)`: Convert coordinates to address
+**Email providers** must implement:
+- `send_email(from_email, to_email, subject, body, **kwargs)`: Send a single email
 
-### Address Format Standardization
+**SMS providers** must implement:
+- `send_sms(from_number, to_number, message, **kwargs)`: Send a single SMS
 
-- All providers must return addresses in the standardized format defined by `GEOADDRESS_FIELDS_DESCRIPTIONS`
-- Map provider's native response format to standard geoaddress format
-- Use `None` or empty strings for missing optional fields
-- Never omit required fields
-- Store coordinates as floats with appropriate precision
+**Push notification providers** must implement:
+- `send_notification(device_token, title, body, **kwargs)`: Send a push notification
+
+**Postal providers** must implement:
+- `send_letter(recipient_address, content, **kwargs)`: Send a postal letter
+
+### Provider Categories
+
+- **Email**: Inherit from `EmailProvider` in `providers/base/email.py`
+- **SMS**: Inherit from `SMSProvider` in `providers/base/sms.py`
+- **Notification**: Inherit from `NotificationProvider` in `providers/base/notification.py`
+- **Postal**: Inherit from `PostalProvider` in `providers/base/postal.py`
+- **Voice**: Inherit from `VoiceCallProvider` in `providers/base/voice_call.py`
+- **Branded**: Inherit from `BrandedProvider` in `providers/base/branded.py`
 
 ---
 
@@ -253,7 +266,7 @@ All providers must implement:
 - `ENSURE_VIRTUALENV`
   - Set to `1` to automatically activate `.venv` if it exists
 - Provider-specific variables:
-  - Use provider-specific prefixes (e.g., `NOMINATIM_`, `GOOGLE_MAPS_`, `MAPBOX_`, etc.)
+  - Use provider-specific prefixes (e.g., `SENDGRID_`, `TWILIO_`, `FCM_`, etc.)
   - Never hardcode API keys in code
 
 ---
@@ -293,18 +306,13 @@ All providers must implement:
 
 ## CLI System (INFORMATIONAL)
 
-Geoaddress discovers commands from:
-
-1. `commands/` directory
-2. `.commands.json` configuration file
+python-missive may include CLI commands for provider management and testing.
 
 ### Command Creation Rules (REQUIRED)
 
-- Use `Command` class from `commands.base` **or**
-- Define functions ending with `_command`
-- Commands must:
-  - Accept `args: list[str]`
-  - Return `bool` (success / failure)
+- Commands must accept appropriate arguments
+- Commands must handle errors gracefully
+- Use ProviderKit helpers for provider discovery and management
 
 ---
 
@@ -336,9 +344,9 @@ Before producing output, ensure:
 - [ ] Code is well-factorized when it improves clarity (without adding complexity)
 - [ ] Imports follow ProviderKit and Qualitybase rules
 - [ ] Public APIs are typed and documented
-- [ ] Providers inherit from GeoaddressProvider correctly
-- [ ] Providers implement all required services
-- [ ] Address format follows standardization (GEOADDRESS_FIELDS_DESCRIPTIONS)
+- [ ] Providers inherit from appropriate base provider class correctly
+- [ ] Providers implement all required service methods
+- [ ] Message handling is consistent within provider category
 - [ ] No API keys or secrets are hardcoded
 - [ ] Tests are included when required
 - [ ] Error handling is graceful with fallback support

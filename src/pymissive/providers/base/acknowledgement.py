@@ -1,4 +1,3 @@
-from typing import Any
 from pymissive.config import MISSIVE_ACKNOWLEDGEMENT_LEVELS
 
 

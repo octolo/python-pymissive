@@ -1,6 +1,5 @@
 # Development dependencies
-# Install qualitybase in editable mode for local development
+# Install dependencies in editable mode for local development
 -e ../python-qualitybase
 -e ../python-providerkit
--e ../python-geoaddress
 -e .
