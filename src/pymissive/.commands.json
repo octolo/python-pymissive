@@ -1,0 +1,5 @@
+{
+    "packages": ["qualitybase", "providerkit"],
+    "directories": ["commands"],
+    "commands": []
+}

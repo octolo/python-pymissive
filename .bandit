@@ -1,3 +1,0 @@
-[bandit]
-# Skip assert_used (B101) - acceptable in test files
-skips = B101
