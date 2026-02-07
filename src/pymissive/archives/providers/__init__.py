@@ -22,7 +22,12 @@ from .sendgrid import SendGridProvider
 from .ses import SESProvider
 from .signal import SignalProvider
 from .slack import SlackProvider
-from .smspartner import SMSPartnerProvider
+from pymissive.providers.partner import (
+    PartnerProvider,
+    SmsPartnerProvider,
+    EmailPartnerProvider,
+    VoiceCallPartnerProvider,
+)
 from .teams import TeamsProvider
 from .telegram import TelegramProvider
 from .twilio import TwilioProvider
@@ -148,7 +153,10 @@ __all__ = [
     "SESProvider",
     "SignalProvider",
     "SlackProvider",
-    "SMSPartnerProvider",
+    "PartnerProvider",
+    "SmsPartnerProvider",
+    "EmailPartnerProvider",
+    "VoiceCallPartnerProvider",
     "TeamsProvider",
     "TelegramProvider",
     "TwilioProvider",

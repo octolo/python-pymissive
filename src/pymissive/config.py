@@ -28,6 +28,8 @@ MISSIVE_SERVICES = {
     "get_attachment": "Get Attachment",
     "delete_attachment": "Delete Attachment",
     "proofs_of_delivery": "Proofs of Delivery",
+    "set_webhook": "set_Webhook",
+    "handle_webhook": "Handle Webhook",
     "monitoring": "Monitoring",
 }
 
