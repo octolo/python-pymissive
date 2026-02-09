@@ -37,3 +37,4 @@ class MissiveProviderBase(
 ):
     """Base class for Missive providers."""
     _default_services_cfg = defaults_services
+

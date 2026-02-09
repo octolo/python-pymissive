@@ -5,12 +5,12 @@ import smtplib
 from contextlib import contextmanager
 from email.message import EmailMessage
 from typing import Any
-
+import json
 from .base import MissiveProviderBase
 
 
 class BrevoProvider(MissiveProviderBase):
-    """Classe de base abstraite pour les providers Brevo."""
+    """Abstract base class for Brevo providers."""
     abstract = True
     display_name = "Brevo"
     description = "Complete CRM platform (Email, SMS, Marketing automation)"
@@ -22,171 +22,39 @@ class BrevoProvider(MissiveProviderBase):
         super().__init__(**kwargs)
         if not hasattr(self, "attachments"):
             self.attachments = []
+        self._api_key = self._get_config_or_env("API_KEY")
+        self._webhooks_api = None
+
+    def get_webhooks(self):
+        """Return the Brevo webhooks API instance."""
+        from sib_api_v3_sdk import ApiClient, Configuration, WebhooksApi
+        configuration = Configuration()
+        configuration.api_key["api-key"] = self._api_key
+        api_client = ApiClient(configuration)
+        return WebhooksApi(api_client)
 
     def add_attachment_email(self, content: bytes | str, name: str) -> None:
-        """Ajoute une pièce jointe à l'email."""
+        """Add an attachment to the email."""
         if isinstance(content, str):
             content = content.encode("utf-8")
 
         self.attachments.append({"content": content, "name": name})
 
     def remove_attachment_email(self, name: str) -> None:
-        """Retire une pièce jointe de l'email."""
+        """Remove an attachment from the email."""
         if not hasattr(self, "attachments"):
             return
 
         self.attachments = [att for att in self.attachments if att["name"] != name]
 
     def cancel_email(self) -> bool:
-        """Annule l'envoi d'un email (non supporté par Brevo)."""
+        """Cancel email sending (not supported by Brevo)."""
         return False
 
-    def _update_missive_status(self, status: str, error_message: str | None = None, external_id: str | None = None) -> None:
-        """Met à jour le statut de la missive."""
-        if self.missive:
-            if hasattr(self.missive, "status"):
-                self.missive.status = status
-            if error_message and hasattr(self.missive, "error_message"):
-                self.missive.error_message = error_message
-            if external_id and hasattr(self.missive, "external_id"):
-                self.missive.external_id = external_id
-            if hasattr(self.missive, "provider"):
-                self.missive.provider = self.name
-            if hasattr(self.missive, "save"):
-                self.missive.save()
-
-
-class BrevoAPIProvider(BrevoProvider):
-    """Brevo provider utilisant l'API REST."""
-    name = "brevo_api"
-    display_name = "Brevo API"
-    required_packages = ["sib-api-v3-sdk"]
-    config_keys = ["API_KEY"]
-
-    def __init__(self, **kwargs: str | None) -> None:
-        """Initialize Brevo API provider."""
-        super().__init__(**kwargs)
-        self._api_key = self._get_config_or_env("API_KEY")
-        self._transactional_api = None
-        self._webhooks_api = None
-
-    def _get_transactional_api(self):
-        """Retourne l'instance de l'API transactionnelle Brevo."""
-        if self._transactional_api is None:
-            try:
-                from sib_api_v3_sdk import ApiClient, Configuration, TransactionalEmailsApi
-            except ImportError as exc:
-                raise RuntimeError("sib-api-v3-sdk package required") from exc
-
-            configuration = Configuration()
-            configuration.api_key["api-key"] = self._api_key
-            api_client = ApiClient(configuration)
-            self._transactional_api = TransactionalEmailsApi(api_client)
-        return self._transactional_api
-
-    def _get_webhooks_api(self):
-        """Retourne l'instance de l'API webhooks Brevo."""
-        if self._webhooks_api is None:
-            try:
-                from sib_api_v3_sdk import ApiClient, Configuration, WebhooksApi
-            except ImportError as exc:
-                raise RuntimeError("sib-api-v3-sdk package required") from exc
-
-            configuration = Configuration()
-            configuration.api_key["api-key"] = self._api_key
-            api_client = ApiClient(configuration)
-            self._webhooks_api = WebhooksApi(api_client)
-        return self._webhooks_api
-
-    def prepare_email(self):
-        """Prépare l'objet SendSmtpEmail pour l'envoi."""
-        try:
-            from sib_api_v3_sdk import SendSmtpEmail, SendSmtpEmailTo, SendSmtpEmailSender, SendSmtpEmailAttachment
-        except ImportError as exc:
-            raise RuntimeError("sib-api-v3-sdk package required") from exc
-
-        recipient_email = self._get_missive_value("recipient_email")
-        sender_email = self._get_missive_value("sender_email")
-        sender_name = self._get_missive_value("sender_name")
-        subject = self._get_missive_value("subject")
-        body = self._get_missive_value("body")
-        body_text = self._get_missive_value("body_text")
-
-        if not recipient_email:
-            raise ValueError("recipient_email is required")
-        if not sender_email:
-            raise ValueError("sender_email is required")
-
-        email = SendSmtpEmail(
-            to=[SendSmtpEmailTo(email=recipient_email)],
-            sender=SendSmtpEmailSender(email=sender_email, name=sender_name or ""),
-            subject=subject or "",
-        )
-
-        if body:
-            email.html_content = body
-        if body_text:
-            email.text_content = body_text
-
-        reply_to = self._get_missive_value("reply_to")
-        if reply_to:
-            email.reply_to = {"email": reply_to}
-
-        cc = self._get_missive_value("cc")
-        if cc:
-            if isinstance(cc, list):
-                email.cc = [SendSmtpEmailTo(email=email_addr) for email_addr in cc]
-            else:
-                email.cc = [SendSmtpEmailTo(email=cc)]
-
-        bcc = self._get_missive_value("bcc")
-        if bcc:
-            if isinstance(bcc, list):
-                email.bcc = [SendSmtpEmailTo(email=email_addr) for email_addr in bcc]
-            else:
-                email.bcc = [SendSmtpEmailTo(email=bcc)]
-
-        if self.attachments:
-            email.attachment = [
-                SendSmtpEmailAttachment(
-                    content=base64.b64encode(att["content"]).decode("utf-8") if isinstance(att["content"], bytes) else att["content"],
-                    name=att["name"],
-                )
-                for att in self.attachments
-            ]
-
-        return email
-
-    def send_email(self) -> bool:
-        """Envoie l'email via l'API Brevo."""
-        if not self._api_key:
-            self._update_missive_status("FAILED", "API_KEY is required")
-            return False
-
-        try:
-            email = self.prepare_email()
-            api_instance = self._get_transactional_api()
-            result = api_instance.send_transac_email(email)
-
-            message_id = result.message_id if hasattr(result, "message_id") else None
-            self._update_missive_status("SENT", external_id=str(message_id) if message_id else None)
-            return True
-
-        except Exception as e:
-            error_msg = str(e)
-            if hasattr(e, "body") and e.body:
-                try:
-                    import json
-                    error_data = json.loads(e.body)
-                    error_msg = error_data.get("message", error_msg)
-                except Exception:
-                    pass
-            self._update_missive_status("FAILED", f"Brevo API error: {error_msg}")
-            return False
-
     def set_webhook(self, webhook_url: str, events: list[str] | None = None) -> bool:
-        """Configure un webhook pour recevoir les événements Brevo."""
-        if not self._api_key:
+        """Configure a webhook to receive Brevo events."""
+        webhooks_api = self._get_webhooks_api()
+        if not webhooks_api:
             return False
 
         try:
@@ -215,15 +83,13 @@ class BrevoAPIProvider(BrevoProvider):
                 description="Missive webhook",
                 events=events,
             )
-            api_instance = self._get_webhooks_api()
-            api_instance.create_webhook(webhook)
+            webhooks_api.create_webhook(webhook)
             return True
-
         except Exception:
             return False
 
     def handle_webhook(self, payload: dict[str, Any], headers: dict[str, str]) -> tuple[bool, str, dict[str, Any] | None]:
-        """Traite un webhook Brevo."""
+        """Handle a Brevo webhook."""
         event = payload.get("event")
         message_id = payload.get("message-id") or payload.get("messageId")
 
@@ -238,18 +104,110 @@ class BrevoAPIProvider(BrevoProvider):
 
         return True, "", normalized
 
-    def extract_email_missive_id(self, payload: dict[str, Any]) -> str | None:
-        """Extrait l'ID de la missive depuis le webhook Brevo."""
-        message_id = payload.get("message-id") or payload.get("messageId")
-        return str(message_id) if message_id else None
+    def get_external_id_email(self, payload: dict[str, Any]) -> str | None:
+        """Extract the external ID from the Brevo webhook."""
+        return payload.get("_message_id")
+
+
+class BrevoAPIProvider(BrevoProvider):
+    """Brevo provider using REST API."""
+    name = "brevo_api"
+    display_name = "Brevo API"
+    required_packages = ["sib-api-v3-sdk"]
+    config_keys = ["API_KEY"]
+    abstract = False
+
+    def __init__(self, **kwargs: str | None) -> None:
+        """Initialize Brevo API provider."""
+        super().__init__(**kwargs)
+        self._transactional_api = None
+
+    def _get_transactional_api(self):
+        """Return the Brevo transactional API instance."""
+        if self._transactional_api is None:
+            if not self._api_key:
+                raise RuntimeError("API_KEY is required")
+            try:
+                from sib_api_v3_sdk import ApiClient, Configuration, TransactionalEmailsApi
+            except ImportError as exc:
+                raise RuntimeError("sib-api-v3-sdk package required") from exc
+
+            configuration = Configuration()
+            configuration.api_key["api-key"] = self._api_key
+            api_client = ApiClient(configuration)
+            self._transactional_api = TransactionalEmailsApi(api_client)
+        return self._transactional_api
+
+    def prepare_email(self, **kwargs):
+        """Prepare the SendSmtpEmail object for sending."""
+        from sib_api_v3_sdk import SendSmtpEmail, SendSmtpEmailTo, SendSmtpEmailSender, SendSmtpEmailAttachment
+
+        recipient_email = kwargs.get("recipient_email")
+        sender_email = kwargs.get("sender_email")
+        sender_name = kwargs.get("sender_name")
+        subject = kwargs.get("subject")
+        body = kwargs.get("body")
+        body_text = kwargs.get("body_text")
+
+        if not recipient_email:
+            raise ValueError("recipient_email is required")
+        if not sender_email:
+            raise ValueError("sender_email is required")
+
+        email = SendSmtpEmail(
+            to=[SendSmtpEmailTo(email=recipient_email)],
+            sender=SendSmtpEmailSender(email=sender_email, name=sender_name or ""),
+            subject=subject or "",
+        )
+
+        if body:
+            email.html_content = body
+        if body_text:
+            email.text_content = body_text
+
+        reply_to = kwargs.get("reply_to")
+        if reply_to:
+            email.reply_to = {"email": reply_to}
+
+        cc = kwargs.get("cc")
+        if cc:
+            if isinstance(cc, list):
+                email.cc = [SendSmtpEmailTo(email=email_addr) for email_addr in cc]
+            else:
+                email.cc = [SendSmtpEmailTo(email=cc)]
+
+        bcc = kwargs.get("bcc")
+        if bcc:
+            if isinstance(bcc, list):
+                email.bcc = [SendSmtpEmailTo(email=email_addr) for email_addr in bcc]
+            else:
+                email.bcc = [SendSmtpEmailTo(email=bcc)]
+
+        return email
+
+    def send_email(self, **kwargs) -> dict[str, Any]:
+        """Send email via Brevo API."""
+        email = self.prepare_email(**kwargs)
+        api_instance = self._get_transactional_api()
+        response = api_instance.send_transac_email(email)
+        return {field: str(getattr(response, field)) for field in response.__dict__}
 
 
 class BrevoSMTPProvider(BrevoProvider):
-    """Brevo provider utilisant SMTP."""
+    """Brevo provider using SMTP."""
     name = "brevo_smtp"
     display_name = "Brevo SMTP"
     required_packages = []
-    config_keys = ["SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_USE_TLS", "SMTP_USE_SSL"]
+    config_keys = [
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USERNAME",
+        "SMTP_PASSWORD",
+        "SMTP_USE_TLS",
+        "SMTP_USE_SSL",
+        "API_KEY",
+        "SMTP_FROM_EMAIL",
+    ]
     config_defaults = {
         "SMTP_HOST": "smtp-relay.brevo.com",
         "SMTP_PORT": "587",
@@ -274,14 +232,14 @@ class BrevoSMTPProvider(BrevoProvider):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value) if value is not None else default
 
-    def prepare_email(self) -> EmailMessage:
-        """Prépare le message email pour l'envoi SMTP."""
-        recipient_email = self._get_missive_value("recipient_email")
-        sender_email = self._get_missive_value("sender_email")
-        sender_name = self._get_missive_value("sender_name")
-        subject = self._get_missive_value("subject")
-        body = self._get_missive_value("body")
-        body_text = self._get_missive_value("body_text")
+    def prepare_email(self, **kwargs) -> EmailMessage:
+        """Prepare the email message for SMTP sending."""
+        recipient_email = kwargs.get("recipient_email")
+        sender_email = kwargs.get("sender_email")
+        sender_name = kwargs.get("sender_name")
+        subject = kwargs.get("subject")
+        body = kwargs.get("body")
+        body_text = kwargs.get("body_text")
 
         if not recipient_email:
             raise ValueError("recipient_email is required")
@@ -309,18 +267,18 @@ class BrevoSMTPProvider(BrevoProvider):
         if body and body != body_text:
             message.add_alternative(body, subtype="html")
 
-        reply_to = self._get_missive_value("reply_to")
+        reply_to = kwargs.get("reply_to")
         if reply_to:
             message["Reply-To"] = reply_to
 
-        cc = self._get_missive_value("cc")
+        cc = kwargs.get("cc")
         if cc:
             if isinstance(cc, list):
                 message["Cc"] = ", ".join(cc)
             else:
                 message["Cc"] = cc
 
-        bcc = self._get_missive_value("bcc")
+        bcc = kwargs.get("bcc")
         if bcc:
             if isinstance(bcc, list):
                 message["Bcc"] = ", ".join(bcc)
@@ -357,29 +315,25 @@ class BrevoSMTPProvider(BrevoProvider):
 
         return message
 
-    def send_email(self) -> bool:
-        """Envoie l'email via SMTP Brevo."""
+    def send_email(self, **kwargs) -> bool:
+        """Send email via Brevo SMTP."""
         if not self._smtp_username or not self._smtp_password:
-            self._update_missive_status("FAILED", "SMTP_USERNAME and SMTP_PASSWORD are required")
             return False
 
         try:
-            message = self.prepare_email()
+            message = self.prepare_email(**kwargs)
 
             with self._smtp_connection() as smtp:
                 smtp.send_message(message)
 
-            missive_id = getattr(self.missive, "id", "unknown") if self.missive else "unknown"
-            self._update_missive_status("SENT", external_id=f"brevo_smtp_{missive_id}")
             return True
 
-        except (OSError, smtplib.SMTPException) as e:
-            self._update_missive_status("FAILED", f"Brevo SMTP error: {str(e)}")
+        except (OSError, smtplib.SMTPException):
             return False
 
     @contextmanager
     def _smtp_connection(self):
-        """Contexte manager pour la connexion SMTP."""
+        """Context manager for SMTP connection."""
         if self._use_ssl:
             smtp = smtplib.SMTP_SSL(self._smtp_host, self._smtp_port, timeout=10)
         else:
@@ -397,15 +351,3 @@ class BrevoSMTPProvider(BrevoProvider):
                 smtp.quit()
             except Exception:
                 smtp.close()
-
-    def set_webhook(self, webhook_url: str, events: list[str] | None = None) -> bool:
-        """Les webhooks ne sont pas disponibles en mode SMTP."""
-        return False
-
-    def handle_webhook(self, payload: dict[str, Any], headers: dict[str, str]) -> tuple[bool, str, dict[str, Any] | None]:
-        """Les webhooks ne sont pas disponibles en mode SMTP."""
-        return False, "Webhooks not available in SMTP mode", None
-
-    def extract_email_missive_id(self, payload: dict[str, Any]) -> str | None:
-        """Les webhooks ne sont pas disponibles en mode SMTP."""
-        return None

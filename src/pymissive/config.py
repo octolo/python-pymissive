@@ -20,17 +20,25 @@ MISSIVE_TYPES = {
 
 MISSIVE_SERVICES = {
     "prepare": "Prepare",
+    "update": "Update",
     "cancel": "Cancel",
     "send": "Send",
+    "delete": "Delete",
     "status": "Status",
     "attachments": "Attachments",
     "add_attachment": "Add Attachment",
-    "get_attachment": "Get Attachment",
+    "get_attachments": "Get Attachments",
     "delete_attachment": "Delete Attachment",
     "proofs_of_delivery": "Proofs of Delivery",
     "set_webhook": "set_Webhook",
+    "update_webhook": "Update Webhook",
     "handle_webhook": "Handle Webhook",
+    "delete_webhook": "Delete Webhook",
+    "get_webhooks": "Get Webhooks",
     "monitoring": "Monitoring",
+    "billing_amount": "Billing Amount",
+    "estimate_amount": "Estimate Amount",
+    "get_external_id": "Get External ID",
 }
 
 MISSIVE_FIELDS_BASE = {

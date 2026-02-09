@@ -3,3 +3,4 @@
 -e ../python-qualitybase
 -e ../python-providerkit
 -e .
+pyngrok>=5.0
