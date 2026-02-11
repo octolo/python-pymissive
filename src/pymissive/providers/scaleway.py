@@ -22,9 +22,30 @@ class ScalewayProvider(MissiveProviderBase):
         "REGION": "fr-par",
         "WEBHOOK_ID": "default",
     }
+    sns_arn = "arn:scw:sns:fr-par:project-44bec53a-54d5-4f98-b183-14ba9f5f33f9:missive-webhook-email"
+
+    ENDPOINTS = {
+        "emails": "emails",
+        "email_detail": "emails/{email_id}",
+        "webhooks": "webhooks",
+        "webhook_detail": "webhooks/{webhook_id}",
+        "webhook_events": "webhooks/{webhook_id}/events",
+        "subscriptions": "subscriptions",
+    }
+
+    events = {
+        "unknown_type": "unknown_type",
+        "email_queued": "email_queued",
+        "email_dropped": "email_dropped",
+        "email_deferred": "email_deferred",
+        "email_delivered": "email_delivered",
+        "email_spam": "email_spam",
+        "email_mailbox_not_found": "email_mailbox_not_found",
+        "email_blocklisted": "email_blocklisted",
+        "blocklist_created": "blocklist_created",
+    }
 
     def __init__(self, **kwargs: str | None) -> None:
-        """Initialize Scaleway provider."""
         super().__init__(**kwargs)
         self._base_url = self._get_config_or_env("BASE_URL", "https://api.scaleway.com/transactional-email/v1alpha1")
         self._secret_key = self._get_config_or_env("SECRET_ACCESS_KEY")
@@ -32,10 +53,22 @@ class ScalewayProvider(MissiveProviderBase):
         self._project_id = self._get_config_or_env("PROJECT_ID")
         self._email_data: dict[str, Any] = {}
 
+    def _get_headers(self) -> dict[str, str]:
+        """Generate standard headers."""
+        return {
+            "X-Auth-Token": self._secret_key,
+            "Content-Type": "application/json",
+        }
+
+    def _build_url(self, endpoint_key: str, **params) -> str:
+        """Build URL from endpoint key."""
+        endpoint = self.ENDPOINTS[endpoint_key].format(**params)
+        return f"{self._base_url}/regions/{self._region}/{endpoint}"
+
     @property
     def api_url(self) -> str:
-        """Return the API URL for the region."""
-        return f"{self._base_url}/regions/{self._region}/emails"
+        """Return emails API URL."""
+        return self._build_url("emails")
 
     def prepare_email(self, **kwargs: Any) -> dict[str, Any]:
         """Prepare email data."""
@@ -54,11 +87,9 @@ class ScalewayProvider(MissiveProviderBase):
         if not self._project_id:
             raise ValueError("PROJECT_ID is required")
 
-        # Initialize attachments if not already done
         if not hasattr(self, "attachments"):
             self.attachments = []
 
-        # Add attachments from kwargs if provided
         attachments_from_kwargs = kwargs.get("attachments")
         if attachments_from_kwargs:
             for att in attachments_from_kwargs:
@@ -80,13 +111,11 @@ class ScalewayProvider(MissiveProviderBase):
             "project_id": self._project_id,
         }
 
-        # Scaleway requires at least html or text content
         if body:
             self._email_data["html"] = body
         if body_text:
             self._email_data["text"] = body_text
         
-        # If neither html nor text is provided, use empty text as fallback
         if "html" not in self._email_data and "text" not in self._email_data:
             self._email_data["text"] = ""
 
@@ -139,17 +168,11 @@ class ScalewayProvider(MissiveProviderBase):
 
     def send_email(self, **kwargs: Any) -> bool:
         """Send email via Scaleway."""
-
         self.prepare_email(**kwargs)
 
-        headers = {
-            "X-Auth-Token": self._secret_key,
-            "Content-Type": "application/json",
-        }
-
         response = requests.post(
-            self.api_url,
-            headers=headers,
+            self._build_url("emails"),
+            headers=self._get_headers(),
             json=self._email_data,
             timeout=30,
         )
@@ -159,88 +182,117 @@ class ScalewayProvider(MissiveProviderBase):
     def status_email(self, **kwargs: Any) -> dict[str, Any]:
         """Check email delivery status."""
         external_id = kwargs.get("external_id")
-        status_url = f"{self._base_url}/regions/{self._region}/emails/{external_id}"
-        headers = {
-            "X-Auth-Token": self._secret_key,
-            "Content-Type": "application/json",
-        }
+        
         response = requests.get(
-            status_url,
-            headers=headers,
+            self._build_url("email_detail", email_id=external_id),
+            headers=self._get_headers(),
             timeout=30,
         )
         response.raise_for_status()
         result = response.json()
-        status_mapping = {
-            "pending": "pending",
-            "sent": "sent",
-            "delivered": "delivered",
-            "opened": "delivered",  # Opened is considered delivered
-            "clicked": "delivered",  # Clicked is considered delivered
-            "bounced": "failed",
-            "failed": "failed",
-            "rejected": "failed",
-        }
-        status = status_mapping.get(scaleway_status.lower(), "unknown")
+        scaleway_status = result.get("status", "unknown").lower()
+        association = self.get_status_events_association()
+        status = association.get(scaleway_status, "Pending")
         return status, response
 
     def cancel_email(self) -> bool:
-        """Cancel email sending (not supported by Scaleway)."""
+        """Cancel email (not supported)."""
         return False
 
     def get_external_id_email(self, response: dict[str, Any]) -> str:
-        """Get the external ID of the email."""
+        """Get external email ID."""
         return response.get("emails")[0].get("id")
 
-    def set_webhook(self, webhook_url: str) -> bool:
-        """Set a webhook for Scaleway."""
-        webhook_url = f"https://api.scaleway.com/transactional-email/v1alpha1/regions/{self._region}/webhooks"  
-        headers = {
-            "X-Auth-Token": self._secret_key,
-            "Content-Type": "application/json",
+    def set_webhook_email(self, webhook_url: str, **kwargs) -> dict[str, Any]:
+        """Create webhook (requires domain_id and sns_arn from Topics and Events)."""
+
+    
+        event_types = kwargs.get("event_types", [
+            "email_delivered",
+            "email_dropped",
+            "email_deferred",
+            "email_spam",
+            "email_mailbox_not_found",
+        ])
+        
+        data = {
+            "domain_id": self._domain_id,
+            "project_id": self._project_id,
+            "name": kwargs.get("name", "Missive Webhook"),
+            "event_types": event_types,
+            "sns_arn": self.sns_arn,
         }
+        
         response = requests.post(
-            webhook_url,
-            headers=headers,
-            json={"url": webhook_url},
+            self._build_url("webhooks"),
+            headers=self._get_headers(),
+            json=data,
         )
         response.raise_for_status()
         return response.json()
 
-    def delete_webhook(self) -> bool:
-        """Delete a webhook for Scaleway."""
-        webhook_url = f"https://api.scaleway.com/transactional-email/v1alpha1/regions/{self._region}/webhooks/{self._webhook_id}"
-        headers = {
-            "X-Auth-Token": self._secret_key,
-            "Content-Type": "application/json",
-        }
-        response = requests.delete(webhook_url, headers=headers)
+    def get_webhooks_email(self) -> dict[str, Any]:
+        """Get all webhooks."""
+        response = requests.get(
+            self._build_url("webhooks"),
+            headers=self._get_headers(),
+        )
+        response.raise_for_status()
+        response = response.json()
+        return response.get("webhooks", [])
+
+    def delete_webhook_email(self, webhook_id: str) -> bool:
+        """Delete webhook."""
+        response = requests.delete(
+            self._build_url("webhook_detail", webhook_id=webhook_id),
+            headers=self._get_headers(),
+        )
         response.raise_for_status()
         return response.json()
 
     def get_webhooks(self) -> dict[str, Any]:
-        """Get a webhook for Scaleway."""
-        webhook_url = f"https://api.scaleway.com/transactional-email/v1alpha1/regions/{self._region}/webhooks"
-        headers = {
-            "X-Auth-Token": self._secret_key,
-            "Content-Type": "application/json",
-        }
-        response = requests.get(webhook_url, headers=headers)
+        """Get all webhooks."""
+        webhooks = []
+        webhooks.extend(self.get_webhooks_email())
+        return webhooks
+
+    def get_webhook_events_email(self, webhook_id: str, **kwargs) -> list[dict[str, Any]]:
+        """Get webhook events."""
+        params = {}
+        if "page" in kwargs:
+            params["page"] = kwargs["page"]
+        if "page_size" in kwargs:
+            params["page_size"] = kwargs["page_size"]
+        if "order_by" in kwargs:
+            params["order_by"] = kwargs["order_by"]
+        
+        response = requests.get(
+            self._build_url("webhook_events", webhook_id=webhook_id),
+            headers=self._get_headers(),
+            params=params,
+        )
+        response.raise_for_status()
+        response = response.json()
+        return response.get("events", [])
+
+    def update_webhook_email(self, webhook_id: str, **kwargs) -> bool:
+        """Update webhook."""
+        data = {}
+        if "name" in kwargs:
+            data["name"] = kwargs["name"]
+        if "event_types" in kwargs:
+            data["event_types"] = kwargs["event_types"]
+        if "sns_arn" in kwargs:
+            data["sns_arn"] = kwargs["sns_arn"]
+        
+        response = requests.patch(
+            self._build_url("webhook_detail", webhook_id=webhook_id),
+            headers=self._get_headers(),
+            json=data,
+        )
         response.raise_for_status()
         return response.json()
 
-    def update_webhook(self, webhook_id: str, webhook_url: str) -> bool:
-        """Update a webhook for Scaleway."""
-        webhook_url = f"https://api.scaleway.com/transactional-email/v1alpha1/regions/{self._region}/webhooks/{webhook_id}"
-        headers = {
-            "X-Auth-Token": self._secret_key,
-            "Content-Type": "application/json",
-        }
-        response = requests.put(webhook_url, headers=headers, json={"url": webhook_url})
-        response.raise_for_status()
-        return response.json()
-
-    def handle_webhook(self, payload: dict[str, Any]) -> bool:
-        """Handle a Scaleway webhook."""
-        print("Scaleway webhook received")
+    def handle_webhook_email(self, payload: dict[str, Any]) -> bool:
+        """Handle webhook."""
         return True

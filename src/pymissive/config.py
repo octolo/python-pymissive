@@ -41,6 +41,81 @@ MISSIVE_SERVICES = {
     "get_external_id": "Get External ID",
 }
 
+MISSIVE_STATUS = {
+    "draft": "Draft",
+    "prepare": "Prepare",
+    "pending": "Pending",
+    "processing": "Processing",
+    "sent": "Sent",
+    "delivered": "Delivered",
+    "read": "Read",
+    "opened": "Opened",
+    "click": "Clicked",
+    "clicked": "Clicked",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "bounced": "Bounced",
+    "hard_bounce": "Hard bounce",
+    "soft_bounce": "Soft bounce",
+    "hardBounce": "Hard bounce",
+    "softBounce": "Soft bounce",
+    "dropped": "Dropped",
+    "email_dropped": "Email dropped",
+    "spam": "Spam",
+    "email_spam": "Email in spam",
+    "blocked": "Blocked",
+    "invalid": "Invalid",
+    "deferred": "Deferred",
+    "email_deferred": "Email deferred",
+    "queued": "Queued",
+    "email_queued": "Email queued",
+    "request": "Request",
+    "email_mailbox_not_found": "Mailbox not found",
+    "email_blocklisted": "Blocklisted",
+    "blocklist_created": "Blocklist created",
+    "unknown_type": "Unknown type",
+    "rejected": "Rejected",
+}
+
+MISSIVE_WEBHOOK_FIELDS = {
+        "webhook_id": {
+            "label": "Webhook ID",
+            "description": "Webhook ID",
+            "format": "str",
+        },
+        "id": {
+            "label": "ID",
+            "description": "ID",
+            "format": "str",
+        },
+        "type": {
+            "label": "Type",
+            "description": "Type",
+            "format": "str",
+        },
+        "url": {
+            "label": "URL",
+            "description": "URL",
+            "format": "str",
+        },
+        "description": {
+            "label": "Description",
+            "description": "Description",
+            "format": "str",
+        },
+        "created_at": {
+            "label": "Created At",
+            "description": "Created At",
+            "format": "datetime",
+        },
+        "updated_at": {
+            "label": "Updated At",
+            "description": "Updated At",
+            "format": "datetime",
+        },
+    }
+
+
 MISSIVE_FIELDS_BASE = {
     "message_id": {
         "label": "Message ID",

@@ -16,6 +16,27 @@ class BrevoProvider(MissiveProviderBase):
     description = "Complete CRM platform (Email, SMS, Marketing automation)"
     documentation_url = "https://developers.brevo.com"
     site_url = "https://www.brevo.com"
+    fields_associations = {
+        "id": "id",
+        "url": "url",
+        "type": "type",
+        "description": "description",
+        "created_at": "createdAt",
+        "updated_at": "updatedAt",
+    }
+    events = {
+        "sent": "sent",
+        "hardBounce": "hardBounce",
+        "softBounce": "softBounce",
+        "blocked": "blocked",
+        "spam": "spam",
+        "delivered": "delivered",
+        "request": "request",
+        "click": "click",
+        "invalid": "invalid",
+        "deferred": "deferred",
+        "opened": "opened",
+    }
 
     def __init__(self, **kwargs: str | None) -> None:
         """Initialize Brevo provider."""
@@ -25,13 +46,57 @@ class BrevoProvider(MissiveProviderBase):
         self._api_key = self._get_config_or_env("API_KEY")
         self._webhooks_api = None
 
-    def get_webhooks(self):
-        """Return the Brevo webhooks API instance."""
-        from sib_api_v3_sdk import ApiClient, Configuration, WebhooksApi
+    def get_api_client(self):
+        """Return the Brevo API client."""
+        from brevo_python import ApiClient, Configuration
         configuration = Configuration()
         configuration.api_key["api-key"] = self._api_key
-        api_client = ApiClient(configuration)
-        return WebhooksApi(api_client)
+        return ApiClient(configuration)
+
+    def set_webhook_email(self, webhook_url: str) -> bool:
+        """Configure a webhook to receive Brevo events."""
+        from brevo_python import CreateWebhook, WebhooksApi
+        api_client = self.get_api_client()
+        wbhs = WebhooksApi(api_client)
+        create_webhook = CreateWebhook(
+            url=webhook_url,
+            description="Missive webhook",
+            events=list(self.events.keys()),
+            channel="email",
+            type="transactional",
+        )
+        return wbhs.create_webhook(create_webhook)
+
+    def get_webhooks(self):
+        """Return the Brevo whebooks."""
+        from brevo_python import WebhooksApi
+        api_client = self.get_api_client()
+        wbhs = WebhooksApi(api_client)
+        return wbhs.get_webhooks().webhooks
+
+    def delete_webhook_email(self, webhook_id: str) -> bool:
+        """Delete a webhook from Brevo."""
+        from brevo_python import WebhooksApi
+        api_client = self.get_api_client()
+        wbhs = WebhooksApi(api_client)
+        provider, webhook_id = webhook_id.split("-")
+        print("removing webhook", provider, webhook_id)
+        return wbhs.delete_webhook(webhook_id)
+
+    def get_normalize_type(self, data: dict[str, Any]) -> str:
+        """Return the normalized type."""
+        if data.get("type") == "transactional":
+            return "email"
+        elif data.get("type") == "marketing":
+            return "email_marketing"
+        elif data.get("type") == "sms":
+            return "sms"
+        return "unknown"
+
+    def get_webhooks_email(self):
+        """Return the Brevo webhooks API instance."""
+        webhooks = self.get_webhooks()
+        return [webhook for webhook in webhooks if webhook["type"] == "transactional"]
 
     def add_attachment_email(self, content: bytes | str, name: str) -> None:
         """Add an attachment to the email."""
@@ -50,43 +115,6 @@ class BrevoProvider(MissiveProviderBase):
     def cancel_email(self) -> bool:
         """Cancel email sending (not supported by Brevo)."""
         return False
-
-    def set_webhook(self, webhook_url: str, events: list[str] | None = None) -> bool:
-        """Configure a webhook to receive Brevo events."""
-        webhooks_api = self._get_webhooks_api()
-        if not webhooks_api:
-            return False
-
-        try:
-            from sib_api_v3_sdk import CreateWebhook
-        except ImportError:
-            return False
-
-        if events is None:
-            events = [
-                "hard_bounce",
-                "soft_bounce",
-                "delivered",
-                "spam",
-                "request",
-                "opened",
-                "click",
-                "invalid",
-                "deferred",
-                "blocked",
-                "unsubscribed",
-            ]
-
-        try:
-            webhook = CreateWebhook(
-                url=webhook_url,
-                description="Missive webhook",
-                events=events,
-            )
-            webhooks_api.create_webhook(webhook)
-            return True
-        except Exception:
-            return False
 
     def handle_webhook(self, payload: dict[str, Any], headers: dict[str, str]) -> tuple[bool, str, dict[str, Any] | None]:
         """Handle a Brevo webhook."""
@@ -113,7 +141,7 @@ class BrevoAPIProvider(BrevoProvider):
     """Brevo provider using REST API."""
     name = "brevo_api"
     display_name = "Brevo API"
-    required_packages = ["sib-api-v3-sdk"]
+    required_packages = ["brevo-python"]
     config_keys = ["API_KEY"]
     abstract = False
 
@@ -128,9 +156,9 @@ class BrevoAPIProvider(BrevoProvider):
             if not self._api_key:
                 raise RuntimeError("API_KEY is required")
             try:
-                from sib_api_v3_sdk import ApiClient, Configuration, TransactionalEmailsApi
+                from brevo_python import ApiClient, Configuration, TransactionalEmailsApi
             except ImportError as exc:
-                raise RuntimeError("sib-api-v3-sdk package required") from exc
+                raise RuntimeError("brevo-python package required") from exc
 
             configuration = Configuration()
             configuration.api_key["api-key"] = self._api_key
@@ -140,7 +168,7 @@ class BrevoAPIProvider(BrevoProvider):
 
     def prepare_email(self, **kwargs):
         """Prepare the SendSmtpEmail object for sending."""
-        from sib_api_v3_sdk import SendSmtpEmail, SendSmtpEmailTo, SendSmtpEmailSender, SendSmtpEmailAttachment
+        from brevo_python import SendSmtpEmail, SendSmtpEmailTo, SendSmtpEmailSender, SendSmtpEmailAttachment
 
         recipient_email = kwargs.get("recipient_email")
         sender_email = kwargs.get("sender_email")
