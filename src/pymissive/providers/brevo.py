@@ -1,18 +1,21 @@
 """Brevo (ex Sendinblue) email provider - API and SMTP modes."""
 
-import base64
-import smtplib
-from contextlib import contextmanager
-from email.message import EmailMessage
+import contextlib
 from typing import Any
-import json
 from .base import MissiveProviderBase
+import json
 
 
-class BrevoProvider(MissiveProviderBase):
+class BrevoAPIProvider(MissiveProviderBase):
     """Abstract base class for Brevo providers."""
-    abstract = True
+
+    # -----------------------
+    # Metadata / configuration
+    # -----------------------
+    name = "brevo"
     display_name = "Brevo"
+    required_packages = ["brevo-python"]
+    config_keys = ["API_KEY"]
     description = "Complete CRM platform (Email, SMS, Marketing automation)"
     documentation_url = "https://developers.brevo.com"
     site_url = "https://www.brevo.com"
@@ -24,10 +27,10 @@ class BrevoProvider(MissiveProviderBase):
         "created_at": "createdAt",
         "updated_at": "updatedAt",
     }
-    events = {
+    events_association = {
         "sent": "sent",
-        "hardBounce": "hardBounce",
-        "softBounce": "softBounce",
+        "hardBounce": "hard_bounce",
+        "softBounce": "soft_bounce",
         "blocked": "blocked",
         "spam": "spam",
         "delivered": "delivered",
@@ -38,13 +41,17 @@ class BrevoProvider(MissiveProviderBase):
         "opened": "opened",
     }
 
+    #########################################################
+    # Initialization / API clients
+    #########################################################
+
     def __init__(self, **kwargs: str | None) -> None:
-        """Initialize Brevo provider."""
         super().__init__(**kwargs)
         if not hasattr(self, "attachments"):
             self.attachments = []
         self._api_key = self._get_config_or_env("API_KEY")
         self._webhooks_api = None
+        self._transactional_api = None
 
     def get_api_client(self):
         """Return the Brevo API client."""
@@ -53,118 +60,38 @@ class BrevoProvider(MissiveProviderBase):
         configuration.api_key["api-key"] = self._api_key
         return ApiClient(configuration)
 
-    def set_webhook_email(self, webhook_url: str) -> bool:
-        """Configure a webhook to receive Brevo events."""
-        from brevo_python import CreateWebhook, WebhooksApi
-        api_client = self.get_api_client()
-        wbhs = WebhooksApi(api_client)
-        create_webhook = CreateWebhook(
-            url=webhook_url,
-            description="Missive webhook",
-            events=list(self.events.keys()),
-            channel="email",
-            type="transactional",
-        )
-        return wbhs.create_webhook(create_webhook)
+    def _get_transactional_api(self):
+        """Return the Brevo transactional API instance."""
+        if self._transactional_api is None:
+            from brevo_python import TransactionalEmailsApi
+            api_client = self.get_api_client()
+            self._transactional_api = TransactionalEmailsApi(api_client)
+        return self._transactional_api
 
-    def get_webhooks(self):
-        """Return the Brevo whebooks."""
-        from brevo_python import WebhooksApi
-        api_client = self.get_api_client()
-        wbhs = WebhooksApi(api_client)
-        return wbhs.get_webhooks().webhooks
-
-    def delete_webhook_email(self, webhook_id: str) -> bool:
-        """Delete a webhook from Brevo."""
-        from brevo_python import WebhooksApi
-        api_client = self.get_api_client()
-        wbhs = WebhooksApi(api_client)
-        provider, webhook_id = webhook_id.split("-")
-        print("removing webhook", provider, webhook_id)
-        return wbhs.delete_webhook(webhook_id)
-
-    def get_normalize_type(self, data: dict[str, Any]) -> str:
-        """Return the normalized type."""
-        if data.get("type") == "transactional":
-            return "email"
-        elif data.get("type") == "marketing":
-            return "email_marketing"
-        elif data.get("type") == "sms":
-            return "sms"
-        return "unknown"
-
-    def get_webhooks_email(self):
-        """Return the Brevo webhooks API instance."""
-        webhooks = self.get_webhooks()
-        return [webhook for webhook in webhooks if webhook["type"] == "transactional"]
+    #########################################################
+    # Attachments
+    #########################################################
 
     def add_attachment_email(self, content: bytes | str, name: str) -> None:
         """Add an attachment to the email."""
         if isinstance(content, str):
             content = content.encode("utf-8")
-
         self.attachments.append({"content": content, "name": name})
 
     def remove_attachment_email(self, name: str) -> None:
         """Remove an attachment from the email."""
         if not hasattr(self, "attachments"):
             return
-
         self.attachments = [att for att in self.attachments if att["name"] != name]
 
-    def cancel_email(self) -> bool:
-        """Cancel email sending (not supported by Brevo)."""
-        return False
+    #########################################################
+    # Email sending
+    #########################################################
 
-    def handle_webhook(self, payload: dict[str, Any], headers: dict[str, str]) -> tuple[bool, str, dict[str, Any] | None]:
-        """Handle a Brevo webhook."""
-        event = payload.get("event")
-        message_id = payload.get("message-id") or payload.get("messageId")
-
-        if not message_id:
-            return False, "message-id missing", None
-
-        normalized = {
-            "message_id": str(message_id),
-            "event": event or "unknown",
-            "raw": payload,
-        }
-
-        return True, "", normalized
-
-    def get_external_id_email(self, payload: dict[str, Any]) -> str | None:
-        """Extract the external ID from the Brevo webhook."""
-        return payload.get("_message_id")
-
-
-class BrevoAPIProvider(BrevoProvider):
-    """Brevo provider using REST API."""
-    name = "brevo_api"
-    display_name = "Brevo API"
-    required_packages = ["brevo-python"]
-    config_keys = ["API_KEY"]
-    abstract = False
-
-    def __init__(self, **kwargs: str | None) -> None:
-        """Initialize Brevo API provider."""
-        super().__init__(**kwargs)
-        self._transactional_api = None
-
-    def _get_transactional_api(self):
-        """Return the Brevo transactional API instance."""
-        if self._transactional_api is None:
-            if not self._api_key:
-                raise RuntimeError("API_KEY is required")
-            try:
-                from brevo_python import ApiClient, Configuration, TransactionalEmailsApi
-            except ImportError as exc:
-                raise RuntimeError("brevo-python package required") from exc
-
-            configuration = Configuration()
-            configuration.api_key["api-key"] = self._api_key
-            api_client = ApiClient(configuration)
-            self._transactional_api = TransactionalEmailsApi(api_client)
-        return self._transactional_api
+    def delete_blocked_email(self, email: str) -> bool:
+        with contextlib.suppress(Exception):
+            api_instance = self._get_transactional_api()
+            api_instance.smtp_blocked_contacts_email_delete(email)
 
     def prepare_email(self, **kwargs):
         """Prepare the SendSmtpEmail object for sending."""
@@ -193,6 +120,7 @@ class BrevoAPIProvider(BrevoProvider):
         if body_text:
             email.text_content = body_text
 
+        # Reply-to / CC / BCC
         reply_to = kwargs.get("reply_to")
         if reply_to:
             email.reply_to = {"email": reply_to}
@@ -215,167 +143,89 @@ class BrevoAPIProvider(BrevoProvider):
 
     def send_email(self, **kwargs) -> dict[str, Any]:
         """Send email via Brevo API."""
+        self.delete_blocked_email(kwargs.get("recipient_email"))
         email = self.prepare_email(**kwargs)
         api_instance = self._get_transactional_api()
         response = api_instance.send_transac_email(email)
         return {field: str(getattr(response, field)) for field in response.__dict__}
 
+    #########################################################
+    # Webhooks
+    #########################################################
 
-class BrevoSMTPProvider(BrevoProvider):
-    """Brevo provider using SMTP."""
-    name = "brevo_smtp"
-    display_name = "Brevo SMTP"
-    required_packages = []
-    config_keys = [
-        "SMTP_HOST",
-        "SMTP_PORT",
-        "SMTP_USERNAME",
-        "SMTP_PASSWORD",
-        "SMTP_USE_TLS",
-        "SMTP_USE_SSL",
-        "API_KEY",
-        "SMTP_FROM_EMAIL",
-    ]
-    config_defaults = {
-        "SMTP_HOST": "smtp-relay.brevo.com",
-        "SMTP_PORT": "587",
-        "SMTP_USE_TLS": "true",
-        "SMTP_USE_SSL": "false",
-    }
+    def _get_webhooks_api(self):
+        """Return the Brevo webhooks API instance."""
+        if self._webhooks_api is None:
+            from brevo_python import WebhooksApi
+            api_client = self.get_api_client()
+            self._webhooks_api = WebhooksApi(api_client)
+        return self._webhooks_api
 
-    def __init__(self, **kwargs: str | None) -> None:
-        """Initialize Brevo SMTP provider."""
-        super().__init__(**kwargs)
-        self._smtp_host = self._get_config_or_env("SMTP_HOST", "smtp-relay.brevo.com")
-        self._smtp_port = int(self._get_config_or_env("SMTP_PORT", "587"))
-        self._smtp_username = self._get_config_or_env("SMTP_USERNAME")
-        self._smtp_password = self._get_config_or_env("SMTP_PASSWORD")
-        self._use_tls = self._bool_config("SMTP_USE_TLS", True)
-        self._use_ssl = self._bool_config("SMTP_USE_SSL", False)
+    def set_webhook_email(self, webhook_url: str) -> bool:
+        """Configure a webhook to receive Brevo events."""
+        from brevo_python import CreateWebhook, WebhooksApi
+        wbhs = self._get_webhooks_api()
+        create_webhook = CreateWebhook(
+            url=webhook_url,
+            description="Missive webhook",
+            events=list(self.events_association.keys()),
+            channel="email",
+            type="transactional",
+        )
+        return wbhs.create_webhook(create_webhook)
 
-    def _bool_config(self, key: str, default: bool) -> bool:
-        """Convert config value to boolean."""
-        value = self._get_config_or_env(key)
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on"}
-        return bool(value) if value is not None else default
+    def get_webhooks(self):
+        """Return the Brevo webhooks."""
+        wbhs = self._get_webhooks_api()
+        return wbhs.get_webhooks().webhooks
 
-    def prepare_email(self, **kwargs) -> EmailMessage:
-        """Prepare the email message for SMTP sending."""
-        recipient_email = kwargs.get("recipient_email")
-        sender_email = kwargs.get("sender_email")
-        sender_name = kwargs.get("sender_name")
-        subject = kwargs.get("subject")
-        body = kwargs.get("body")
-        body_text = kwargs.get("body_text")
+    def delete_webhook_email(self, webhook_id: str) -> bool:
+        """Delete a webhook from Brevo."""
+        wbhs = self._get_webhooks_api()
+        provider, webhook_id = webhook_id.split("-")
+        return wbhs.delete_webhook(webhook_id)
 
-        if not recipient_email:
-            raise ValueError("recipient_email is required")
-        if not sender_email:
-            raise ValueError("sender_email is required")
+    def update_webhook_email(self, webhook_id: str, webhook_url: str) -> bool:
+        """Return the Brevo webhooks."""
+        from brevo_python import UpdateWebhook
+        wbhs = self._get_webhooks_api()
+        update = UpdateWebhook(url=webhook_url)
+        provider, webhook_id = webhook_id.split("-")
+        return wbhs.update_webhook(webhook_id, update)
 
-        message = EmailMessage()
-        message["Subject"] = subject or ""
-        
-        # Format From header correctly
-        if sender_name:
-            message["From"] = f"{sender_name} <{sender_email}>"
-        else:
-            message["From"] = sender_email
-        
-        message["To"] = recipient_email
+    def get_webhooks_email(self):
+        """Return only transactional email webhooks."""
+        webhooks = self.get_webhooks()
+        return [webhook for webhook in webhooks if webhook["type"] == "transactional"]
 
-        # Set body content - text first, then HTML as alternative
-        if body_text:
-            message.set_content(body_text, subtype="plain")
-        else:
-            # Avoid empty payloads
-            message.set_content(" ", subtype="plain")
-        
-        if body and body != body_text:
-            message.add_alternative(body, subtype="html")
+    def handle_webhook(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Handle a Brevo webhook and normalize event type."""
+        print("okkkkkkkkkkkkkk payload", payload)
+        payload = payload.decode("utf-8")
+        payload = json.loads(payload)
+        event = payload.get("event")
+        message_id = payload.get("message-id") or payload.get("messageId")
+        return {
+            "external_id": str(message_id),
+            "event": self.events_association.get(event, "unknown"),
+            "occurred_at": payload.get("date"),
+            "trace": payload,
+        }
 
-        reply_to = kwargs.get("reply_to")
-        if reply_to:
-            message["Reply-To"] = reply_to
+    #########################################################
+    # Helpers
+    #########################################################
 
-        cc = kwargs.get("cc")
-        if cc:
-            if isinstance(cc, list):
-                message["Cc"] = ", ".join(cc)
-            else:
-                message["Cc"] = cc
+    def get_external_id_email(self, payload: dict[str, Any]) -> str | None:
+        """Extract the external ID from the Brevo webhook."""
+        return payload.get("_message_id")
 
-        bcc = kwargs.get("bcc")
-        if bcc:
-            if isinstance(bcc, list):
-                message["Bcc"] = ", ".join(bcc)
-            else:
-                message["Bcc"] = bcc
-
-        for att in self.attachments:
-            content = att["content"]
-            name = att["name"]
-            if isinstance(content, str):
-                content = content.encode("utf-8")
-            
-            # Try to detect MIME type from filename
-            mime_type = "application/octet-stream"
-            if name:
-                if name.lower().endswith((".jpg", ".jpeg")):
-                    mime_type = "image/jpeg"
-                elif name.lower().endswith(".png"):
-                    mime_type = "image/png"
-                elif name.lower().endswith(".pdf"):
-                    mime_type = "application/pdf"
-                elif name.lower().endswith((".txt", ".text")):
-                    mime_type = "text/plain"
-                elif name.lower().endswith(".html"):
-                    mime_type = "text/html"
-            
-            maintype, _, subtype = mime_type.partition("/")
-            message.add_attachment(
-                content,
-                maintype=maintype,
-                subtype=subtype,
-                filename=name,
-            )
-
-        return message
-
-    def send_email(self, **kwargs) -> bool:
-        """Send email via Brevo SMTP."""
-        if not self._smtp_username or not self._smtp_password:
-            return False
-
-        try:
-            message = self.prepare_email(**kwargs)
-
-            with self._smtp_connection() as smtp:
-                smtp.send_message(message)
-
-            return True
-
-        except (OSError, smtplib.SMTPException):
-            return False
-
-    @contextmanager
-    def _smtp_connection(self):
-        """Context manager for SMTP connection."""
-        if self._use_ssl:
-            smtp = smtplib.SMTP_SSL(self._smtp_host, self._smtp_port, timeout=10)
-        else:
-            smtp = smtplib.SMTP(self._smtp_host, self._smtp_port, timeout=10)
-            if self._use_tls:
-                smtp.starttls()
-
-        if self._smtp_username and self._smtp_password:
-            smtp.login(self._smtp_username, self._smtp_password)
-
-        try:
-            yield smtp
-        finally:
-            try:
-                smtp.quit()
-            except Exception:
-                smtp.close()
+    def get_normalize_type(self, data: dict[str, Any]) -> str:
+        """Return the normalized type of webhook/email/SMS."""
+        if data.get("type") == "transactional":
+            return "email"
+        elif data.get("type") == "marketing":
+            return "email_marketing"
+        elif data.get("type") == "sms":
+            return "sms"
+        return "unknown"

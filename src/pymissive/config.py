@@ -41,17 +41,35 @@ MISSIVE_SERVICES = {
     "get_external_id": "Get External ID",
 }
 
-MISSIVE_STATUS = {
-    "draft": "Draft",
-    "prepare": "Prepare",
-    "pending": "Pending",
-    "processing": "Processing",
-    "sent": "Sent",
+MISSIVE_EVENT_SUCCESS = {
     "delivered": "Delivered",
     "read": "Read",
     "opened": "Opened",
     "click": "Clicked",
     "clicked": "Clicked",
+}
+
+MISSIVE_EVENT_INFO = {
+    "draft": "Draft",
+    "sent": "Sent",
+    "prepare": "Prepare",
+    "pending": "Pending",
+    "processing": "Processing",
+    "queued": "Queued",
+    "request": "Request",
+    "deferred": "Deferred",
+    "scheduled": "Scheduled",
+    "unknown_type": "Unknown type",
+    "attempted_delivery": "Attempted delivery",
+    "mailed": "Mailed",
+    "printed": "Printed",
+    "accepted": "Accepted",
+    "dispatched": "Dispatched",
+    "shipped": "Shipped",
+    "in_transit": "In transit",
+}
+
+MISSIVE_EVENT_FAILED = {
     "failed": "Failed",
     "cancelled": "Cancelled",
     "bounced": "Bounced",
@@ -60,22 +78,25 @@ MISSIVE_STATUS = {
     "hardBounce": "Hard bounce",
     "softBounce": "Soft bounce",
     "dropped": "Dropped",
-    "email_dropped": "Email dropped",
     "spam": "Spam",
-    "email_spam": "Email in spam",
     "blocked": "Blocked",
     "invalid": "Invalid",
-    "deferred": "Deferred",
-    "email_deferred": "Email deferred",
-    "queued": "Queued",
-    "email_queued": "Email queued",
-    "request": "Request",
-    "email_mailbox_not_found": "Mailbox not found",
-    "email_blocklisted": "Blocklisted",
+    "mailbox_not_found": "Mailbox not found",
+    "blocklisted": "Blocklisted",
     "blocklist_created": "Blocklist created",
-    "unknown_type": "Unknown type",
     "rejected": "Rejected",
+    "undelivered": "Undelivered",
+    "undeliverable": "Undeliverable",
+    "expired": "Expired",
+    "carrier_rejected": "Carrier rejected",
+    "return_to_sender": "Return to sender",
+    "refused": "Refused",
+    "lost": "Lost",
+    "damaged": "Damaged",
+    "out_for_delivery": "Out for delivery",
 }
+
+MISSIVE_EVENT = {**MISSIVE_EVENT_SUCCESS, **MISSIVE_EVENT_INFO, **MISSIVE_EVENT_FAILED}
 
 MISSIVE_WEBHOOK_FIELDS = {
         "webhook_id": {

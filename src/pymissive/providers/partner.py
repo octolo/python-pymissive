@@ -109,7 +109,7 @@ class PartnerProvider(MissiveProviderBase):
             return default or "Unknown error"
         return self.ERROR_CODES.get(code, default or f"Error {code}")
 
-    def _update_missive_status(
+    def _update_missive_event(
         self,
         status: str,
         error_message: str | None = None,
@@ -206,12 +206,12 @@ class SmsPartnerProvider(PartnerProvider):
             )
             result = self._safe_json(response)
         except Exception as exc:
-            self._update_missive_status("FAILED", error_message=str(exc))
+            self._update_missive_event("FAILED", error_message=str(exc))
             return False
 
         if result.get("success") is True:
             message_id = result.get("message_id") or result.get("messageId")
-            self._update_missive_status(
+            self._update_missive_event(
                 "SENT",
                 external_id=str(message_id) if message_id else None,
                 provider=self.name,
@@ -221,7 +221,7 @@ class SmsPartnerProvider(PartnerProvider):
         code = result.get("code")
         message = result.get("message", "")
         error_msg = self._get_error_message(code, message)
-        self._update_missive_status("FAILED", error_message=error_msg)
+        self._update_missive_event("FAILED", error_message=error_msg)
         return False
 
     def cancel_sms(self, **kwargs: Any) -> bool:
@@ -387,12 +387,12 @@ class EmailPartnerProvider(PartnerProvider):
             )
             result = self._safe_json(response)
         except Exception as exc:
-            self._update_missive_status("FAILED", error_message=str(exc))
+            self._update_missive_event("FAILED", error_message=str(exc))
             return False
 
         if result.get("success") is True:
             message_id = result.get("messageId") or result.get("message_id")
-            self._update_missive_status(
+            self._update_missive_event(
                 "SENT",
                 external_id=str(message_id) if message_id else None,
                 provider=self.name,
@@ -402,7 +402,7 @@ class EmailPartnerProvider(PartnerProvider):
         code = result.get("code")
         message = result.get("message", "")
         error_msg = self._get_error_message(code, message)
-        self._update_missive_status("FAILED", error_message=error_msg)
+        self._update_missive_event("FAILED", error_message=error_msg)
         return False
 
     def cancel_email(self, **kwargs: Any) -> bool:
@@ -549,12 +549,12 @@ class VoiceCallPartnerProvider(PartnerProvider):
             )
             result = self._safe_json(response)
         except Exception as exc:
-            self._update_missive_status("FAILED", error_message=str(exc))
+            self._update_missive_event("FAILED", error_message=str(exc))
             return False
 
         if result.get("success") is True:
             campaign_id = result.get("campaignId")
-            self._update_missive_status(
+            self._update_missive_event(
                 "SENT",
                 external_id=str(campaign_id) if campaign_id else None,
                 provider=self.name,
@@ -564,7 +564,7 @@ class VoiceCallPartnerProvider(PartnerProvider):
         code = result.get("code")
         message = result.get("message", "")
         error_msg = self._get_error_message(code, message)
-        self._update_missive_status("FAILED", error_message=error_msg)
+        self._update_missive_event("FAILED", error_message=error_msg)
         return False
 
     def cancel_voice_call(self, **kwargs: Any) -> bool:

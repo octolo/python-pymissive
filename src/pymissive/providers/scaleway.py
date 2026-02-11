@@ -35,14 +35,26 @@ class ScalewayProvider(MissiveProviderBase):
 
     events = {
         "unknown_type": "unknown_type",
-        "email_queued": "email_queued",
-        "email_dropped": "email_dropped",
-        "email_deferred": "email_deferred",
-        "email_delivered": "email_delivered",
-        "email_spam": "email_spam",
-        "email_mailbox_not_found": "email_mailbox_not_found",
-        "email_blocklisted": "email_blocklisted",
+        "email_queued": "queued",
+        "email_dropped": "dropped",
+        "email_deferred": "deferred",
+        "email_delivered": "delivered",
+        "email_spam": "spam",
+        "email_mailbox_not_found": "mailbox_not_found",
+        "email_blocklisted": "blocklisted",
         "blocklist_created": "blocklist_created",
+    }
+    events_association = {
+        "unknown": "unknown_type",
+        "pending": "pending",
+        "queued": "queued",
+        "sent": "sent",
+        "delivered": "delivered",
+        "dropped": "dropped",
+        "deferred": "deferred",
+        "spam": "spam",
+        "mailbox_not_found": "mailbox_not_found",
+        "blocklisted": "blocklisted",
     }
 
     def __init__(self, **kwargs: str | None) -> None:
@@ -191,8 +203,8 @@ class ScalewayProvider(MissiveProviderBase):
         response.raise_for_status()
         result = response.json()
         scaleway_status = result.get("status", "unknown").lower()
-        association = self.get_status_events_association()
-        status = association.get(scaleway_status, "Pending")
+        association = self.get_events_association()
+        status = association.get(scaleway_status, "pending")
         return status, response
 
     def cancel_email(self) -> bool:
