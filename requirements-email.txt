@@ -6,4 +6,4 @@
 -r requirements-mailgun.txt
 -r requirements-brevo.txt
 -r requirements-ses.txt
-
+-r requirements-scaleway.txt

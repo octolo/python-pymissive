@@ -1,49 +1,48 @@
 """Scaleway Transactional Email provider."""
 
-import base64
-import os
+import logging
+import re
 from typing import Any
-
 import requests
-
 from .base import MissiveProviderBase
-
+from functools import cached_property
 
 class ScalewayProvider(MissiveProviderBase):
     name = "scaleway"
     display_name = "Scaleway"
     description = "Scaleway messaging and communication services"
-    required_packages = ["requests"]
+    required_packages = ["requests", "boto3"]
     documentation_url = "https://www.scaleway.com/en/docs/managed-services/transactional-email/"
     site_url = "https://www.scaleway.com"
-    config_keys = ["SECRET_ACCESS_KEY", "REGION", "PROJECT_ID", "BASE_URL", "WEBHOOK_ID"]
+    config_keys = [
+        "ACCESS_KEY",
+        "SECRET_ACCESS_KEY",
+        "REGION",
+        "PROJECT_ID",
+        "BASE_URL",
+        "WEBHOOK_ID",
+        "DOMAIN_ID",
+        "SNS_ACCESS_KEY",
+        "SNS_SECRET_KEY",
+        "WEBHOOK_URL",
+    ]
     config_defaults = {
-        "BASE_URL": "https://api.scaleway.com/transactional-email/v1alpha1",
+        "BASE_URL": "https://api.scaleway.com",
         "REGION": "fr-par",
         "WEBHOOK_ID": "default",
     }
-    sns_arn = "arn:scw:sns:fr-par:project-44bec53a-54d5-4f98-b183-14ba9f5f33f9:missive-webhook-email"
-
     ENDPOINTS = {
-        "emails": "emails",
-        "email_detail": "emails/{email_id}",
-        "webhooks": "webhooks",
-        "webhook_detail": "webhooks/{webhook_id}",
-        "webhook_events": "webhooks/{webhook_id}/events",
-        "subscriptions": "subscriptions",
+        "email": "{base_url}/transactional-email/v1alpha1/regions/{region}/emails",
+        "webhooks": "{base_url}/transactional-email/v1alpha1/regions/{region}/webhooks",
+        "domains": "{base_url}/transactional-email/v1alpha1/regions/{region}/domains",
+        "activate_sns": "{base_url}/mnq/v1beta1/regions/{region}/activate-sns",
+        "sns_info": "{base_url}/mnq/v1beta1/regions/{region}/sns-info",
+        "sns_credentials": "{base_url}/mnq/v1beta1/regions/{region}/sns-credentials",
     }
-
-    events = {
-        "unknown_type": "unknown_type",
-        "email_queued": "queued",
-        "email_dropped": "dropped",
-        "email_deferred": "deferred",
-        "email_delivered": "delivered",
-        "email_spam": "spam",
-        "email_mailbox_not_found": "mailbox_not_found",
-        "email_blocklisted": "blocklisted",
-        "blocklist_created": "blocklist_created",
-    }
+    EVENT_TYPES = [
+        "email_sent", "email_delivered", "email_queued", "email_dropped",
+        "email_deferred", "email_spam", "email_mailbox_not_found", "email_blocklisted",
+    ]
     events_association = {
         "unknown": "unknown_type",
         "pending": "pending",
@@ -59,11 +58,35 @@ class ScalewayProvider(MissiveProviderBase):
 
     def __init__(self, **kwargs: str | None) -> None:
         super().__init__(**kwargs)
-        self._base_url = self._get_config_or_env("BASE_URL", "https://api.scaleway.com/transactional-email/v1alpha1")
+        base = self._get_config_or_env("BASE_URL", "https://api.scaleway.com")
+        self._base_url = base.rstrip("/")
+        self._access_key = self._get_config_or_env("ACCESS_KEY")
         self._secret_key = self._get_config_or_env("SECRET_ACCESS_KEY")
         self._region = self._get_config_or_env("REGION", "fr-par")
         self._project_id = self._get_config_or_env("PROJECT_ID")
         self._email_data: dict[str, Any] = {}
+
+    def _get_mnq_api(self):
+        """Return MnqV1Beta1SnsAPI if scaleway SDK is available and configured. Else None."""
+        if not self._access_key or not self._secret_key:
+            return None
+        try:
+            from scaleway import Client
+            from scaleway.mnq.v1beta1 import MnqV1Beta1SnsAPI
+
+            client = Client(
+                access_key=self._access_key,
+                secret_key=self._secret_key,
+                default_project_id=self._project_id or "",
+                default_region=self._region,
+            )
+            return MnqV1Beta1SnsAPI(client)
+        except ImportError:
+            return None
+
+    #########################################################
+    # Helpers
+    #########################################################
 
     def _get_headers(self) -> dict[str, str]:
         """Generate standard headers."""
@@ -72,118 +95,101 @@ class ScalewayProvider(MissiveProviderBase):
             "Content-Type": "application/json",
         }
 
-    def _build_url(self, endpoint_key: str, **params) -> str:
+    def _build_url(self, url_key: str) -> str:
         """Build URL from endpoint key."""
-        endpoint = self.ENDPOINTS[endpoint_key].format(**params)
-        return f"{self._base_url}/regions/{self._region}/{endpoint}"
+        return self.ENDPOINTS[url_key].format(base_url=self._base_url, region=self._region)
 
-    @property
-    def api_url(self) -> str:
-        """Return emails API URL."""
-        return self._build_url("emails")
+    def get_external_id_email(self, response: dict[str, Any]) -> str:
+        """Get external email ID."""
+        return response.get("emails")[0].get("id")
 
-    def prepare_email(self, **kwargs: Any) -> dict[str, Any]:
-        """Prepare email data."""
-        recipient_email = kwargs.get("recipient_email")
-        recipient_name = kwargs.get("recipient_name")
-        sender_email = kwargs.get("sender_email")
-        sender_name = kwargs.get("sender_name")
-        subject = kwargs.get("subject")
-        body = kwargs.get("body")
-        body_text = kwargs.get("body_text")
+    def get_domains(self):
+        """Get domains."""
+        url = self.ENDPOINTS["domains"].format(base_url=self._base_url, region=self._region)
+        response = requests.get(
+            url,
+            headers=self._get_headers(),
+            params={"project_id": self._project_id}, timeout=30
+        )
+        response.raise_for_status()
+        return response.json()
 
-        if not recipient_email:
-            raise ValueError("recipient_email is required")
-        if not sender_email:
-            raise ValueError("sender_email is required")
+    #########################################################
+    # Email sending
+    #########################################################
+
+    def _prepare_email(self, **kwargs):
+        """Prepare email data for Scaleway API."""
         if not self._project_id:
-            raise ValueError("PROJECT_ID is required")
-
-        if not hasattr(self, "attachments"):
-            self.attachments = []
-
-        attachments_from_kwargs = kwargs.get("attachments")
-        if attachments_from_kwargs:
-            for att in attachments_from_kwargs:
-                if isinstance(att, dict) and "content" in att and "name" in att:
-                    self.attachments.append(att)
-
+            raise ValueError("PROJECT_ID is required for Scaleway transactional email")
         self._email_data = {
-            "subject": subject or "",
-            "from": {
-                "email": sender_email,
-                "name": sender_name or "",
-            },
-            "to": [
-                {
-                    "email": recipient_email,
-                    "name": recipient_name or "",
-                }
-            ],
+            "subject": kwargs["subject"],
             "project_id": self._project_id,
+            "additional_headers": [],
+        }
+        self._add_sender(kwargs["sender"])
+        self._add_content(kwargs)
+        self._add_reply_to(kwargs)
+        self._add_recipients(kwargs.get("recipients", []))
+        self._add_bcc_or_cc(kwargs.get("bcc", []), "bcc")
+        self._add_bcc_or_cc(kwargs.get("cc", []), "cc")
+        self._add_attachments_email(kwargs.get("attachments", []))
+        return self._email_data
+
+    def _add_sender(self, sender):
+        self._email_data["from"] = {
+            "email": sender["email"],
+            "name": sender.get("name") or "",
         }
 
-        if body:
-            self._email_data["html"] = body
-        if body_text:
-            self._email_data["text"] = body_text
-        
+    def _add_content(self, kwargs):
+        if kwargs.get("body"):
+            self._email_data["html"] = kwargs["body"]
+        if kwargs.get("body_text"):
+            self._email_data["text"] = kwargs["body_text"]
         if "html" not in self._email_data and "text" not in self._email_data:
             self._email_data["text"] = ""
 
+    def _add_reply_to(self, kwargs):
         reply_to = kwargs.get("reply_to")
         if reply_to:
-            self._email_data["additional_headers"] = [
-                {"key": "Reply-To", "value": reply_to}
-            ]
-
-        if self.attachments:
-            self._email_data["attachments"] = [
-                {
-                    "content": base64.b64encode(att["content"]).decode("utf-8") if isinstance(att["content"], bytes) else att["content"],
-                    "name": att["name"],
-                }
-                for att in self.attachments
-            ]
-
-        return self._email_data
-
-    def add_attachment_email(self, content: bytes | str, name: str) -> None:
-        """Add an attachment to the email."""
-        if not hasattr(self, "attachments"):
-            self.attachments = []
-
-        if isinstance(content, str):
-            content = content.encode("utf-8")
-
-        self.attachments.append({"content": content, "name": os.path.basename(name)})
-
-        if self._email_data:
-            if "attachments" not in self._email_data:
-                self._email_data["attachments"] = []
-            self._email_data["attachments"].append({
-                "content": base64.b64encode(content).decode("utf-8"),
-                "name": os.path.basename(name),
+            value = reply_to["email"] if isinstance(reply_to, dict) else reply_to
+            self._email_data["additional_headers"].append({
+                "key": "Reply-To",
+                "value": value,
             })
 
-    def remove_attachment_email(self, name: str) -> None:
-        """Remove an attachment from the email."""
-        if not hasattr(self, "attachments"):
+    def _add_recipients(self, recipients):
+        self._email_data["to"] = [
+            {"email": recipient["email"], "name": recipient.get("name", "")}
+            for recipient in recipients
+        ]
+
+    def _add_bcc_or_cc(self, recipients, key):
+        if not recipients or key not in ["cc", "bcc"]:
             return
+        self._email_data[key] = [
+            {"email": recipient["email"], "name": recipient.get("name", "")}
+            for recipient in recipients
+        ]
 
-        self.attachments = [att for att in self.attachments if att["name"] != name]
-
-        if self._email_data and "attachments" in self._email_data:
-            self._email_data["attachments"] = [
-                att for att in self._email_data["attachments"] if att["name"] != name
-            ]
+    def _add_attachments_email(self, attachments):
+        if not attachments:
+            return
+        self._email_data["attachments"] = [
+            {
+                "name": att["name"],
+                "type": att.get("type") or self._guess_content_type(att["name"]),
+                "content": self._to_base64(att["content"]),
+            }
+            for att in attachments
+        ]
 
     def send_email(self, **kwargs: Any) -> bool:
         """Send email via Scaleway."""
-        self.prepare_email(**kwargs)
-
+        self._prepare_email(**kwargs)
         response = requests.post(
-            self._build_url("emails"),
+            self._build_url("email"),
             headers=self._get_headers(),
             json=self._email_data,
             timeout=30,
@@ -191,120 +197,196 @@ class ScalewayProvider(MissiveProviderBase):
         response.raise_for_status()
         return response.json()
 
-    def status_email(self, **kwargs: Any) -> dict[str, Any]:
-        """Check email delivery status."""
-        external_id = kwargs.get("external_id")
-        
-        response = requests.get(
-            self._build_url("email_detail", email_id=external_id),
+    #########################################################
+    # Webhooks
+    #########################################################
+
+    def insert_type_and_url_webhooks(self, sns, webhooks: list[dict[str, Any]]):
+        """Insert type and url in webhooks."""
+        for wbh in webhooks:
+            wbh["type"] = wbh["name"].split("-")[-1]
+            wbh["url"] = self.get_subscription_url(sns, wbh)
+        return webhooks
+
+    def _create_webhook(self, domain_id: str, sns_arn: str):
+        url = self.ENDPOINTS["webhooks"].format(base_url=self._base_url, region=self._region)
+        response = requests.post(
+            url,
             headers=self._get_headers(),
+            json={
+                "project_id": self._project_id,
+                "domain_id": domain_id,
+                "name": "missive-webhook-email",
+                "sns_arn": sns_arn,
+                "event_types": self.EVENT_TYPES
+            },
             timeout=30,
         )
         response.raise_for_status()
-        result = response.json()
-        scaleway_status = result.get("status", "unknown").lower()
-        association = self.get_events_association()
-        status = association.get(scaleway_status, "pending")
-        return status, response
+        return response.json()        
 
-    def cancel_email(self) -> bool:
-        """Cancel email (not supported)."""
-        return False
+    def get_webhooks(self):
+        """Get all webhooks."""
+        url = self.ENDPOINTS["webhooks"].format(base_url=self._base_url, region=self._region)
+        response = requests.get(
+            url,
+            headers=self._get_headers(),
+            params={"project_id": self._project_id},
+            timeout=30
+        )
+        response.raise_for_status()
+        response = response.json()
+        response = response.get("webhooks", [])
+        response = [wbh for wbh in response if wbh.get("project_id") == self._project_id]
+        response = self.insert_type_and_url_webhooks(self.sns_client_email, response)
+        return response
 
-    def get_external_id_email(self, response: dict[str, Any]) -> str:
-        """Get external email ID."""
-        return response.get("emails")[0].get("id")
+    def get_webhook_email(self, webhook_id: str):
+        """Get a webhook."""
+        print("--------------- webhook_id ---------------")
+        webhook_id = webhook_id.split("-")[1]
+        print(webhook_id)
+        print("--------------- webhook_id ---------------")
+        self.get_webhooks()
+        for wbh in self.get_webhooks():
+            if wbh.get("id") == webhook_id:
+                return wbh
+        return None
 
-    def set_webhook_email(self, webhook_url: str, **kwargs) -> dict[str, Any]:
-        """Create webhook (requires domain_id and sns_arn from Topics and Events)."""
+    def set_webhook_email(self, webhook_url: str):
+        """Set a webhook email."""
+        sns = self.sns_client_email
+        topic = self.create_topic(sns, name="missive-webhook-email")
+        topic_arn = topic.get("TopicArn")
+        subscription = self.create_subscription(sns, topic_arn, webhook_url)
+        domains = self.get_domains()
+        domain_id = domains.get("domains", [])[0].get("id")
+        return self._create_webhook(domain_id, topic_arn)
 
-    
-        event_types = kwargs.get("event_types", [
-            "email_delivered",
-            "email_dropped",
-            "email_deferred",
-            "email_spam",
-            "email_mailbox_not_found",
-        ])
-        
-        data = {
-            "domain_id": self._domain_id,
-            "project_id": self._project_id,
-            "name": kwargs.get("name", "Missive Webhook"),
-            "event_types": event_types,
-            "sns_arn": self.sns_arn,
-        }
-        
+    def _handle_webhook_email_confirm(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Handle a webhook confirm email."""
+        payload = payload.decode("utf-8")
+        payload = json.loads(payload)
+        return payload
+
+    def handle_webhook_email(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Handle a webhook email."""
+        print("--------------- payload ---------------")
+        print(payload)
+        print("--------------- payload ---------------")
+        if payload.get("type") == "confirm":
+            return self._handle_webhook_email_confirm(payload)
+        return payload
+
+    #########################################################
+    # Topics / Events
+    #########################################################
+
+    def create_topic(self, sns, name: str):
+        """Create a topic."""
+        return sns.create_topic(Name=name)
+
+    def get_topic(self, sns, name: str):
+        """Get a topic."""
+        sns.get_topic(name=name)
+        return self._get_mnq_api().get_topic(name=name)
+
+    #########################################################
+    # Sns
+    #########################################################
+
+    def get_sns_info(self):
+        """Get SNS info."""
+        url = self.ENDPOINTS["sns_info"].format(base_url=self._base_url, region=self._region)
+        response = requests.get(
+            url,
+            headers=self._get_headers(),
+            params={"project_id": self._project_id},
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def is_sns_active(self):
+        """Check if SNS is active."""
+        url = self.ENDPOINTS["activate_sns"].format(base_url=self._base_url, region=self._region)
         response = requests.post(
-            self._build_url("webhooks"),
+            url,
             headers=self._get_headers(),
-            json=data,
+            json={"project_id": self._project_id}, 
+            timeout=30
         )
+        if response.status_code == 409:
+            return self.get_sns_info()
         response.raise_for_status()
         return response.json()
 
-    def get_webhooks_email(self) -> dict[str, Any]:
-        """Get all webhooks."""
-        response = requests.get(
-            self._build_url("webhooks"),
+    def create_sns_credentials(self, name: str = "missive-webhook-email"):
+        """Create SNS credentials."""
+        url = self.ENDPOINTS["sns_credentials"].format(base_url=self._base_url, region=self._region)
+        response = requests.post(
+            url,
             headers=self._get_headers(),
+            json={
+                "project_id": self._project_id,
+                "name": name,
+                "permissions": {
+                    "can_publish": True,
+                    "can_receive": True,
+                    "can_manage": True
+                }
+            },
+            timeout=30,
         )
         response.raise_for_status()
         response = response.json()
-        return response.get("webhooks", [])
-
-    def delete_webhook_email(self, webhook_id: str) -> bool:
-        """Delete webhook."""
-        response = requests.delete(
-            self._build_url("webhook_detail", webhook_id=webhook_id),
-            headers=self._get_headers(),
+        print("--------------- sns credentials ---------------")
+        print("SNS_ACCESS_KEY =", response.get("access_key"))
+        self._tmp_sns_access_key = response.get("access_key")
+        print("SNS_SECRET_KEY =", response.get("secret_key"))
+        self._tmp_sns_secret_key = response.get("secret_key")
+        print("--------------- sns credentials ---------------")
+        return response
+    
+    def sns_client(self, name: str = "missive-webhook-email"):
+        """Get SNS client."""
+        import boto3
+        from botocore.config import Config
+        sns_info = self.is_sns_active()
+        self._tmp_sns_access_key = self._get_config_or_env("SNS_ACCESS_KEY")
+        self._tmp_sns_secret_key = self._get_config_or_env("SNS_SECRET_KEY")
+        if not self._tmp_sns_access_key or not self._tmp_sns_secret_key:
+            self.create_sns_credentials(name=name)
+        return boto3.client(
+            "sns",
+            endpoint_url=sns_info.get("sns_endpoint_url"),
+            aws_access_key_id=self._tmp_sns_access_key,
+            aws_secret_access_key=self._tmp_sns_secret_key,
+            region_name=self._region,
+            config=Config(signature_version="s3v4"),
         )
-        response.raise_for_status()
-        return response.json()
 
-    def get_webhooks(self) -> dict[str, Any]:
-        """Get all webhooks."""
-        webhooks = []
-        webhooks.extend(self.get_webhooks_email())
-        return webhooks
+    @cached_property
+    def sns_client_email(self):
+        """Get SNS client."""
+        return self.sns_client(name="missive-webhook-email")
 
-    def get_webhook_events_email(self, webhook_id: str, **kwargs) -> list[dict[str, Any]]:
-        """Get webhook events."""
-        params = {}
-        if "page" in kwargs:
-            params["page"] = kwargs["page"]
-        if "page_size" in kwargs:
-            params["page_size"] = kwargs["page_size"]
-        if "order_by" in kwargs:
-            params["order_by"] = kwargs["order_by"]
-        
-        response = requests.get(
-            self._build_url("webhook_events", webhook_id=webhook_id),
-            headers=self._get_headers(),
-            params=params,
+    #########################################################
+    # Subscriptions
+    #########################################################
+
+    def create_subscription(self, sns, topic_arn: str, webhook_url: str):
+        """Create a subscription."""
+        return sns.subscribe(
+            TopicArn=topic_arn,
+            Protocol="https",
+            Endpoint=webhook_url,
         )
-        response.raise_for_status()
-        response = response.json()
-        return response.get("events", [])
 
-    def update_webhook_email(self, webhook_id: str, **kwargs) -> bool:
-        """Update webhook."""
-        data = {}
-        if "name" in kwargs:
-            data["name"] = kwargs["name"]
-        if "event_types" in kwargs:
-            data["event_types"] = kwargs["event_types"]
-        if "sns_arn" in kwargs:
-            data["sns_arn"] = kwargs["sns_arn"]
-        
-        response = requests.patch(
-            self._build_url("webhook_detail", webhook_id=webhook_id),
-            headers=self._get_headers(),
-            json=data,
-        )
-        response.raise_for_status()
-        return response.json()
-
-    def handle_webhook_email(self, payload: dict[str, Any]) -> bool:
-        """Handle webhook."""
-        return True
+    def get_subscription_url(self, sns, webhook: dict[str, Any]):
+        paginator = sns.get_paginator("list_subscriptions_by_topic")
+        for page in paginator.paginate(TopicArn=webhook.get("sns_arn")):
+            for sub in page.get("Subscriptions", []):
+                if sub.get("Protocol").startswith("http") and sub.get("Endpoint"):
+                    return sub.get("Endpoint")
+        return None

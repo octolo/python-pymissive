@@ -1,0 +1,9 @@
+# Provider Mailgun (Email)
+# Install with: pip install -r requirements-mailgun.txt
+
+# Required core dependencies
+-r requirements.txt
+
+# Package Mailgun
+scaleway>=2.10.3
+

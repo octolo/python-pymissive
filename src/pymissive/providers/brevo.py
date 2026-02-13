@@ -1,9 +1,9 @@
 """Brevo (ex Sendinblue) email provider - API and SMTP modes."""
 
 import contextlib
+import json
 from typing import Any
 from .base import MissiveProviderBase
-import json
 
 
 class BrevoAPIProvider(MissiveProviderBase):
@@ -28,13 +28,13 @@ class BrevoAPIProvider(MissiveProviderBase):
         "updated_at": "updatedAt",
     }
     events_association = {
+        "request": "request",
         "sent": "sent",
         "hardBounce": "hard_bounce",
         "softBounce": "soft_bounce",
         "blocked": "blocked",
         "spam": "spam",
         "delivered": "delivered",
-        "request": "request",
         "click": "click",
         "invalid": "invalid",
         "deferred": "deferred",
@@ -72,79 +72,94 @@ class BrevoAPIProvider(MissiveProviderBase):
     # Attachments
     #########################################################
 
-    def add_attachment_email(self, content: bytes | str, name: str) -> None:
-        """Add an attachment to the email."""
-        if isinstance(content, str):
-            content = content.encode("utf-8")
-        self.attachments.append({"content": content, "name": name})
-
-    def remove_attachment_email(self, name: str) -> None:
-        """Remove an attachment from the email."""
-        if not hasattr(self, "attachments"):
+    def _add_attachments_email(self, email, attachments):
+        if not attachments:
             return
-        self.attachments = [att for att in self.attachments if att["name"] != name]
+        from brevo_python import SendSmtpEmailAttachment
+
+        email.attachment = [
+            SendSmtpEmailAttachment(
+                name=a["name"],
+                content=self._to_base64(a["content"]),
+            )
+            for a in attachments
+        ]
 
     #########################################################
     # Email sending
     #########################################################
 
-    def delete_blocked_email(self, email: str) -> bool:
+    def delete_blocked_emails(self, kwargs: dict[str, Any]) -> bool:
         with contextlib.suppress(Exception):
             api_instance = self._get_transactional_api()
-            api_instance.smtp_blocked_contacts_email_delete(email)
+            for recipient in kwargs.get("recipients", []):
+                api_instance.smtp_blocked_contacts_email_delete(recipient["email"])
+            for recipient in kwargs.get("cc", []):
+                api_instance.smtp_blocked_contacts_email_delete(recipient["email"])
+            for recipient in kwargs.get("bcc", []):
+                api_instance.smtp_blocked_contacts_email_delete(recipient["email"])
 
-    def prepare_email(self, **kwargs):
+    def _prepare_email(self, **kwargs):
         """Prepare the SendSmtpEmail object for sending."""
-        from brevo_python import SendSmtpEmail, SendSmtpEmailTo, SendSmtpEmailSender, SendSmtpEmailAttachment
+        from brevo_python import SendSmtpEmail
+        email = SendSmtpEmail(subject=kwargs["subject"])
+        self._add_sender(email, kwargs)
+        self._add_content(email, kwargs)
+        self._add_reply_to(email, kwargs)
+        self._add_recipients(email, kwargs["recipients"])
+        self._add_bcc_or_cc(email, kwargs.get("bcc", []), "bcc")
+        self._add_bcc_or_cc(email, kwargs.get("cc", []), "cc")
+        self._add_attachments_email(email, kwargs.get("attachments", []))
+        return email
 
-        recipient_email = kwargs.get("recipient_email")
-        sender_email = kwargs.get("sender_email")
-        sender_name = kwargs.get("sender_name")
-        subject = kwargs.get("subject")
-        body = kwargs.get("body")
-        body_text = kwargs.get("body_text")
+    def _add_recipients(self, email, recipients):
+        from brevo_python import SendSmtpEmailTo
+        email.to = [
+            SendSmtpEmailTo(email=recipient["email"], name=recipient.get("name", ""))
+            for recipient in recipients
+        ]
 
-        if not recipient_email:
-            raise ValueError("recipient_email is required")
-        if not sender_email:
-            raise ValueError("sender_email is required")
-
-        email = SendSmtpEmail(
-            to=[SendSmtpEmailTo(email=recipient_email)],
-            sender=SendSmtpEmailSender(email=sender_email, name=sender_name or ""),
-            subject=subject or "",
+    def _add_sender(self, email, kwargs):
+        from brevo_python import SendSmtpEmailSender
+        sender = kwargs.get("sender")
+        email.sender = SendSmtpEmailSender(
+            email=sender["email"],
+            name=sender.get("name", "")
         )
 
-        if body:
-            email.html_content = body
-        if body_text:
-            email.text_content = body_text
+    def _add_content(self, email, kwargs):
+        if kwargs.get("body"):
+            email.html_content = kwargs["body"]
+        if kwargs.get("body_text"):
+            email.text_content = kwargs["body_text"]
 
-        # Reply-to / CC / BCC
+    def _add_reply_to(self, email, kwargs):
         reply_to = kwargs.get("reply_to")
         if reply_to:
-            email.reply_to = {"email": reply_to}
+            from brevo_python import SendSmtpEmailReplyTo
+            email.reply_to = SendSmtpEmailReplyTo(
+                email=reply_to["email"],
+                name=reply_to.get("name", "")
+            )
 
-        cc = kwargs.get("cc")
-        if cc:
-            if isinstance(cc, list):
-                email.cc = [SendSmtpEmailTo(email=email_addr) for email_addr in cc]
-            else:
-                email.cc = [SendSmtpEmailTo(email=cc)]
-
-        bcc = kwargs.get("bcc")
-        if bcc:
-            if isinstance(bcc, list):
-                email.bcc = [SendSmtpEmailTo(email=email_addr) for email_addr in bcc]
-            else:
-                email.bcc = [SendSmtpEmailTo(email=bcc)]
-
-        return email
+    def _add_bcc_or_cc(self, email, recipients, key):
+        if not recipients or key not in ["cc", "bcc"]:
+            return
+        if key == "cc":
+            from brevo_python import SendSmtpEmailCc
+            recipient_class = SendSmtpEmailCc
+        elif key == "bcc":
+            from brevo_python import SendSmtpEmailBcc
+            recipient_class = SendSmtpEmailBcc
+        setattr(email, key, [
+            recipient_class(email=r["email"], name=r.get("name", ""))
+            for r in recipients
+        ])
 
     def send_email(self, **kwargs) -> dict[str, Any]:
         """Send email via Brevo API."""
-        self.delete_blocked_email(kwargs.get("recipient_email"))
-        email = self.prepare_email(**kwargs)
+        self.delete_blocked_emails(kwargs)
+        email = self._prepare_email(**kwargs)
         api_instance = self._get_transactional_api()
         response = api_instance.send_transac_email(email)
         return {field: str(getattr(response, field)) for field in response.__dict__}
@@ -198,16 +213,17 @@ class BrevoAPIProvider(MissiveProviderBase):
         webhooks = self.get_webhooks()
         return [webhook for webhook in webhooks if webhook["type"] == "transactional"]
 
-    def handle_webhook(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def handle_webhook_email(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle a Brevo webhook and normalize event type."""
-        print("okkkkkkkkkkkkkk payload", payload)
         payload = payload.decode("utf-8")
         payload = json.loads(payload)
         event = payload.get("event")
         message_id = payload.get("message-id") or payload.get("messageId")
         return {
+            "recipient": payload.get("email"),
             "external_id": str(message_id),
             "event": self.events_association.get(event, "unknown"),
+            "description": payload.get("reason"),
             "occurred_at": payload.get("date"),
             "trace": payload,
         }

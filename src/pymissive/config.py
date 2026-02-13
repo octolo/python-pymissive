@@ -367,6 +367,14 @@ MISSIVE_ACKNOWLEDGEMENT_LEVELS = [
     },
 ]
 
+MISSIVE_GENERIC_SUPPORT = {
+    "EMAIL": ["email", "email_marketing"],
+    "PHONE": ["sms", "rcs"],
+    "POSTAL": ["postal", "postal_registered", "postal_signature", "lre", "lre_qualified", "ere"],
+    "NOTIFICATION": ["notification", "push_notification"],
+    "BRANDED": ["branded"],
+}
+
 type_to_fields_mapping = {
     "email": "MISSIVE_FIELDS_EMAIL",
     "email_marketing": "MISSIVE_FIELDS_EMAIL",
