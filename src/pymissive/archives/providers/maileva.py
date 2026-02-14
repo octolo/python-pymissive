@@ -50,7 +50,7 @@ class MailevaProvider(BaseProvider):
     postal_duplex_printing_available = True
     postal_archiving_duration = 0
 
-    # Postal recommandé
+    # Recommended postal mail
     postal_registered_price = 5.36
     postal_registered_page_price_black_white = 0.33
     postal_registered_page_price_color = 0.58
@@ -92,7 +92,7 @@ class MailevaProvider(BaseProvider):
     lre_duplex_printing_available = False
     lre_archiving_duration = 3650  # 10 years
 
-    # LRE qualifiée
+    # Qualified electronic registered mail
     lre_qualified_price = 6.2
     lre_qualified_page_price_black_white = 0.0
     lre_qualified_page_price_color = 0.0
@@ -106,7 +106,7 @@ class MailevaProvider(BaseProvider):
     lre_qualified_duplex_printing_available = False
     lre_qualified_archiving_duration = 3650
 
-    # Envoi recommandé électronique
+    # Electronic registered mail
     ere_price = 2.8
     ere_page_price_black_white = 0.0
     ere_page_price_color = 0.0

@@ -46,7 +46,7 @@ class LaPosteProvider(BaseProvider):
     postal_duplex_printing_available = True
     postal_archiving_duration = 0
 
-    # Postal recommandé (R1)
+    # Recommended postal mail (R1)
     postal_registered_price = 6.432  # 5.36€ +20%
     postal_registered_page_price_black_white = 0.396
     postal_registered_page_price_color = 0.696
@@ -74,7 +74,7 @@ class LaPosteProvider(BaseProvider):
     postal_signature_duplex_printing_available = True
     postal_signature_archiving_duration = 0
 
-    # LRE (électronique)
+    # Electronic registered mail
     lre_price = 4.68  # 3.9€ +20%
     lre_page_price_black_white = 0.0
     lre_page_price_color = 0.0

@@ -15,10 +15,11 @@ class BrevoAPIProvider(MissiveProviderBase):
     name = "brevo"
     display_name = "Brevo"
     required_packages = ["brevo-python"]
-    config_keys = ["API_KEY"]
+    config_keys = ["EMAIL_API_KEY", "SMS_API_KEY", "WHATSAPP_API_KEY"]
     description = "Complete CRM platform (Email, SMS, Marketing automation)"
     documentation_url = "https://developers.brevo.com"
     site_url = "https://www.brevo.com"
+    brands = ["WhatsApp"]
     fields_associations = {
         "id": "id",
         "url": "url",
@@ -49,24 +50,65 @@ class BrevoAPIProvider(MissiveProviderBase):
         super().__init__(**kwargs)
         if not hasattr(self, "attachments"):
             self.attachments = []
-        self._api_key = self._get_config_or_env("API_KEY")
+        self._email_api_key = self._get_config_or_env("EMAIL_API_KEY")
+        self._sms_api_key = self._get_config_or_env("SMS_API_KEY")
+        self._whatsapp_api_key = self._get_config_or_env("WHATSAPP_API_KEY")
         self._webhooks_api = None
-        self._transactional_api = None
+        self._transactional_email_api = None
+        self._transactional_sms_api = None
+        self._transactional_whatsapp_api = None
 
-    def get_api_client(self):
+    def get_api_client(self, api_key: str):
         """Return the Brevo API client."""
         from brevo_python import ApiClient, Configuration
         configuration = Configuration()
-        configuration.api_key["api-key"] = self._api_key
+        configuration.api_key["api-key"] = api_key
+        configuration.api_key['partner-key'] = api_key
         return ApiClient(configuration)
 
-    def _get_transactional_api(self):
+    def _get_transactional_email_api(self):
         """Return the Brevo transactional API instance."""
-        if self._transactional_api is None:
+        if self._transactional_email_api is None:
             from brevo_python import TransactionalEmailsApi
-            api_client = self.get_api_client()
-            self._transactional_api = TransactionalEmailsApi(api_client)
-        return self._transactional_api
+            api_client = self.get_api_client(self._email_api_key)
+            self._transactional_email_api = TransactionalEmailsApi(api_client)
+        return self._transactional_email_api
+
+    #########################################################
+    # Webhooks
+    #########################################################
+
+    def _get_webhooks_api(self):
+        """Return the Brevo webhooks API instance."""
+        if self._webhooks_api is None:
+            from brevo_python import WebhooksApi
+            api_client = self.get_api_client(self._email_api_key)
+            self._webhooks_api = WebhooksApi(api_client)
+        return self._webhooks_api
+
+    def get_webhooks(self):
+        """Return the Brevo webhooks."""
+        wbhs = self._get_webhooks_api()
+        return wbhs.get_webhooks().webhooks
+
+
+    #########################################################
+    # Helpers
+    #########################################################
+
+    def get_external_id_email(self, payload: dict[str, Any]) -> str | None:
+        """Extract the external ID from the Brevo webhook."""
+        return payload.get("_message_id")
+
+    def get_normalize_type(self, data: dict[str, Any]) -> str:
+        """Return the normalized type of webhook/email/SMS."""
+        if data.get("type") == "transactional":
+            return "email"
+        elif data.get("type") == "marketing":
+            return "email_marketing"
+        elif data.get("type") == "sms":
+            return "sms"
+        return "unknown"
 
     #########################################################
     # Attachments
@@ -91,7 +133,7 @@ class BrevoAPIProvider(MissiveProviderBase):
 
     def delete_blocked_emails(self, kwargs: dict[str, Any]) -> bool:
         with contextlib.suppress(Exception):
-            api_instance = self._get_transactional_api()
+            api_instance = self._get_transactional_email_api()
             for recipient in kwargs.get("recipients", []):
                 api_instance.smtp_blocked_contacts_email_delete(recipient["email"])
             for recipient in kwargs.get("cc", []):
@@ -160,53 +202,42 @@ class BrevoAPIProvider(MissiveProviderBase):
         """Send email via Brevo API."""
         self.delete_blocked_emails(kwargs)
         email = self._prepare_email(**kwargs)
-        api_instance = self._get_transactional_api()
+        api_instance = self._get_transactional_email_api()
         response = api_instance.send_transac_email(email)
         return {field: str(getattr(response, field)) for field in response.__dict__}
 
-    #########################################################
-    # Webhooks
-    #########################################################
-
-    def _get_webhooks_api(self):
-        """Return the Brevo webhooks API instance."""
-        if self._webhooks_api is None:
-            from brevo_python import WebhooksApi
-            api_client = self.get_api_client()
-            self._webhooks_api = WebhooksApi(api_client)
-        return self._webhooks_api
-
-    def set_webhook_email(self, webhook_url: str) -> bool:
+    def set_webhook_email(self, webhook_data: dict[str, Any]) -> bool:
         """Configure a webhook to receive Brevo events."""
-        from brevo_python import CreateWebhook, WebhooksApi
+        from brevo_python import CreateWebhook
         wbhs = self._get_webhooks_api()
         create_webhook = CreateWebhook(
-            url=webhook_url,
-            description="Missive webhook",
+            url=webhook_data.get("url"),
+            description="Missive webhook email",
             events=list(self.events_association.keys()),
             channel="email",
             type="transactional",
         )
-        return wbhs.create_webhook(create_webhook)
+        wbh = wbhs.create_webhook(create_webhook)
+        return self.get_normalize_webhook_id({"id": wbh.id})
 
-    def get_webhooks(self):
-        """Return the Brevo webhooks."""
-        wbhs = self._get_webhooks_api()
-        return wbhs.get_webhooks().webhooks
-
-    def delete_webhook_email(self, webhook_id: str) -> bool:
+    def delete_webhook_email(self, webhook_data: dict[str, Any]) -> bool:
         """Delete a webhook from Brevo."""
         wbhs = self._get_webhooks_api()
-        provider, webhook_id = webhook_id.split("-")
-        return wbhs.delete_webhook(webhook_id)
+        return wbhs.delete_webhook(webhook_data.get("id"))
 
-    def update_webhook_email(self, webhook_id: str, webhook_url: str) -> bool:
+    def update_webhook_email(self, webhook_data: dict[str, Any]) -> bool:
         """Return the Brevo webhooks."""
         from brevo_python import UpdateWebhook
         wbhs = self._get_webhooks_api()
-        update = UpdateWebhook(url=webhook_url)
-        provider, webhook_id = webhook_id.split("-")
-        return wbhs.update_webhook(webhook_id, update)
+        update = UpdateWebhook(url=webhook_data.get("url"))
+        webhook_id = webhook_data.get("id")
+        wbhs.update_webhook(webhook_id, update)
+        return self.get_normalize_webhook_id({"id": webhook_id})
+
+    def get_webhook_email(self, webhook_id: str):
+        """Return the Brevo webhook."""
+        wbhs = self._get_webhooks_api()
+        return next((wbh for wbh in wbhs if str(wbh.id) == str(webhook_id)), None)
 
     def get_webhooks_email(self):
         """Return only transactional email webhooks."""
@@ -228,20 +259,162 @@ class BrevoAPIProvider(MissiveProviderBase):
             "trace": payload,
         }
 
+
     #########################################################
-    # Helpers
+    # SMS
     #########################################################
 
-    def get_external_id_email(self, payload: dict[str, Any]) -> str | None:
-        """Extract the external ID from the Brevo webhook."""
-        return payload.get("_message_id")
+    def _get_transactional_sms_api(self):
+        """Return the Brevo transactional SMS API instance."""
+        if self._transactional_sms_api is None:
+            from brevo_python import TransactionalSMSApi
+            api_client = self.get_api_client(self._sms_api_key)
+            self._transactional_sms_api = TransactionalSMSApi(api_client)
+        return self._transactional_sms_api
 
-    def get_normalize_type(self, data: dict[str, Any]) -> str:
-        """Return the normalized type of webhook/email/SMS."""
-        if data.get("type") == "transactional":
-            return "email"
-        elif data.get("type") == "marketing":
-            return "email_marketing"
-        elif data.get("type") == "sms":
-            return "sms"
-        return "unknown"
+    def _prepare_sms(self, **kwargs):
+        """Prepare the SendSmsEmail object for sending."""
+        from brevo_python import SendTransacSms
+        sms = SendTransacSms(
+            sender=kwargs["sender"].get("name"),
+            recipient=str(kwargs["recipients"][0].get("phone")),
+            content=kwargs.get("body_text"),
+        )
+        return sms
+
+    def send_sms(self, **kwargs) -> dict[str, Any]:
+        """Send SMS via Brevo API."""
+        sms = self._prepare_sms(**kwargs)
+        api_instance = self._get_transactional_sms_api()
+        response = api_instance.send_transac_sms(sms)
+        return {field: str(getattr(response, field)) for field in response.__dict__}
+
+    def set_webhook_sms(self, webhook_data: dict[str, Any]) -> bool:
+        """Configure a webhook to receive Brevo events."""
+        from brevo_python import CreateWebhook
+        wbhs = self._get_webhooks_api()
+        create_webhook = CreateWebhook(
+            url=webhook_data.get("url"),
+            description="Missive webhook SMS",
+            events=list(self.events_association.keys()),
+            channel="sms",
+            type="transactional",
+        )
+        return wbhs.create_webhook(create_webhook)
+
+    def delete_webhook_sms(self, webhook_data: dict[str, Any]) -> bool:
+        """Delete a webhook from Brevo."""
+        wbhs = self._get_webhooks_api()
+        return wbhs.delete_webhook(webhook_data.get("id"))
+
+    def update_webhook_sms(self, webhook_data: dict[str, Any]) -> bool:
+        """Return the Brevo webhooks."""
+        from brevo_python import UpdateWebhook
+        wbhs = self._get_webhooks_api()
+
+    def get_webhook_sms(self, webhook_id: str):
+        """Return the Brevo webhook."""
+        wbhs = self._get_webhooks_api()
+        return next((wbh for wbh in wbhs if str(wbh.id) == str(webhook_id)), None)
+
+    def get_webhooks_sms(self):
+        """Return only transactional SMS webhooks."""
+        webhooks = self.get_webhooks()
+        return [webhook for webhook in webhooks if webhook["type"] == "transactional"]
+
+    def handle_webhook_sms(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Handle a Brevo webhook and normalize event type."""
+        payload = payload.decode("utf-8")
+        payload = json.loads(payload)
+        event = payload.get("event")
+        message_id = payload.get("message-id") or payload.get("messageId")
+        return {
+            "recipient": payload.get("phone"),
+            "external_id": str(message_id),
+            "event": self.events_association.get(event, "unknown"),
+            "description": payload.get("reason"),
+            "occurred_at": payload.get("date"),
+            "trace": payload,
+        }
+
+    #########################################################
+    # Whatsapp
+    #########################################################
+
+    def _get_transactional_whatsapp_api(self):
+        """Return the Brevo transactional WhatsApp API instance."""
+        if self._transactional_whatsapp_api is None:
+            from brevo_python import TransactionalWhatsAppApi
+            api_client = self.get_api_client(self._whatsapp_api_key)
+            self._transactional_whatsapp_api = TransactionalWhatsAppApi(api_client)
+        return self._transactional_whatsapp_api
+
+    def send_branded(self, **kwargs) -> dict[str, Any]:
+        """Send a branded message via Brevo API."""
+        return self.send_whatsapp(**kwargs)
+
+    def send_whatsapp(self, **kwargs) -> dict[str, Any]:
+        """Send WhatsApp via Brevo API."""
+        from brevo_python import SendWhatsappMessage
+        recipients = [str(recipient["phone"]) for recipient in kwargs.get("recipients", [])]
+        sender = "+33614397083"
+        message = SendWhatsappMessage(
+            contact_numbers=recipients,
+            sender_number=sender,
+            text=kwargs.get("body_text"),
+        )
+        api_instance = self._get_transactional_whatsapp_api()
+        response = api_instance.send_whatsapp_message(message)
+        return {field: str(getattr(response, field)) for field in response.__dict__}
+
+    def set_webhook_whatsapp(self, webhook_data: dict[str, Any]) -> bool:
+        """Configure a webhook to receive Brevo events."""
+        from brevo_python import CreateWebhook
+        wbhs = self._get_webhooks_api()
+        create_webhook = CreateWebhook(
+            url=webhook_data.get("url"),
+            description="Missive webhook WhatsApp",
+            events=list(self.events_association.keys()),
+            channel="whatsapp",
+            type="transactional",
+        )
+        return wbhs.create_webhook(create_webhook)
+
+    def delete_webhook_whatsapp(self, webhook_data: dict[str, Any]) -> bool:
+        """Delete a webhook from Brevo."""
+        wbhs = self._get_webhooks_api()
+        return wbhs.delete_webhook(webhook_data.get("id"))
+
+    def update_webhook_whatsapp(self, webhook_data: dict[str, Any]) -> bool:
+        """Return the Brevo webhooks."""
+        from brevo_python import UpdateWebhook
+        wbhs = self._get_webhooks_api()
+        update = UpdateWebhook(url=webhook_data.get("url"))
+        webhook_id = webhook_data.get("id")
+        wbhs.update_webhook(webhook_id, update)
+        return self.get_normalize_webhook_id({"id": webhook_id})
+
+    def get_webhook_whatsapp(self, webhook_id: str):
+        """Return the Brevo webhook."""
+        wbhs = self._get_webhooks_api()
+        return next((wbh for wbh in wbhs if str(wbh.id) == str(webhook_id)), None)
+
+    def get_webhooks_whatsapp(self):
+        """Return only transactional WhatsApp webhooks."""
+        webhooks = self.get_webhooks()
+        return [webhook for webhook in webhooks if webhook["type"] == "transactional"]
+    
+    def handle_webhook_whatsapp(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Handle a Brevo webhook and normalize event type."""
+        payload = payload.decode("utf-8")
+        payload = json.loads(payload)
+        event = payload.get("event")
+        message_id = payload.get("message-id") or payload.get("messageId")
+        return {
+            "recipient": payload.get("phone"),
+            "external_id": str(message_id),
+            "event": self.events_association.get(event, "unknown"),
+            "description": payload.get("reason"),
+            "occurred_at": payload.get("date"),
+            "trace": payload,
+        }

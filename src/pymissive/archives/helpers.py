@@ -25,7 +25,7 @@ def format_phone_international(phone: str, country_code: str | None = None) -> s
     return f"+{cleaned}"
 
 # Provider helpers - Stubs (need restoration from backup)
-def get_providers_from_config(providers_config=None, on_error=None):
+def get_providers_from_config(providers_config=None, **kwargs):
     """Get providers from configuration - stub, needs restoration."""
     return []
 
@@ -33,7 +33,7 @@ def get_provider_paths_from_config(providers_config=None):
     """Get provider paths from configuration - stub, needs restoration."""
     return {}
 
-def get_provider_by_attribute(providers_config=None, attribute="", value="", on_error=None):
+def get_provider_by_attribute(providers_config=None, attribute="", value="", **kwargs):
     """Get provider by attribute - stub, needs restoration."""
     return None
 

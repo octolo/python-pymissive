@@ -99,43 +99,42 @@ MISSIVE_EVENT_FAILED = {
 MISSIVE_EVENT = {**MISSIVE_EVENT_SUCCESS, **MISSIVE_EVENT_INFO, **MISSIVE_EVENT_FAILED}
 
 MISSIVE_WEBHOOK_FIELDS = {
-        "webhook_id": {
-            "label": "Webhook ID",
-            "description": "Webhook ID",
-            "format": "str",
-        },
-        "id": {
-            "label": "ID",
-            "description": "ID",
-            "format": "str",
-        },
-        "type": {
-            "label": "Type",
-            "description": "Type",
-            "format": "str",
-        },
-        "url": {
-            "label": "URL",
-            "description": "URL",
-            "format": "str",
-        },
-        "description": {
-            "label": "Description",
-            "description": "Description",
-            "format": "str",
-        },
-        "created_at": {
-            "label": "Created At",
-            "description": "Created At",
-            "format": "datetime",
-        },
-        "updated_at": {
-            "label": "Updated At",
-            "description": "Updated At",
-            "format": "datetime",
-        },
-    }
-
+    "webhook_id": {
+        "label": "Webhook ID",
+        "description": "Webhook ID",
+        "format": "str",
+    },
+    "id": {
+        "label": "ID",
+        "description": "ID",
+        "format": "str",
+    },
+    "type": {
+        "label": "Type",
+        "description": "Type",
+        "format": "str",
+    },
+    "url": {
+        "label": "URL",
+        "description": "URL",
+        "format": "str",
+    },
+    "description": {
+        "label": "Description",
+        "description": "Description",
+        "format": "str",
+    },
+    "created_at": {
+        "label": "Created At",
+        "description": "Created At",
+        "format": "datetime",
+    },
+    "updated_at": {
+        "label": "Updated At",
+        "description": "Updated At",
+        "format": "datetime",
+    },
+}
 
 MISSIVE_FIELDS_BASE = {
     "message_id": {
@@ -309,6 +308,11 @@ MISSIVE_FIELDS_BRANDED = {
     "brand": {
         "label": "Brand",
         "description": "Brand",
+        "format": "str",
+    },
+    "target": {
+        "label": "Target",
+        "description": "Target",
         "format": "str",
     },
     **MISSIVE_FIELDS_BASE,

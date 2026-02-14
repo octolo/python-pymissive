@@ -1,11 +1,13 @@
 """Scaleway Transactional Email provider."""
 
-import logging
-import re
-from typing import Any
-import requests
-from .base import MissiveProviderBase
+import json
 from functools import cached_property
+from typing import Any
+
+import requests
+
+from .base import MissiveProviderBase
+
 
 class ScalewayProvider(MissiveProviderBase):
     name = "scaleway"
@@ -44,16 +46,14 @@ class ScalewayProvider(MissiveProviderBase):
         "email_deferred", "email_spam", "email_mailbox_not_found", "email_blocklisted",
     ]
     events_association = {
-        "unknown": "unknown_type",
-        "pending": "pending",
-        "queued": "queued",
-        "sent": "sent",
-        "delivered": "delivered",
-        "dropped": "dropped",
-        "deferred": "deferred",
-        "spam": "spam",
-        "mailbox_not_found": "mailbox_not_found",
-        "blocklisted": "blocklisted",
+        "unknown_type": "unknown",
+        "email_queued": "queued",
+        "email_delivered": "delivered",
+        "email_dropped": "dropped",
+        "email_deferred": "deferred",
+        "email_spam": "spam",
+        "email_mailbox_not_found": "mailbox_not_found",
+        "email_blocklisted": "blocklisted",
     }
 
     def __init__(self, **kwargs: str | None) -> None:
@@ -101,7 +101,27 @@ class ScalewayProvider(MissiveProviderBase):
 
     def get_external_id_email(self, response: dict[str, Any]) -> str:
         """Get external email ID."""
-        return response.get("emails")[0].get("id")
+        message_id = None
+        if "email_headers" in response:
+            email_headers = response.get("email_headers")
+            keys = ["X-Scw-Tem-Message-Id",]
+            message_id = next((header.get("value") for header in email_headers if header.get("key") in keys), None)
+        if not message_id:
+            message_id = response.get("emails")[0].get("message_id")
+        return message_id
+
+    def get_subscription_id(self, sub_arn: str) -> str:
+        return sub_arn.split(":")[-1]
+
+    def get_normalize_id(self, data: dict[str, Any]) -> str:
+        """Get normalized ID."""
+        return self.get_subscription_id(data.get("sub_id"))
+
+    def get_normalize_webhook_id(self, data: dict[str, Any]) -> str:
+        """Get normalized webhook ID."""
+        wbh_id = data.get('id')
+        sub_id = self.get_subscription_id(data.get('sub_id'))
+        return f"{self.name}-{wbh_id}_{sub_id}"
 
     def get_domains(self):
         """Get domains."""
@@ -205,10 +225,22 @@ class ScalewayProvider(MissiveProviderBase):
         """Insert type and url in webhooks."""
         for wbh in webhooks:
             wbh["type"] = wbh["name"].split("-")[-1]
-            wbh["url"] = self.get_subscription_url(sns, wbh)
+            topic_arn = wbh.get("sns_arn")
+            wbh["url"] = self.get_subscription(sns, topic_arn).get("Endpoint")
         return webhooks
 
-    def _create_webhook(self, domain_id: str, sns_arn: str):
+    def get_webhook(self, domain_id: str, sns_arn: str):
+        """Get a webhook."""
+        webhooks = self.get_webhooks()
+        for wbh in webhooks:
+            if wbh.get("domain_id") == domain_id and wbh.get("sns_arn") == sns_arn:
+                return wbh
+        return None
+
+    def get_or_create_webhook(self, domain_id: str, sns_arn: str):
+        webhook = self.get_webhook(domain_id, sns_arn)
+        if webhook:
+            return webhook
         url = self.ENDPOINTS["webhooks"].format(base_url=self._base_url, region=self._region)
         response = requests.post(
             url,
@@ -238,58 +270,82 @@ class ScalewayProvider(MissiveProviderBase):
         response = response.json()
         response = response.get("webhooks", [])
         response = [wbh for wbh in response if wbh.get("project_id") == self._project_id]
-        response = self.insert_type_and_url_webhooks(self.sns_client_email, response)
-        return response
+        return self.merge_subscriptions_url(response)
 
     def get_webhook_email(self, webhook_id: str):
         """Get a webhook."""
-        print("--------------- webhook_id ---------------")
-        webhook_id = webhook_id.split("-")[1]
-        print(webhook_id)
-        print("--------------- webhook_id ---------------")
-        self.get_webhooks()
         for wbh in self.get_webhooks():
-            if wbh.get("id") == webhook_id:
+            if "missive-webhook-email" in wbh.get("sns_arn"):
                 return wbh
         return None
 
-    def set_webhook_email(self, webhook_url: str):
+    def set_webhook_email(self, webhook_data: dict[str, Any]):
         """Set a webhook email."""
         sns = self.sns_client_email
-        topic = self.create_topic(sns, name="missive-webhook-email")
+        topic = self.get_or_create_topic(sns, name="missive-webhook-email")
         topic_arn = topic.get("TopicArn")
-        subscription = self.create_subscription(sns, topic_arn, webhook_url)
+        subscription = self.get_or_create_subscription(sns, topic_arn, webhook_data.get("url"))
         domains = self.get_domains()
         domain_id = domains.get("domains", [])[0].get("id")
-        return self._create_webhook(domain_id, topic_arn)
+        webhook = self.get_or_create_webhook(domain_id, topic_arn)
+        return self.get_normalize_webhook_id({
+            "id": webhook.get("id"), 
+            "sub_id": subscription.get("SubscriptionArn")
+        })
 
-    def _handle_webhook_email_confirm(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def delete_webhook_email(self, webhook_data: dict[str, Any]):
+        """Delete a webhook email."""
+        webhook_id = webhook_data.get("id")
+        webhook_url = webhook_data.get("url")
+        webhook_type = webhook_data.get("type")
+        sns = getattr(self, f"sns_client_{webhook_type}")
+        webhook = getattr(self, f"get_webhook_{webhook_type}")(webhook_id)
+        self.delete_subscription(sns, webhook, webhook_url)
+
+    def _handle_webhook_email_confirm(self, payload: dict[str, Any]) -> None:
         """Handle a webhook confirm email."""
+        subscription_url = payload.get("SubscribeURL")
+        requests.get(subscription_url, timeout=30)
+        return None
+
+    def _handle_webhook_email(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Handle a webhook email notification (SNS Notification with Message as JSON)."""
+        event = payload.get("type", "unknown")
+        return {
+            "recipient": payload.get("email_to"),
+            "external_id": self.get_external_id_email(payload),
+            "event": self.events_association.get(event, "unknown"),
+            "description": payload.get("email_response_message"),
+            "occurred_at": payload.get("created_at") or payload.get("email_sent_at"),
+            "trace": payload,
+        }
+
+    def handle_webhook_email(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Handle a webhook email."""
         payload = payload.decode("utf-8")
         payload = json.loads(payload)
-        return payload
-
-    def handle_webhook_email(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Handle a webhook email."""
-        print("--------------- payload ---------------")
-        print(payload)
-        print("--------------- payload ---------------")
-        if payload.get("type") == "confirm":
+        if payload.get("Type") == "SubscriptionConfirmation":
             return self._handle_webhook_email_confirm(payload)
-        return payload
+        if payload.get("Type") == "Notification":
+            message = payload.get("Message")
+            if isinstance(message, str):
+                message = json.loads(message)
+            return self._handle_webhook_email(message)
+        return None
 
     #########################################################
     # Topics / Events
     #########################################################
 
-    def create_topic(self, sns, name: str):
-        """Create a topic."""
-        return sns.create_topic(Name=name)
-
-    def get_topic(self, sns, name: str):
+    def get_or_create_topic(self, sns, name: str):
         """Get a topic."""
-        sns.get_topic(name=name)
-        return self._get_mnq_api().get_topic(name=name)
+        paginator = sns.get_paginator("list_topics")
+        for page in paginator.paginate():
+            for topic in page.get("Topics", []):
+                arn = topic.get("TopicArn")
+                if arn.endswith(f":{name}"):
+                    return topic
+        return sns.create_topic(Name=name)
 
     #########################################################
     # Sns
@@ -321,6 +377,30 @@ class ScalewayProvider(MissiveProviderBase):
         response.raise_for_status()
         return response.json()
 
+    def log_sns_credentials(self, access_key: str, secret_key: str):
+        scaleway_sns_save_method = self._get_config_or_env("SCALEWAY_SNS_SAVE_METHOD")
+        separator = "--------------- sns credentials ---------------"
+        if scaleway_sns_save_method == "logger":
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(separator)
+            logger.info("SNS_ACCESS_KEY =", access_key)
+            logger.info("SNS_SECRET_KEY =", secret_key)
+            logger.info(separator)
+        elif scaleway_sns_save_method == "print":
+            print(separator)
+            print("SNS_ACCESS_KEY =", access_key)
+            print("SNS_SECRET_KEY =", secret_key)
+            print(separator)
+        else:
+            filename = f"sns_credentials_{self._project_id}.txt"
+            print(separator)
+            print(f"Saving SNS credentials to {filename}")
+            print(separator)
+            with open(filename, "a") as f:
+                f.write("SNS_ACCESS_KEY = " + access_key + "\n")
+                f.write("SNS_SECRET_KEY = " + secret_key + "\n")
+
     def create_sns_credentials(self, name: str = "missive-webhook-email"):
         """Create SNS credentials."""
         url = self.ENDPOINTS["sns_credentials"].format(base_url=self._base_url, region=self._region)
@@ -340,12 +420,9 @@ class ScalewayProvider(MissiveProviderBase):
         )
         response.raise_for_status()
         response = response.json()
-        print("--------------- sns credentials ---------------")
-        print("SNS_ACCESS_KEY =", response.get("access_key"))
         self._tmp_sns_access_key = response.get("access_key")
-        print("SNS_SECRET_KEY =", response.get("secret_key"))
         self._tmp_sns_secret_key = response.get("secret_key")
-        print("--------------- sns credentials ---------------")
+        self.log_sns_credentials(response.get("access_key"), response.get("secret_key"))
         return response
     
     def sns_client(self, name: str = "missive-webhook-email"):
@@ -353,8 +430,10 @@ class ScalewayProvider(MissiveProviderBase):
         import boto3
         from botocore.config import Config
         sns_info = self.is_sns_active()
-        self._tmp_sns_access_key = self._get_config_or_env("SNS_ACCESS_KEY")
-        self._tmp_sns_secret_key = self._get_config_or_env("SNS_SECRET_KEY")
+        if not hasattr(self, "_tmp_sns_access_key"):
+            self._tmp_sns_access_key = self._get_config_or_env("SNS_ACCESS_KEY")
+        if not hasattr(self, "_tmp_sns_secret_key") or not self._tmp_sns_secret_key:
+            self._tmp_sns_secret_key = self._get_config_or_env("SNS_SECRET_KEY")
         if not self._tmp_sns_access_key or not self._tmp_sns_secret_key:
             self.create_sns_credentials(name=name)
         return boto3.client(
@@ -375,18 +454,45 @@ class ScalewayProvider(MissiveProviderBase):
     # Subscriptions
     #########################################################
 
-    def create_subscription(self, sns, topic_arn: str, webhook_url: str):
-        """Create a subscription."""
-        return sns.subscribe(
-            TopicArn=topic_arn,
-            Protocol="https",
-            Endpoint=webhook_url,
-        )
+    def get_or_create_subscription(self, sns, topic_arn: str, webhook_url: str):
+        """Create a subscription."""        
+        subscription = self.get_subscription(sns, topic_arn, webhook_url)
+        if not subscription:
+            return sns.subscribe(TopicArn=topic_arn, Protocol="https", Endpoint=webhook_url)
+        return subscription
 
-    def get_subscription_url(self, sns, webhook: dict[str, Any]):
+    def merge_subscriptions_url(self, webhooks: list[dict[str, Any]]):
+        merged_webhooks = []
+        for wbh in webhooks:
+            wbh["type"] = wbh["name"].split("-")[-1]
+            sns = getattr(self, f"sns_client_{wbh.get('type')}")
+            subs = self.get_subscriptions(sns, wbh.get("sns_arn"))
+            for sub in subs:
+                wbh_copy = wbh.copy()
+                wbh_copy["url"] = sub.get("Endpoint")
+                wbh_copy["sub_id"] = sub.get("SubscriptionArn")
+                merged_webhooks.append(wbh_copy)
+        return merged_webhooks
+
+    def get_subscriptions(self, sns, topic_arn: str):
         paginator = sns.get_paginator("list_subscriptions_by_topic")
-        for page in paginator.paginate(TopicArn=webhook.get("sns_arn")):
+        for page in paginator.paginate(TopicArn=topic_arn):
             for sub in page.get("Subscriptions", []):
                 if sub.get("Protocol").startswith("http") and sub.get("Endpoint"):
-                    return sub.get("Endpoint")
+                    yield sub
+        return None
+
+    def get_subscription(self, sns, topic_arn: str, webhook_url: str):
+        """Get a subscription."""
+        subs = self.get_subscriptions(sns, topic_arn)
+        return next((sub for sub in subs if sub.get("Endpoint") == webhook_url), None)
+
+    def delete_subscription(self, sns, webhook, webhook_url: str):
+        """Delete a subscription."""
+        topic_arn = webhook.get("sns_arn")
+        subscription = self.get_subscription(sns, topic_arn, webhook_url)
+        if subscription:
+            if subscription.get("SubscriptionArn") == 'pending subscription':
+                raise ValueError("Pending subscription")
+            return sns.unsubscribe(SubscriptionArn=subscription.get("SubscriptionArn"))
         return None

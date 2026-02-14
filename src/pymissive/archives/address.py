@@ -160,7 +160,7 @@ class Address:
         cls,
         backends_config: Sequence[Dict[str, Any]] | None,
         *,
-        operation: str = "validate",
+        _operation: str = "validate",
         min_confidence: Optional[float] = None,
         **address_kwargs: Any,
     ) -> Tuple["Address", Dict[str, Any]]:
