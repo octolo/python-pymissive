@@ -3,8 +3,8 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "python-missive"
-version = "0.2.0"
+name = "pymissive"
+version = "0.1.0"
 description = "Framework-agnostic messaging library for multi-channel communication."
 authors = [{ name = "Charl", email = "charl@example.com" }]
 readme = "README.md"
