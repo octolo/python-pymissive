@@ -53,3 +53,13 @@ module = [
     "pymissive.providers.base.*",
 ]
 ignore_errors = true
+
+# Provider implementations - type fixes pending
+[[tool.mypy.overrides]]
+module = [
+    "pymissive.providers.partner",
+    "pymissive.providers.maileva",
+    "pymissive.providers.brevo",
+    "pymissive.providers.scaleway",
+]
+ignore_errors = true

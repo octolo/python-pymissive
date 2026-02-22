@@ -1,3 +1,4 @@
+import json
 import requests
 
 from .base import MissiveProviderBase
@@ -93,7 +94,7 @@ class MailevaProvider(MissiveProviderBase):
             'client_id': self._get_config_or_env('CLIENTID'),
             'client_secret': self._get_config_or_env('SECRET'),
         }
-        response = requests.post(url, headers=headers, data=data)
+        response = requests.post(url, headers=headers, data=data, timeout=30)
         response.raise_for_status()
         return response.json()['access_token']
 
@@ -131,13 +132,13 @@ class MailevaProvider(MissiveProviderBase):
                     "event_type": event,
                     "resource_type": rt,
                 }
-                response = requests.post(url, headers=self._get_headers(), json=data)
+                response = requests.post(url, headers=self._get_headers(), json=data, timeout=30)
                 response.raise_for_status()
         return True
 
     def get_webhooks(self) -> list[dict[str, Any]]:
         url = self.get_endpoint('subscriptions')
-        response = requests.get(url, headers=self._get_headers())
+        response = requests.get(url, headers=self._get_headers(), timeout=30)
         response.raise_for_status()
         return response.json().get("subscriptions", [])
 
@@ -146,7 +147,7 @@ class MailevaProvider(MissiveProviderBase):
         for webhook in webhooks:
             url = self.get_endpoint('subscriptions') + "/" + webhook.get("id")
             data = {"callback_url": url,}
-            response = requests.patch(url, headers=self._get_headers(), json=data)
+            response = requests.patch(url, headers=self._get_headers(), json=data, timeout=30)
             response.raise_for_status()
         return True
 
@@ -154,7 +155,7 @@ class MailevaProvider(MissiveProviderBase):
         webhooks = self.get_webhooks_by_resource_type_and_url(resource_type, url)
         for webhook in webhooks:
             url = self.get_endpoint('subscriptions') + "/" + webhook.get("id")
-            response = requests.delete(url, headers=self._get_headers())
+            response = requests.delete(url, headers=self._get_headers(), timeout=30)
             response.raise_for_status()
         return True
 
@@ -219,18 +220,18 @@ class MailevaProvider(MissiveProviderBase):
         data = {
             "event_types": events,
             "callback_url": webhook_data.get("url"),
-            "resource_type": resource_type[0],
+            "resource_type": resource_types[0],
         }
-        response = requests.put(url, headers=self._get_headers(), json=data)
+        response = requests.put(url, headers=self._get_headers(), json=data, timeout=30)
         response.raise_for_status()
         return response.json()
 
     def get_recipient_postal_registered(self, payload: dict[str, Any]) -> str:
         return None
     
-    def handle_webhook_postal_registered(self, payload: dict[str, Any]) -> dict[str, Any]:
-        payload = payload.decode("utf-8")
-        payload = json.loads(payload)
+    def handle_webhook_postal_registered(self, payload: dict[str, Any] | bytes) -> dict[str, Any]:
+        if isinstance(payload, (bytes, bytearray)):
+            payload = json.loads(payload.decode("utf-8"))
         return {
             "recipients": self.get_recipient_postal_registered(payload),
             "event": self.events_association.get(payload.get("event_type"), "unknown"),

@@ -47,6 +47,7 @@ class ScalewayProvider(MissiveProviderBase):
     ]
     events_association = {
         "unknown_type": "unknown",
+        "sent": "delivered",
         "email_queued": "queued",
         "email_delivered": "delivered",
         "email_dropped": "dropped",
@@ -102,13 +103,21 @@ class ScalewayProvider(MissiveProviderBase):
     def get_external_id_email(self, response: dict[str, Any]) -> str:
         """Get external email ID."""
         message_id = None
+        recipients = []
         if "email_headers" in response:
             email_headers = response.get("email_headers")
             keys = ["X-Scw-Tem-Message-Id",]
             message_id = next((header.get("value") for header in email_headers if header.get("key") in keys), None)
-        if not message_id:
-            message_id = response.get("emails")[0].get("message_id")
-        return message_id
+            recipients = [{'email': header.get("value"), 'external_id': header.get("value")} 
+              for header in email_headers if header.get("key") in keys]
+        if not message_id and response.get("emails"):
+            message_id = next((email.get("message_id") for email in response.get("emails") if email.get("message_id")), None)
+            recipients = [{'email': email.get("mail_rcpt"), 'external_id': email.get("id")} 
+              for email in response.get("emails") if email.get("message_id")]
+        if not message_id and not recipients:
+            message_id = response.get("message_id")
+            recipients = [{'email': response.get("mail_rcpt"), 'external_id': response.get('id')}]
+        return message_id, recipients
 
     def get_subscription_id(self, sub_arn: str) -> str:
         return sub_arn.split(":")[-1]
@@ -217,6 +226,18 @@ class ScalewayProvider(MissiveProviderBase):
         response.raise_for_status()
         return response.json()
 
+    def _normalize_event_email(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Normalize the event email."""
+        event = payload.get("type") or payload.get("status")
+        return {
+            "recipient": payload.get("email_to") or payload.get("mail_rcpt"),
+            "external_id": self.get_external_id_email(payload)[0],
+            "event": self.events_association.get(event, "unknown"),
+            "description": payload.get("email_response_message") or payload.get("status_details"),
+            "occurred_at": payload.get("created_at") or payload.get("email_sent_at"),
+            "trace": payload,
+        }
+
     #########################################################
     # Webhooks
     #########################################################
@@ -272,6 +293,22 @@ class ScalewayProvider(MissiveProviderBase):
         response = [wbh for wbh in response if wbh.get("project_id") == self._project_id]
         return self.merge_subscriptions_url(response)
 
+    def status_email(self, **kwargs):
+        """Get the status of an email via Scaleway API."""
+        
+        url = self.ENDPOINTS["email"].format(base_url=self._base_url, region=self._region) + "/"
+        events = []
+        for recipient in kwargs.get("recipients", []):
+            response = requests.get(
+                url + recipient.get("external_id"),
+                headers=self._get_headers(),
+                timeout=30,
+            )
+            event = self._normalize_event_email(response.json())
+            events.append(event)
+        print(events)
+        return events
+
     def get_webhook_email(self, webhook_id: str):
         """Get a webhook."""
         for wbh in self.get_webhooks():
@@ -307,18 +344,6 @@ class ScalewayProvider(MissiveProviderBase):
         subscription_url = payload.get("SubscribeURL")
         requests.get(subscription_url, timeout=30)
         return None
-
-    def _handle_webhook_email(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Handle a webhook email notification (SNS Notification with Message as JSON)."""
-        event = payload.get("type", "unknown")
-        return {
-            "recipient": payload.get("email_to"),
-            "external_id": self.get_external_id_email(payload),
-            "event": self.events_association.get(event, "unknown"),
-            "description": payload.get("email_response_message"),
-            "occurred_at": payload.get("created_at") or payload.get("email_sent_at"),
-            "trace": payload,
-        }
 
     def handle_webhook_email(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Handle a webhook email."""
