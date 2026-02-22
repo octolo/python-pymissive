@@ -19,26 +19,30 @@ MISSIVE_TYPES = {
 }
 
 MISSIVE_SERVICES = {
+    # SEND
     "prepare": "Prepare",
     "update": "Update",
     "cancel": "Cancel",
     "send": "Send",
     "delete": "Delete",
     "status": "Status",
-    "attachments": "Attachments",
+    # ATTACHMENTS
     "add_attachment": "Add Attachment",
     "get_attachments": "Get Attachments",
     "delete_attachment": "Delete Attachment",
-    "proofs_of_delivery": "Proofs of Delivery",
+    # WEBHOOKS
     "set_webhook": "set_Webhook",
     "update_webhook": "Update Webhook",
     "handle_webhook": "Handle Webhook",
     "delete_webhook": "Delete Webhook",
     "get_webhooks": "Get Webhooks",
+    # HELPERS
     "monitoring": "Monitoring",
     "billing_amount": "Billing Amount",
     "estimate_amount": "Estimate Amount",
     "get_external_id": "Get External ID",
+    "get_proofs": "Get Proofs",
+    "download_proof": "Download Proof",
 }
 
 MISSIVE_EVENT_SUCCESS = {
@@ -47,6 +51,7 @@ MISSIVE_EVENT_SUCCESS = {
     "opened": "Opened",
     "click": "Clicked",
     "clicked": "Clicked",
+    "proofs_of_delivery": "Proofs of Delivery",
 }
 
 MISSIVE_EVENT_INFO = {
@@ -67,6 +72,9 @@ MISSIVE_EVENT_INFO = {
     "dispatched": "Dispatched",
     "shipped": "Shipped",
     "in_transit": "In transit",
+    "deposit_proof": "Deposit Proof",
+    "proof_of_content": "Proof of Content",
+    "archived": "Archived",
 }
 
 MISSIVE_EVENT_FAILED = {
@@ -94,6 +102,7 @@ MISSIVE_EVENT_FAILED = {
     "lost": "Lost",
     "damaged": "Damaged",
     "out_for_delivery": "Out for delivery",
+    "error": "Error",
 }
 
 MISSIVE_EVENT = {**MISSIVE_EVENT_SUCCESS, **MISSIVE_EVENT_INFO, **MISSIVE_EVENT_FAILED}
