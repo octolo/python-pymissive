@@ -1,6 +1,7 @@
 from providerkit import ProviderBase
 import base64
 import mimetypes
+from typing import Any
 from .acknowledgement import AcknowledgementMixin
 from .attachments import AttachmentsMixin
 from .branded import BrandedMixin
@@ -18,16 +19,13 @@ defaults_services = {
     },
 }
 
-if config is not None:
+
+for missive_type, type_desc in config.MISSIVE_TYPES.items():
+    fields_name = config.type_to_fields_mapping.get(missive_type, "MISSIVE_FIELDS_BASE")
+    fields = getattr(config, fields_name, config.MISSIVE_FIELDS_BASE)
     
-    for missive_type, type_desc in config.MISSIVE_TYPES.items():
-        fields_name = config.type_to_fields_mapping.get(missive_type, "MISSIVE_FIELDS_BASE")
-        fields = getattr(config, fields_name, config.MISSIVE_FIELDS_BASE)
-        
-        for service, service_desc in config.MISSIVE_SERVICES.items():
-            defaults_services[f"{service}_{missive_type}"] = {
-                "fields": fields,
-            }
+    for service, service_desc in config.MISSIVE_SERVICES.items():
+        defaults_services[f"{service}_{missive_type}"] = {"fields": fields}
 
 
 class MissiveProviderBase(
@@ -59,6 +57,10 @@ class MissiveProviderBase(
     def get_events_association(self) -> dict[str, str]:
         """Return mapping of provider events to missive event."""
         return self.events_association or {}
+
+    def get_normalize_event(self, data: dict[str, Any]) -> str:
+        """Return the normalized event of webhook/email/SMS."""
+        return self.events_association.get(data.get("event"), "unknown")
 
     def get_normalize_webhook_id(self, data: dict) -> str:
         return f"{self.name}-{data['id']}"

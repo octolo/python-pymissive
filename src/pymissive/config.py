@@ -40,7 +40,6 @@ MISSIVE_SERVICES = {
     "monitoring": "Monitoring",
     "billing_amount": "Billing Amount",
     "estimate_amount": "Estimate Amount",
-    "get_external_id": "Get External ID",
     "get_proofs": "Get Proofs",
     "download_proof": "Download Proof",
 }
@@ -146,25 +145,55 @@ MISSIVE_WEBHOOK_FIELDS = {
 }
 
 MISSIVE_FIELDS_BASE = {
-    "message_id": {
-        "label": "Message ID",
-        "description": "Message ID",
-        "format": "str",
-    },
     "webhook_url": {
         "label": "Webhook URL",
         "description": "Webhook URL",
         "format": "str",
+    },
+    "external_id": {
+        "label": "External ID",
+        "description": "External ID",
+        "format": "str",
+    },
+    "recipient": {
+        "label": "Recipient",
+        "description": "Recipient",
+        "format": "str",
+    },
+    "recipients_external_ids": {
+        "label": "Recipients External IDs",
+        "description": "Recipients External IDs",
+        "format": "dict",
     },
     "status": {
         "label": "Status",
         "description": "Status",
         "format": "str",
     },
-    "acknowledgment": {
-        "label": "Acknowledgment",
-        "description": "Acknowledgment",
-        "format": "bool",
+    "cost": {
+        "label": "Cost",
+        "description": "Cost",
+        "format": "float",
+    },
+    "event": {
+        "label": "Event",
+        "description": "Event",
+        "format": "str",
+    },
+    "description": {
+        "label": "Description",
+        "description": "Description",
+        "format": "str",
+    },
+    "occurred_at": {
+        "label": "Occurred At",
+        "description": "Occurred At",
+        "format": "datetime",
+    },
+    "currency": {
+        "label": "Currency",
+        "description": "Currency",
+        "format": "str",
     },
     "error_message": {
         "label": "Error Message",

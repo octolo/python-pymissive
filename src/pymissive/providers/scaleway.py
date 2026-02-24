@@ -23,10 +23,9 @@ class ScalewayProvider(MissiveProviderBase):
         "PROJECT_ID",
         "BASE_URL",
         "WEBHOOK_ID",
-        "DOMAIN_ID",
         "SNS_ACCESS_KEY",
         "SNS_SECRET_KEY",
-        "WEBHOOK_URL",
+        "SUFFIX_SENDER_EMAIL",
     ]
     config_defaults = {
         "BASE_URL": "https://api.scaleway.com",
@@ -45,6 +44,16 @@ class ScalewayProvider(MissiveProviderBase):
         "email_sent", "email_delivered", "email_queued", "email_dropped",
         "email_deferred", "email_spam", "email_mailbox_not_found", "email_blocklisted",
     ]
+    fields_associations = {
+        "external_id": ["MessageId", "message-id"],
+        "email": "email_to",
+        "occurred_at": ["Timestamp",],
+        "event": "Message.type",
+        "description": ["reason", "trace.reason", "event", "trace.event"],
+        "external_id": ["message_id", "_message_id", "message-id"],
+        "email": ["email", "Message.email_to"],
+        "sender_email": ["Message.email_from",],
+    }
     events_association = {
         "unknown_type": "unknown",
         "sent": "delivered",
@@ -100,25 +109,6 @@ class ScalewayProvider(MissiveProviderBase):
         """Build URL from endpoint key."""
         return self.ENDPOINTS[url_key].format(base_url=self._base_url, region=self._region)
 
-    def get_external_id_email(self, response: dict[str, Any]) -> str:
-        """Get external email ID."""
-        message_id = None
-        recipients = []
-        if "email_headers" in response:
-            email_headers = response.get("email_headers")
-            keys = ["X-Scw-Tem-Message-Id",]
-            message_id = next((header.get("value") for header in email_headers if header.get("key") in keys), None)
-            recipients = [{'email': header.get("value"), 'external_id': header.get("value")} 
-              for header in email_headers if header.get("key") in keys]
-        if not message_id and response.get("emails"):
-            message_id = next((email.get("message_id") for email in response.get("emails") if email.get("message_id")), None)
-            recipients = [{'email': email.get("mail_rcpt"), 'external_id': email.get("id")} 
-              for email in response.get("emails") if email.get("message_id")]
-        if not message_id and not recipients:
-            message_id = response.get("message_id")
-            recipients = [{'email': response.get("mail_rcpt"), 'external_id': response.get('id')}]
-        return message_id, recipients
-
     def get_subscription_id(self, sub_arn: str) -> str:
         return sub_arn.split(":")[-1]
 
@@ -143,6 +133,54 @@ class ScalewayProvider(MissiveProviderBase):
         response.raise_for_status()
         return response.json()
 
+    def get_normalize_event(self, data: dict[str, Any]) -> str:
+        """Return the normalized event of webhook/email/SMS."""
+        event = data["Message"]["type"]        
+        return self.events_association.get(event, "unknown")
+
+    def get_normalize_recipients_external_ids(self, response: dict[str, Any]) -> str:
+        """Get external email ID."""
+        return []
+        recipients = []
+        if "Message" in response:
+            message = response["Message"]
+            if "email_headers" in message:
+
+                print("herrreee")
+                email_headers = message.get("email_headers")
+                keys = ["X-Scw-Tem-Message-Id",]
+                recipients = [
+                    {'email': header.get("value"), 'external_id': header.get("value")} 
+                        for header in email_headers if header.get("key") in keys]
+
+            if not recipients and message.get("emails"):
+                recipients = [
+                    {'email': email.get("mail_rcpt"), 'external_id': email.get("id")} 
+                        for email in message.get("emails") if email.get("mail_rcpt")]
+
+        if not recipients:
+            recipients = [{'email': email.get("mail_rcpt"), 'external_id': email.get('id')}
+                for email in response.get("emails")]
+                
+        return recipients
+
+    def get_normalize_external_id(self, response: dict[str, Any]) -> str:
+        """Get external email ID."""
+        message_id = None
+        if "MessageId" in response:
+            message_id = response.get("MessageId")
+        if not message_id and "Message" in response:
+            message = response["Message"]
+            if "email_headers" in message:
+                email_headers = message.get("email_headers")
+                keys = ["X-Scw-Tem-Message-Id",]
+                message_id = next((header.get("value") for header in email_headers if header.get("key") in keys), None)
+            if not message_id and "emails" in message:
+                message_id = next((email.get("message_id") for email in message.get("emails") if email.get("message_id")), None)
+        if not message_id and "emails" in response:
+            message_id = next((email.get("message_id") for email in response.get("emails") if email.get("message_id")), None)
+        return message_id
+
     #########################################################
     # Email sending
     #########################################################
@@ -166,8 +204,10 @@ class ScalewayProvider(MissiveProviderBase):
         return self._email_data
 
     def _add_sender(self, sender):
+        prefix, suffix = sender["email"].split("@")
+        email = f"{prefix}@{self._get_config_or_env('SUFFIX_SENDER_EMAIL', suffix)}"
         self._email_data["from"] = {
-            "email": sender["email"],
+            "email": email,
             "name": sender.get("name") or "",
         }
 
@@ -226,18 +266,6 @@ class ScalewayProvider(MissiveProviderBase):
         response.raise_for_status()
         return response.json()
 
-    def _normalize_event_email(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Normalize the event email."""
-        event = payload.get("type") or payload.get("status")
-        return {
-            "recipient": payload.get("email_to") or payload.get("mail_rcpt"),
-            "external_id": self.get_external_id_email(payload)[0],
-            "event": self.events_association.get(event, "unknown"),
-            "description": payload.get("email_response_message") or payload.get("status_details"),
-            "occurred_at": payload.get("created_at") or payload.get("email_sent_at"),
-            "trace": payload,
-        }
-
     #########################################################
     # Webhooks
     #########################################################
@@ -295,7 +323,6 @@ class ScalewayProvider(MissiveProviderBase):
 
     def status_email(self, **kwargs):
         """Get the status of an email via Scaleway API."""
-        
         url = self.ENDPOINTS["email"].format(base_url=self._base_url, region=self._region) + "/"
         events = []
         for recipient in kwargs.get("recipients", []):
@@ -304,9 +331,7 @@ class ScalewayProvider(MissiveProviderBase):
                 headers=self._get_headers(),
                 timeout=30,
             )
-            event = self._normalize_event_email(response.json())
             events.append(event)
-        print(events)
         return events
 
     def get_webhook_email(self, webhook_id: str):
@@ -354,9 +379,8 @@ class ScalewayProvider(MissiveProviderBase):
         if payload.get("Type") == "Notification":
             message = payload.get("Message")
             if isinstance(message, str):
-                message = json.loads(message)
-            return self._handle_webhook_email(message)
-        return None
+                payload["Message"] = json.loads(message)
+        return payload
 
     #########################################################
     # Topics / Events

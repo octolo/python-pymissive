@@ -20,16 +20,19 @@ class BrevoAPIProvider(MissiveProviderBase):
     documentation_url = "https://developers.brevo.com"
     site_url = "https://www.brevo.com"
     brands = ["WhatsApp"]
+    
     fields_associations = {
         "id": "id",
         "url": "url",
         "type": "type",
         "created_at": "createdAt",
         "updated_at": "updatedAt",
-        "occurred_at": "_date",
-        "recipient": "email",
-        "event": "event",
-        "description": "reason",
+        "occurred_at": ["occurred_at","_date", "date", "trace._date"],
+        "event": ["event", "trace.event"],
+        "description": ["reason", "trace.reason", "event", "trace.event"],
+        "external_id": ["message_id", "_message_id", "message-id"],
+        "email": ["email", "trace.email"],
+        "sender_email": ["_from", "trace._from", "sender_email",],
     }
     events_association = {
         "request": "request",
@@ -78,6 +81,16 @@ class BrevoAPIProvider(MissiveProviderBase):
             self._transactional_email_api = TransactionalEmailsApi(api_client)
         return self._transactional_email_api
 
+    def get_normalize_type(self, data: dict[str, Any]) -> str:
+        """Return the normalized type of webhook/email/SMS."""
+        if data.get("type") == "transactional":
+            return "email"
+        elif data.get("type") == "marketing":
+            return "email_marketing"
+        elif data.get("type") == "sms":
+            return "sms"
+        return "unknown"
+
     #########################################################
     # Webhooks
     #########################################################
@@ -94,24 +107,6 @@ class BrevoAPIProvider(MissiveProviderBase):
         """Return the Brevo webhooks."""
         wbhs = self._get_webhooks_api()
         return wbhs.get_webhooks().webhooks
-
-    #########################################################
-    # Helpers
-    #########################################################
-
-    def get_external_id_email(self, payload: dict[str, Any]) -> str | None:
-        """Extract the external ID from the Brevo webhook."""
-        return payload.get("_message_id"), []
-
-    def get_normalize_type(self, data: dict[str, Any]) -> str:
-        """Return the normalized type of webhook/email/SMS."""
-        if data.get("type") == "transactional":
-            return "email"
-        elif data.get("type") == "marketing":
-            return "email_marketing"
-        elif data.get("type") == "sms":
-            return "sms"
-        return "unknown"
 
     #########################################################
     # Attachments
@@ -141,31 +136,7 @@ class BrevoAPIProvider(MissiveProviderBase):
         to_dict = getattr(event, "to_dict", None)
         if callable(to_dict):
             return to_dict()
-        msg_id = getattr(event, "message_id", None)
-        return {
-            "email": getattr(event, "email", None),
-            "_date": getattr(event, "_date", None),
-            "message_id": msg_id,
-            "messageId": msg_id,
-            "event": getattr(event, "event", None),
-            "reason": getattr(event, "reason", None),
-        }
-
-    def _normalize_event_email(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Normalize the event email."""
-        message_id = (
-            payload.get("message-id")
-            or payload.get("messageId")
-            or payload.get("message_id")
-        )
-        return {
-            "recipient": payload.get("email"),
-            "external_id": str(message_id or ""),
-            "event": self.events_association.get(payload.get("event"), "unknown"),
-            "description": payload.get("reason") or payload.get("event"),
-            "occurred_at": payload.get("date") or payload.get("_date"),
-            "trace": payload,
-        }
+        return {k: v for k, v in event.__dict__.items() if k != "to_dict"}
 
     #########################################################
     # Email sending
@@ -253,19 +224,17 @@ class BrevoAPIProvider(MissiveProviderBase):
             message_id=kwargs["external_id"]
         )
         events = getattr(response, "events", []) or []
-        return [
-            self._normalize_event_email(self._event_to_payload(event))
-            for event in events
-        ]
+        return [self._event_to_payload(event) for event in events]
 
     def set_webhook_email(self, webhook_data: dict[str, Any]) -> bool:
         """Configure a webhook to receive Brevo events."""
         from brevo_python import CreateWebhook
         wbhs = self._get_webhooks_api()
+        events = [event for event in self.events_association.keys() if event != "requests"]
         create_webhook = CreateWebhook(
             url=webhook_data.get("url"),
             description="Missive webhook email",
-            events=list(self.events_association.keys()),
+            events=events,
             channel="email",
             type="transactional",
         )
@@ -299,8 +268,8 @@ class BrevoAPIProvider(MissiveProviderBase):
     def handle_webhook_email(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle a Brevo webhook and normalize event type."""
         payload = payload.decode("utf-8")
-        payload = json.loads(payload)
-        return self._normalize_event_email(payload)
+        return json.loads(payload)
+        
 
     #########################################################
     # SMS
@@ -371,17 +340,8 @@ class BrevoAPIProvider(MissiveProviderBase):
     def handle_webhook_sms(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle a Brevo webhook and normalize event type."""
         payload = payload.decode("utf-8")
-        payload = json.loads(payload)
-        event = payload.get("event")
-        message_id = payload.get("message-id") or payload.get("messageId")
-        return {
-            "recipient": payload.get("phone"),
-            "external_id": str(message_id),
-            "event": self.events_association.get(event, "unknown"),
-            "description": payload.get("reason") or event,
-            "occurred_at": payload.get("date"),
-            "trace": payload,
-        }
+        return json.loads(payload)
+
 
     #########################################################
     # Whatsapp
