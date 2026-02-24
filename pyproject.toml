@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymissive"
-version = "0.1.0"
+version = "0.1.1"
 description = "Framework-agnostic messaging library for multi-channel communication."
 authors = [{ name = "Charl", email = "charl@example.com" }]
 readme = "README.md"
