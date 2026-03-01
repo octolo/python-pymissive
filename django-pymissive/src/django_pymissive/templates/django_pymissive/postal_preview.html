@@ -1,0 +1,44 @@
+{% extends "django_pymissive/base_preview.html" %}
+{% load static i18n %}
+
+{% block preview_stylesheet %}
+<link rel="stylesheet" href="{% static 'django_pymissive/css/postal_preview.css' %}">
+{% endblock %}
+
+{% block preview_content %}
+<div class="postal-preview">
+    <div class="postal-header">
+        <div class="sender-address">
+            <h3>{% trans 'Sender' %}</h3>
+            <p>{{ missive.sender_name }}</p>
+            {% if missive.sender_address %}
+                {% for key, value in missive.sender_address.items %}
+                    {% if value %}<p>{{ value }}</p>{% endif %}
+                {% endfor %}
+            {% endif %}
+        </div>
+        <div class="recipient-address">
+            <h3>{% trans 'Recipient' %}</h3>
+            <p>{{ missive.recipient_name }}</p>
+            {% if missive.recipient_address %}
+                {% for key, value in missive.recipient_address.items %}
+                    {% if value %}<p>{{ value }}</p>{% endif %}
+                {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+    <div class="postal-body">
+        {% if missive.body %}
+            <div class="postal-content">
+                {{ missive.body|safe }}
+            </div>
+        {% elif missive.body_text %}
+            <div class="postal-content">
+                <pre>{{ missive.body_text }}</pre>
+            </div>
+        {% else %}
+            <p class="empty">{% trans 'No content' %}</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

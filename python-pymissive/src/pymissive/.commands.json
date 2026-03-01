@@ -1,0 +1,5 @@
+{
+    "packages": ["clicommands", "providerkit"],
+    "directories": ["commands"],
+    "commands": []
+}

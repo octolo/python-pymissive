@@ -1,0 +1,47 @@
+.postal-preview {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 20px;
+    margin: 20px 0;
+    background: #f9f9f9;
+}
+
+.postal-header {
+    display: flex;
+    gap: 40px;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #ddd;
+}
+
+.sender-address, .recipient-address {
+    flex: 1;
+}
+
+.sender-address h3, .recipient-address h3 {
+    margin-top: 0;
+    font-size: 14px;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: #666;
+}
+
+.postal-body {
+    margin-top: 20px;
+}
+
+.postal-content {
+    background: #fff;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.postal-content pre {
+    background: #fff;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
