@@ -96,3 +96,18 @@ MISSIVE_SCALEWAY_SNS_ACCESS_KEY = "PfJEDJrCiff1FKzClXnF"
 MISSIVE_SCALEWAY_SNS_SECRET_KEY = (
     "fckt8EDSXXG5VOrQpWKDlwCtTuHleANDdE7kYIfWwXHcl70UEbWjmC5Q6QQ7q2l1"
 )
+
+INSTALLED_APPS += [
+    "djrichtextfield",
+]
+PYMISSIVE_RICHTEXT_FIELD = "djrichtextfield.models.RichTextField"
+DJRICHTEXTFIELD_CONFIG = {
+    'js': [f'//cdn.tiny.cloud/1/{os.getenv("TINYMCE_API_KEY")}/tinymce/5/tinymce.min.js'],
+    'init_template': 'djrichtextfield/init/tinymce.js',
+    'settings': {
+        'menubar': False,
+        'plugins': 'link image',
+        'toolbar': 'bold italic | link image | removeformat',
+        'width': 700
+    }
+}

@@ -118,7 +118,7 @@ class MissiveAdmin(AdminBoostModel):
             if obj.count_target > 1:
                 text += f" (+{obj.count_target - 1})"
             return self.format_with_help_text(text, recipient.target)
-        return recipient
+        return self.format_label(_("No recipient"), label_type="warning")
 
     recipient_display.short_description = _("Recipient")
 
@@ -200,7 +200,7 @@ class MissiveAdmin(AdminBoostModel):
         if obj.campaign is None:
             return "-"
         return self.format_with_help_text(
-            self.format_label(obj.campaign.name, size="small"),
+            self.format_label(obj.campaign.subject, size="small"),
             obj.last_campaign_send_date)
     campaign_display.short_description = _("Campaign / Last Send Date")
 
@@ -242,7 +242,8 @@ class MissiveAdmin(AdminBoostModel):
 
     def provider_has_service(self, obj, service):
         service_name = f"{service}_{obj.missive_type}".lower()
-        return hasattr(obj.provider._provider, service_name)
+        if obj.provider:
+            return hasattr(obj.provider._provider, service_name)
 
     def has_prepare_missive_permission(self, request, obj=None):
         return obj and obj.pk and self.provider_has_service(obj, "prepare")

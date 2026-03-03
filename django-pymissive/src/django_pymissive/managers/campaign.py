@@ -49,6 +49,8 @@ class MissiveCampaignManager(models.Manager):
                     to_missive__to_missiverecipient__status=MissiveStatus.PROCESSING
                 ),
             ),
+            count_related_object=models.Count("to_campaignrelatedobject", distinct=True),
+            count_attachment=models.Count("to_campaigndocument", distinct=True),
         )
 
         def pct_expr(cnt):

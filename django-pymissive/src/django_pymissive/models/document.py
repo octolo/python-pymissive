@@ -1,22 +1,39 @@
 """MissiveAttachment model."""
 
+import os
+import uuid
+from datetime import date
+
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
+
+from .choices import MissiveDocumentType
 from ..managers.document import (
     MissiveDocumentManager,
     MissiveAttachmentManager,
     MissiveVirtualAttachmentManager,
+    CampaignDocumentManager,
+    CampaignAttachmentManager,
+    CampaignVirtualAttachmentManager,
 )
-from .choices import MissiveDocumentType
-import os
-import uuid
-from django.urls import reverse
 
 
-class MissiveDocument(models.Model):
+def _document_upload_to(instance, filename):
+    """Return upload path based on document class: missivedocument/ or campaigndocument/."""
+    today = date.today()
+    prefix = (
+        "campaigndocument"
+        if "Campaign" in instance.__class__.__name__
+        else "missivedocument"
+    )
+    return f"missive/{prefix}/{today:%Y/%m/%d}/{filename}"
+
+
+class BaseDocument(models.Model):
     """File attachment for missives or any other model."""
 
     id = models.UUIDField(
@@ -25,15 +42,7 @@ class MissiveDocument(models.Model):
         editable=False,
         verbose_name=_("ID"),
     )
-    missive = models.ForeignKey(
-        "django_pymissive.Missive",
-        on_delete=models.CASCADE,
-        related_name="to_missivedocument",
-        verbose_name=_("Missive"),
-        null=True,
-        blank=True,
-        help_text=_("Missive to which this file is attached"),
-    )
+
     document_type = models.CharField(
         max_length=50,
         choices=MissiveDocumentType.choices,
@@ -66,7 +75,7 @@ class MissiveDocument(models.Model):
     )
 
     document = models.FileField(
-        upload_to="missive/attachments/%Y/%m/%d/",
+        upload_to=_document_upload_to,
         blank=True,
         null=True,
         verbose_name=_("Local File"),
@@ -94,18 +103,19 @@ class MissiveDocument(models.Model):
 
     document_object = GenericForeignKey("document_content_type", "document_object_id")
 
-    objects = MissiveDocumentManager()
-
     class Meta:
+        abstract = True
         verbose_name = _("Document")
         verbose_name_plural = _("Documents")
-        ordering = [
-            "order",
-        ]
+        ordering = ["order",]
 
     @property
     def can_be_modified(self):
-        return self.missive.can_be_modified
+        if hasattr(self, "missive"):
+            return self.missive.can_be_modified
+        if hasattr(self, "campaign"):
+            return self.campaign.can_be_modified
+        return False
 
     def can_access_document(self):
         """Checks if the document can be accessed."""
@@ -142,7 +152,12 @@ class MissiveDocument(models.Model):
         """Gets the serialized document."""
         document = self.get_document()
         name = getattr(document, "name") or "unnamed_document"
-        url = reverse("django_pymissive:document_download", args=[self.id])
+        url_name = (
+            "django_pymissive:missive_document_download"
+            if isinstance(self, MissiveDocument)
+            else "django_pymissive:campaign_document_download"
+        )
+        url = reverse(url_name, args=[self.id])
         data = {
             "name": os.path.basename(name),
             "url": url,
@@ -162,6 +177,24 @@ class MissiveDocument(models.Model):
                     "You must provide either a local document or a method to access the document."
                 )
             )
+
+
+class MissiveDocument(BaseDocument):
+    """Document for missives."""
+    missive = models.ForeignKey(
+        "django_pymissive.Missive",
+        on_delete=models.CASCADE,
+        related_name="to_missivedocument",
+        verbose_name=_("Missive"),
+        null=True,
+        blank=True,
+        help_text=_("Missive to which this file is attached"),
+    )
+
+    class Meta:
+        verbose_name = _("Missive Document")
+        verbose_name_plural = _("Missive Documents")
+        ordering = ["order",]
 
 
 class MissiveAttachment(MissiveDocument):
@@ -184,3 +217,43 @@ class MissiveVirtualAttachment(MissiveDocument):
         proxy = True
         verbose_name = _("Virtual Attachment")
         verbose_name_plural = _("Virtual Attachments")
+
+
+class CampaignDocument(BaseDocument):
+    """Document for campaigns."""
+    campaign = models.ForeignKey(
+        "django_pymissive.MissiveCampaign",
+        on_delete=models.CASCADE,
+        related_name="to_campaigndocument",
+        verbose_name=_("Campaign"),
+        null=True,
+        blank=True,
+        help_text=_("Campaign to which this file is attached"),
+    )
+
+    class Meta:
+        verbose_name = _("Campaign Document")
+        verbose_name_plural = _("Campaign Documents")
+        ordering = ["order",]
+
+
+class CampaignAttachment(CampaignDocument):
+    """Attachment for campaigns."""
+
+    objects = CampaignAttachmentManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Campaign Attachment")
+        verbose_name_plural = _("Campaign Attachments")
+
+
+class CampaignVirtualAttachment(CampaignDocument):
+    """Virtual attachment for campaigns."""
+
+    objects = CampaignVirtualAttachmentManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Campaign Virtual Attachment")
+        verbose_name_plural = _("Campaign Virtual Attachments")

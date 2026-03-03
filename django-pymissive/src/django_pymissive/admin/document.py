@@ -9,6 +9,9 @@ from ..models.document import (
     MissiveAttachment,
     MissiveDocument,
     MissiveVirtualAttachment,
+    CampaignAttachment,
+    CampaignVirtualAttachment,
+    CampaignDocument,
 )
 
 
@@ -75,6 +78,78 @@ class MissiveDocumentAdmin(AdminBoostModel):
         ),
     ]
 
+    def change_fieldsets(self):
+        """Configure fieldsets for change view."""
+        self.add_to_fieldset(
+            _("Document Object"),
+            [
+                "document_content_type",
+                "document_object_id",
+                "document_object_arguments",
+                "document_object",
+            ],
+        )
+
+
+class CampaignAttachmentInline(admin.TabularInline):
+    """Inline for campaign documents."""
+
+    model = CampaignAttachment
+    extra = 0
+    fields = [
+        "order",
+        "document",
+        "linked",
+    ]
+
+
+class CampaignVirtualAttachmentInline(admin.TabularInline):
+    """Inline for campaign virtual documents."""
+
+    model = CampaignVirtualAttachment
+    extra = 0
+    fields = [
+        "order",
+        "document_content_type",
+        "document_object_id",
+        "document_object_arguments",
+        "linked",
+    ]
+
+
+@admin.register(CampaignDocument)
+class CampaignDocumentAdmin(AdminBoostModel):
+    """Admin for campaign document model."""
+
+    list_display = [
+        "id",
+        "document_type",
+        "campaign",
+        "order",
+    ]
+    search_fields = [
+        "campaign__subject",
+    ]
+    readonly_fields = [
+        "document_object",
+    ]
+    raw_id_fields = ["campaign", "document_content_type"]
+
+    fieldsets = [
+        (
+            None,
+            {
+                "fields": (
+                    "campaign",
+                    "order",
+                    "document",
+                    "document_metadata",
+                    "linked",
+                )
+            },
+        ),
+    ]
+    
     def change_fieldsets(self):
         """Configure fieldsets for change view."""
         self.add_to_fieldset(

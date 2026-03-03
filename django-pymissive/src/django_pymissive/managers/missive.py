@@ -47,13 +47,7 @@ class MissiveManager(models.Manager):
             count_event=models.Count("to_missiveevent", distinct=True),
             count_related_object=models.Count("to_missiverelatedobject", distinct=True),
             count_recipient=models.Count("to_missiverecipient", distinct=True),
-            count_attachment=models.Count(
-                "to_missivedocument",
-                distinct=True,
-                filter=Q(
-                    to_missivedocument__document_type=MissiveDocumentType.ATTACHMENT,
-                ),
-            ),
+            count_attachment=models.Count("to_missivedocument", distinct=True),
             count_target=models.Count(
                 "to_missiverecipient",
                 distinct=True,

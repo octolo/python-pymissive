@@ -8,8 +8,14 @@ from .document import (
     MissiveDocumentManager,
     MissiveAttachmentManager,
     MissiveVirtualAttachmentManager,
+    CampaignDocumentManager,
+    CampaignAttachmentManager,
+    CampaignVirtualAttachmentManager,
 )
-from .related_object import MissiveRelatedObjectManager
+from .related_object import (
+    MissiveRelatedObjectManager,
+    CampaignRelatedObjectManager,
+)
 from .recipient import (
     MissiveRecipientManager,
     MissiveRecipientEmailManager,
@@ -27,9 +33,13 @@ __all__ = [
     "MissiveAttachmentManager",
     "MissiveVirtualAttachmentManager",
     "MissiveRelatedObjectManager",
+    "CampaignRelatedObjectManager",
     "MissiveRecipientManager",
     "MissiveRecipientEmailManager",
     "MissiveRecipientPhoneManager",
     "MissiveRecipientAddressManager",
     "MissiveRecipientNotificationManager",
+    "CampaignDocumentManager",
+    "CampaignAttachmentManager",
+    "CampaignVirtualAttachmentManager",
 ]

@@ -1,13 +1,18 @@
 """Admin for MissiveCampaign model."""
 
+from urllib.parse import unquote
+
 from django.contrib import admin
+from django.urls import reverse
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django_boosted import AdminBoostModel
-
-from urllib.parse import unquote
-from ..models.campaign import MissiveCampaign, MissiveScheduledCampaign
 from django_boosted.decorators import admin_boost_view
-from django.urls import reverse 
+
+from ..models.campaign import MissiveCampaign, MissiveScheduledCampaign
+from .document import CampaignAttachmentInline, CampaignVirtualAttachmentInline
+from .related_object import CampaignRelatedObjectInline 
 
 
 @admin.register(MissiveScheduledCampaign)
@@ -48,28 +53,109 @@ class MissiveCampaignAdmin(AdminBoostModel):
     """Admin for missive campaign model."""
 
     list_display = [
-        "name",
+        "subject_display",
         "stats_display",
         "last_send_date_display",
         "last_ended_at_display",
     ]
-    search_fields = ["name", "description"]
+    search_fields = ["subject"]
     ordering = ["-id"]
-    inlines = [MissiveScheduledCampaignInline]
+    readonly_fields = [
+        "buttons_show_and_preview_email",
+        "buttons_show_and_preview_sms",
+        "buttons_show_and_preview_postal",
+    ]
+    inlines = [MissiveScheduledCampaignInline, CampaignAttachmentInline, CampaignVirtualAttachmentInline, CampaignRelatedObjectInline]
     changeform_actions = {
         "start_campaign": _("Start Campaign"),
     }
 
-    def stats_display(self, obj):
-        """Display missive/recipient counts and status percentages."""
-        parts = [
+    fieldsets = [
+        (
+            None,
+            {
+                "fields": (
+                    "subject",
+                    "sender_name",
+                )
+            },
+        ),
+    ]
+
+    def change_fieldsets(self):
+        """Configure fieldsets for change view."""
+        self.add_to_fieldset(
+            _("Email"),
+            ["sender_email", "body_text", "body", "buttons_show_and_preview_email"],
+        )
+        self.add_to_fieldset(
+            _("SMS"),
+            ["body_sms", "buttons_show_and_preview_sms"],
+        )
+        self.add_to_fieldset(
+            _("Postal"),
+            ["sender_address", "body_postal", "buttons_show_and_preview_postal"],
+        )
+
+    def _preview_buttons(self, obj, preview_type):
+        """Show and Preview buttons for a given type (email, sms, postal)."""
+        base_url = reverse("django_pymissive:campaign_preview", args=[obj.pk])
+        preview_url = reverse("django_pymissive:campaign_preview_form")
+        buttons_html = []
+        if obj.pk:
+            buttons_html.append(
+                format_html(
+                    '<a class="button" href="{}?type={}" target="_blank">{}</a>',
+                    base_url,
+                    preview_type,
+                    _("Show"),
+                )
+            )
+        buttons_html.append(
+            format_html(
+                '<button type="submit" form="missivecampaign_form" formaction="{}?type={}" formmethod="post" formtarget="_blank" class="button" name="_preview" value="{}" style="margin-left: 10px;">{}</button>',
+                preview_url,
+                preview_type,
+                preview_type,
+                _("Preview"),
+            )
+        )
+        return mark_safe(" ".join(str(btn) for btn in buttons_html))  # nosec B703 B308
+
+    def buttons_show_and_preview_email(self, obj):
+        return self._preview_buttons(obj, "email")
+
+    buttons_show_and_preview_email.short_description = _("Email: Show and Preview")
+
+    def buttons_show_and_preview_sms(self, obj):
+        return self._preview_buttons(obj, "sms")
+
+    buttons_show_and_preview_sms.short_description = _("SMS: Show and Preview")
+
+    def buttons_show_and_preview_postal(self, obj):
+        return self._preview_buttons(obj, "postal")
+
+    buttons_show_and_preview_postal.short_description = _("Postal: Show and Preview")
+
+    def subject_display(self, obj):
+        missive_recipients = [
             f"{obj.count_missive} missive(s)",
             f"{obj.count_recipient} recipient(s)",
-            f"{obj.pct_failed:.0f}% failed",
-            f"{obj.pct_success:.0f}% success",
-            f"{obj.pct_processing:.0f}% processing",
         ]
-        return " | ".join(parts)
+        return self.format_with_help_text(obj.subject, " | ".join(missive_recipients))
+
+    def stats_display(self, obj):
+        """Display missive/recipient counts and status percentages."""
+        related_attachment = [
+            f"{obj.count_related_object} related(s)",
+            f"{obj.count_attachment} attachment(s)",
+        ]
+        rates = [
+            self.format_label(f"{obj.pct_failed:.0f}% failed", size="small", label_type="danger"),
+            self.format_label(f"{obj.pct_success:.0f}% success", size="small", label_type="success"),
+            self.format_label(f"{obj.pct_processing:.0f}% processing", size="small", label_type="warning"),
+        ]
+        return self.format_with_help_text(mark_safe(" ".join(rates)), " | ".join(related_attachment))
 
     stats_display.short_description = _("Stats")
 
@@ -94,5 +180,11 @@ class MissiveCampaignAdmin(AdminBoostModel):
     @admin_boost_view("redirect", "Show missives")
     def handle_show_missives(self, request, obj):
         url = reverse("admin:django_pymissive_missive_changelist")
+        url += f"?campaign={obj.pk}"
+        return url
+
+    @admin_boost_view("redirect", "Send missive")
+    def handle_send_missive(self, request, obj):
+        url = reverse("admin:django_pymissive_missive_add")
         url += f"?campaign={obj.pk}"
         return url

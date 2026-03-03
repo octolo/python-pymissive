@@ -14,6 +14,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("geoaddress/", include("django_geoaddress.urls")),
     path("missive/", include("django_pymissive.urls")),
+    path('djrichtextfield/', include('djrichtextfield.urls'))
 ]
 
 _version = f"(Django {django.get_version()}, pymissive {pymissive.__version__}/{django_pymissive.__version__})"

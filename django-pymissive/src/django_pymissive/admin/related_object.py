@@ -3,11 +3,26 @@
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 from django_boosted import AdminBoostModel
+from django.utils.safestring import mark_safe
+from django.urls import reverse
 
-from ..models.related_object import MissiveRelatedObject
+from ..models.related_object import MissiveRelatedObject, CampaignRelatedObject
+
+class BaseRelatedObjectAdmin:
+    @admin.display(description=_("Object URL Link"))
+    def object_url_link_display(self, obj):
+        """Return a link to the related object in the admin site."""
+        if not obj or not obj.content_type_id or not obj.object_id:
+            return "-"
+        url = reverse(
+            f"admin:{obj.content_type.app_label}_{obj.content_type.model}_change",
+            args=[obj.object_id],
+        )
+        label = obj.object_str or f"{obj.content_type} #{obj.object_id}"
+        return mark_safe(f'<a href="{url}">{label}</a>')
 
 
-class MissiveRelatedObjectInline(admin.TabularInline):
+class MissiveRelatedObjectInline(admin.TabularInline, BaseRelatedObjectAdmin):
     """Inline for missive related objects."""
 
     model = MissiveRelatedObject
@@ -18,19 +33,16 @@ class MissiveRelatedObjectInline(admin.TabularInline):
         "object_str",
     ]
     readonly_fields = ["object_str"]
-    raw_id_fields = ["content_type"]
 
 
 @admin.register(MissiveRelatedObject)
-class MissiveRelatedObjectAdmin(AdminBoostModel):
+class MissiveRelatedObjectAdmin(AdminBoostModel, BaseRelatedObjectAdmin):
     """Admin for missive related object model."""
 
     list_display = [
-        "id",
         "missive",
         "content_type",
-        "object_id",
-        "content_object_display",
+        "object_url_link_display",
         "created_at",
     ]
     list_filter = [
@@ -45,25 +57,65 @@ class MissiveRelatedObjectAdmin(AdminBoostModel):
         "missive__recipients__address",
     ]
     readonly_fields = [
-        "object_str",
+        "object_url_link_display",
         "created_at",
     ]
-    raw_id_fields = ["missive", "content_type"]
-
-    @admin.display(description=_("Related Object"))
-    def content_object_display(self, obj):
-        """Display the related object or its saved string representation."""
-        if obj.content_object:
-            return str(obj.content_object)
-        elif obj.object_str:
-            return f"{obj.object_str} (deleted)"
-        return f"{obj.content_type} #{obj.object_id}"
+    raw_id_fields = ["missive",]
 
     def change_fieldsets(self):
         """Configure fieldsets for change view."""
         self.add_to_fieldset(
             None,
-            ["missive", "content_type", "object_id", "content_object", "object_str"],
+            ["missive", "content_type", "object_id", "object_url_link_display"],
+        )
+        self.add_to_fieldset(
+            _("Timestamps"),
+            ["created_at"],
+        )
+
+
+class CampaignRelatedObjectInline(admin.TabularInline, BaseRelatedObjectAdmin):
+    """Inline for campaign related objects."""
+
+    model = CampaignRelatedObject
+    extra = 0
+    fields = [
+        "content_type",
+        "object_id",
+        "object_url_link_display",
+    ]
+    readonly_fields = ["object_url_link_display",]
+
+
+
+@admin.register(CampaignRelatedObject)
+class CampaignRelatedObjectAdmin(AdminBoostModel, BaseRelatedObjectAdmin):
+    """Admin for campaign related object model."""
+
+    list_display = [
+        "campaign",
+        "content_type",
+        "object_url_link_display",
+        "created_at",
+    ]
+    list_filter = [
+        "content_type",
+        "created_at",
+    ]
+    search_fields = [
+        "campaign__name",
+    ]
+    readonly_fields = [
+        "object_url_link_display",
+        "created_at",
+    ]
+    raw_id_fields = ["campaign",]
+
+    def change_fieldsets(self):
+        """Configure fieldsets for change view."""
+        self.add_to_fieldset(
+            None,
+            ["campaign", "content_type", "object_id", "object_url_link_display"],
         )
         self.add_to_fieldset(
             _("Timestamps"),

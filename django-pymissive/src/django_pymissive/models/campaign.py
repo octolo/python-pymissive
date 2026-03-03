@@ -1,12 +1,21 @@
 """Missive campaign models."""
 
-from django.db import models
-from django.utils.translation import gettext_lazy as _
-from django.utils import timezone
-
-from ..models.choices import MissiveStatus
-from ..managers.campaign import MissiveCampaignManager
 import uuid
+
+from django.conf import settings
+from django.db import models
+from django.template import Context, Template
+from django.utils import timezone
+from django.utils.module_loading import import_string
+from django.utils.translation import gettext_lazy as _
+
+from ..managers.campaign import MissiveCampaignManager
+from ..models.choices import MissiveStatus
+from django_geoaddress.fields import GeoaddressField
+
+BODY_FIELD = import_string(
+    getattr(settings, "PYMISSIVE_RICHTEXT_FIELD", "django.db.models.TextField")
+)
 
 class MissiveCampaign(models.Model):
     """Campaign grouping missives for batch sending."""
@@ -16,15 +25,54 @@ class MissiveCampaign(models.Model):
         editable=False,
         verbose_name=_("ID"),
     )
-    name = models.CharField(
+    subject = models.CharField(
         max_length=255,
-        verbose_name=_("Name"),
-        help_text=_("Campaign name"),
+        verbose_name=_("Subject"),
+        help_text=_("Campaign subject"),
     )
-    description = models.TextField(
+    sender_name = models.CharField(
+        max_length=255,
+        verbose_name=_("Sender name"),
+        help_text=_("Campaign sender name"),
+    )
+
+    # Email
+    sender_email = models.EmailField(
+        verbose_name=_("Sender email"),
+        help_text=_("Campaign sender email"),
         blank=True,
-        verbose_name=_("Description"),
-        help_text=_("Campaign description"),
+        null=True,
+    )
+
+    body = BODY_FIELD(
+        blank=True,
+        verbose_name=_("Body"),
+        help_text=_("Campaign body"),
+    )
+    body_text = models.TextField(
+        blank=True,
+        verbose_name=_("Body text"),
+        help_text=_("Campaign body text"),
+    )
+
+    # SMS
+    body_sms = models.TextField(
+        blank=True,
+        verbose_name=_("Body SMS"),
+        help_text=_("Campaign body SMS"),
+    )
+
+    # Postal
+    sender_address = GeoaddressField(
+        verbose_name=_("Sender address"),
+        help_text=_("Campaign sender address"),
+        blank=True,
+        null=True,
+    )
+    body_postal = BODY_FIELD(
+        blank=True,
+        verbose_name=_("Body Postal"),
+        help_text=_("Campaign body Postal"),
     )
 
     objects = MissiveCampaignManager()
@@ -35,7 +83,32 @@ class MissiveCampaign(models.Model):
         ordering = []
 
     def __str__(self):
-        return self.name
+        return self.subject
+
+    def campaign_context(self):
+        """Context for template rendering."""
+        return {}
+
+    def body_compiled(self):
+        """Render body (email HTML) with campaign context."""
+        if not self.body:
+            return ""
+        from django.template import Context, Template
+        return Template(str(self.body)).render(Context(self.campaign_context()))
+
+    def body_text_compiled(self):
+        """Render body_text (email plain text) with campaign context."""
+        if not self.body_etxt:
+            return ""
+        from django.template import Context, Template
+        return Template(str(self.body_etxt)).render(Context(self.campaign_context()))
+
+    def body_postal_compiled(self):
+        """Render body_postal with campaign context."""
+        if not self.body_postal:
+            return ""
+        from django.template import Context, Template
+        return Template(str(self.body_postal)).render(Context(self.campaign_context()))
 
     def start_campaign(self):
         """Start the campaign."""

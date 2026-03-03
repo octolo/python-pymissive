@@ -111,6 +111,8 @@ class Missive(models.Model):
         max_length=500,
         verbose_name=_("Subject"),
         help_text=_("Subject line (for email, SMS, etc.)"),
+        blank=True,
+        null=True,
     )
     body = models.TextField(
         blank=True,
@@ -206,7 +208,8 @@ class Missive(models.Model):
 
     def has_service(self, service):
         service_name = f"{service}_{self.missive_type}".lower()
-        return hasattr(self.provider._provider, service_name)
+        if self.provider:
+            return hasattr(self.provider._provider, service_name)
 
     @property
     def can_be_modified(self):
@@ -307,11 +310,13 @@ class Missive(models.Model):
     def body_compiled(self):
         """Compile the body of the missive."""
         context = self.missive_context()
+        tpl = self.body or self.campain.get_body("body", self.missive_type)
         return Template(self.body).render(Context(context))
 
     def body_text_compiled(self):
         """Compile the body text of the missive."""
         context = self.missive_context()
+        tpl = self.body_text or self.campaign.get_body("body_text", self.missive_type)
         return Template(self.body_text).render(Context(context))
 
     #########################################################
@@ -480,24 +485,36 @@ class Missive(models.Model):
         if hasattr(self, clean_by_support):
             getattr(self, clean_by_support)()
 
+    def clean_subject(self):
+        if not self.subject and not self.campaign:
+            raise ValidationError({
+                "subject": _("Subject or Campaign is required"),
+            })
+
     def clean_support_email(self):
         """Clean the missive for email support."""
-        if not self.body and not self.body_text:
+        has_body_missive = (self.body or self.body_text)
+        has_body_campaign = (self.campaign and (self.campaign.body or self.campaign.body_text))
+        if not has_body_missive and not has_body_campaign:
             raise ValidationError({
-                "body": _("Body or body text is required"),
-                "body_text": _("Body or body text is required"),
+                "body": _("Body or body text is required (in missive or campaign)"),
+                "body_text": _("Body or body text is required (in missive or campaign)"),
             })
 
     def clean_support_phone(self):
         """Clean the missive for SMS support."""
-        if not self.body_text:
+        has_body_missive = self.body_text
+        has_body_campaign = (self.campaign and self.campaign.body_sms)
+        if not has_body_missive and not has_body_campaign:
             raise ValidationError({
-                "body_text": _("Body text is required"),
+                "body_text": _("Body text is required (in missive or campaign)"),
             })
 
     def clean_support_postal(self):
         """Clean the missive for phone support."""
-        if not self.body and not self.to_missivedocument.all().exists():
+        has_body_missive = (self.body or self.to_missivedocument.all().exists())
+        has_body_campaign = (self.campaign and self.campaign.to_campaigndocument.exists())
+        if not has_body_missive and not has_body_campaign:
             raise ValidationError({
-                "body": _("Body or attachments are required"),
+                "body": _("Body or attachments are required (in missive or campaign)"),
             })

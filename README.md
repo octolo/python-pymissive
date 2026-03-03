@@ -6,19 +6,19 @@ Monorepo contenant **python-missive** (bibliothèque Python pour l'envoi multi-c
 
 ### python-missive — `python-missive/`
 
-Bibliothèque Python légère et framework-agnostic pour l'envoi de missives multi-canaux : emails, SMS, notifications push, courrier postal, etc. Basée sur ProviderKit.
+Bibliothèque Python légère et indépendante du framework pour l'envoi de missives multi-canaux : emails, SMS, notifications push, courrier postal, etc. Basée sur ProviderKit.
 
-- **15+ providers** : SendGrid, Mailgun, Twilio, La Poste, Telegram, FCM, APN, Slack, Teams, etc.
+- **15+ fournisseurs** : SendGrid, Mailgun, Twilio, La Poste, Telegram, FCM, APN, Slack, Teams, etc.
 - **Architecture modulaire** : utilisable avec ou sans framework
-- **Multi-canaux** : email, SMS, postal, messaging, push
+- **Multi-canaux** : email, SMS, postal, messagerie, push
 
-📁 Détails : [python-missive/README.md](python-missive/README.md) | Docs : [python-missive/docs/](python-missive/docs/)
+📁 Détails : [python-missive/README.md](python-missive/README.md) | Documentation : [python-missive/docs/](python-missive/docs/)
 
 ### django-missive — `django-missive/`
 
-Intégration Django complète pour gérer l'envoi de missives multi-canaux. Interface admin, modèles, webhooks unifiés, tracking.
+Intégration Django complète pour gérer l'envoi de missives multi-canaux. Interface d'administration, modèles, webhooks unifiés et suivi.
 
-- **Admin Django** : gestion des missives avec validation et prévisualisation
+- **Interface d'administration Django** : gestion des missives avec validation et prévisualisation
 - **Webhooks unifiés** : `/missive/webhook/{provider}/`
 - **Modèle Recipient** : centralisation des coordonnées
 - **Dépendance** : requiert python-missive
@@ -36,7 +36,7 @@ missive/
 
 ## Développement
 
-Chaque package a son propre `service.py` :
+Chaque package dispose de son propre `service.py` :
 
 ```bash
 # Dans python-missive/ ou django-missive/
