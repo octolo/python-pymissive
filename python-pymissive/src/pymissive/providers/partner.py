@@ -40,6 +40,7 @@ class PartnerProvider(MissiveProviderBase):
         "phone": ["phone", "e164", "number"],
         "occurred_at": "date",
         "event": "status",
+        "billing_amount": "cost",
     }
 
     def _request(self, url: str, method: str, data: dict = None) -> dict:
@@ -66,8 +67,8 @@ class PartnerProvider(MissiveProviderBase):
         """Return the normalized event of webhook/email/SMS."""
         if "event" in data:
             return self.events_association.get(data.get("event"), "unknown")
-        if "status" in data:
-            return self.events_association.get(data.get("status"), "unknown")
+        if "statut" in data:
+            return self.events_association.get(data.get("statut"), "unknown")
         if "success" in data:
             return "sent" if data.get("success") else "failed"
         return "unknown"
@@ -76,7 +77,7 @@ class PartnerProvider(MissiveProviderBase):
         """Send SMS."""
         data = {
             'apiKey': self._get_config_or_env("SMS_API_KEY"),
-            "sender": kwargs.get("sender").get("name") or self._get_config_or_env("SENDER_NAME", "Missive"),
+            "sender": kwargs.get("sender", {}).get("phone") or kwargs.get("sender", {}).get("name") or self._get_config_or_env("SENDER_NAME", "Missive"),
             "message": kwargs["body_text"],
             "phoneNumbers": ",".join([str(rp["phone"]) for rp in kwargs.get("recipients", [])]),
             "isStopSms": kwargs.get("is_stop_sms", self._get_config_or_env("IS_STOP_SMS", 0)),
@@ -85,14 +86,15 @@ class PartnerProvider(MissiveProviderBase):
             "_format": kwargs.get("format", self._get_config_or_env("FORMAT", "json")),
             "tag": kwargs.get("tag"),
             "urlDlr": kwargs.get("webhook_url"),
+            "urlResponse": kwargs.get("webhook_url"),
         }
+        print("---- data", data)
         response = self._request(self._api_base_sms + "/send", "POST", data)
         return response
 
     def status_sms(self, **kwargs: Any) -> Dict[str, Any]:
         """Status SMS."""
         responses = []
-        print(kwargs)
         for rp in kwargs.get("recipients", []):
             data = {
                 "apiKey": self._get_config_or_env("SMS_API_KEY"),

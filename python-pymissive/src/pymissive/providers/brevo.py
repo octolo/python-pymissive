@@ -241,7 +241,7 @@ class BrevoAPIProvider(MissiveProviderBase):
                 for r in bcc
             ]
         if attachments:
-            send_kwargs["attachment"] = attachments
+            send_kwargs["attachments"] = attachments
 
         client = self._get_email_client()
         response = client.transactional_emails.send_transac_email(**send_kwargs)
@@ -329,8 +329,9 @@ class BrevoAPIProvider(MissiveProviderBase):
         from urllib.error import HTTPError
         from urllib.request import Request, urlopen
 
+        sender = kwargs.get("sender", {})
         recipient = str(kwargs["recipients"][0].get("phone", ""))
-        sender_name = kwargs["sender"].get("name", "Missive")
+        sender_name = sender.get("phone") or sender.get("name") or "Missive"
         content = kwargs.get("body_text", "")
 
         body = _json.dumps(

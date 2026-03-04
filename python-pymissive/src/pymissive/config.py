@@ -142,6 +142,7 @@ MISSIVE_WEBHOOK_FIELDS = {
         "description": "Updated At",
         "format": "datetime",
     },
+
 }
 
 MISSIVE_FIELDS_BASE = {
@@ -170,11 +171,6 @@ MISSIVE_FIELDS_BASE = {
         "description": "Status",
         "format": "str",
     },
-    "cost": {
-        "label": "Cost",
-        "description": "Cost",
-        "format": "float",
-    },
     "event": {
         "label": "Event",
         "description": "Event",
@@ -199,6 +195,21 @@ MISSIVE_FIELDS_BASE = {
         "label": "Error Message",
         "description": "Error Message",
         "format": "str",
+    },
+    "billing_amount": {
+        "label": "Billing Amount",
+        "description": "Billing Amount",
+        "format": "float",
+    },
+    "estimate_amount": {
+        "label": "Estimate Amount",
+        "description": "Estimate Amount",
+        "format": "float",
+    },
+    "is_billed": {
+        "label": "Is Billed",
+        "description": "Is Billed",
+        "format": "bool",
     },
 }
 
@@ -411,7 +422,7 @@ MISSIVE_ACKNOWLEDGEMENT_LEVELS = [
 
 MISSIVE_GENERIC_SUPPORT = {
     "EMAIL": ["email", "email_marketing"],
-    "PHONE": ["sms", "rcs"],
+    "PHONE": ["sms", "rcs", "voice_call"],
     "POSTAL": ["postal", "postal_registered", "postal_signature", "lre", "lre_qualified", "ere"],
     "NOTIFICATION": ["notification", "push_notification"],
     "BRANDED": ["branded"],
