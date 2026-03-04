@@ -17,12 +17,12 @@
                 <div class="notification">
                     <div class="notification-header">
                         <div class="notification-icon">💬</div>
-                        {% if missive.sender_name or missive.sender_phone %}
+                    {% if sender_name or sender_phone %}
                         <div class="notification-info">
-                            <div class="notification-title">{{ missive.sender_name|default:missive.sender_phone|default:_('Unknown') }}</div>
+                            <div class="notification-title">{{ sender_name|default:sender_phone|default:_('Unknown') }}</div>
                             <div class="notification-time">now</div>
                         </div>
-                        {% endif %}
+                    {% endif %}
                     </div>
                     <div class="notification-body">
                         {% if missive.body_text %}
@@ -39,9 +39,9 @@
         <div class="phone-container">
             <div class="phone-screen phone-opened">
                 <div class="sms-header">
-                    <div class="sms-contact-name">{{ missive.sender_name|default:_('Unknown') }}</div>
-                    {% if missive.sender_phone %}
-                    <div class="sms-contact-phone">{{ missive.sender_phone }}</div>
+                    <div class="sms-contact-name">{{ sender_name|default:_('Unknown') }}</div>
+                    {% if sender_phone %}
+                    <div class="sms-contact-phone">{{ sender_phone }}</div>
                     {% endif %}
                 </div>
                 <div class="sms-body">

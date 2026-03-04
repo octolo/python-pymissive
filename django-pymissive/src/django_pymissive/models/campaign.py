@@ -10,12 +10,10 @@ from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
 from ..managers.campaign import MissiveCampaignManager
-from ..models.choices import MissiveStatus
+from ..models.choices import MissiveStatus, MissivePriority, AcknowledgementLevel
 from django_geoaddress.fields import GeoaddressField
-
-BODY_FIELD = import_string(
-    getattr(settings, "PYMISSIVE_RICHTEXT_FIELD", "django.db.models.TextField")
-)
+from phonenumber_field.modelfields import PhoneNumberField
+from ..fields import RichTextField
 
 class MissiveCampaign(models.Model):
     """Campaign grouping missives for batch sending."""
@@ -44,7 +42,7 @@ class MissiveCampaign(models.Model):
         null=True,
     )
 
-    body = BODY_FIELD(
+    body = RichTextField(
         blank=True,
         verbose_name=_("Body"),
         help_text=_("Campaign body"),
@@ -53,6 +51,13 @@ class MissiveCampaign(models.Model):
         blank=True,
         verbose_name=_("Body text"),
         help_text=_("Campaign body text"),
+    )
+
+    sender_phone = PhoneNumberField(
+        blank=True,
+        null=True,
+        verbose_name=_("Sender phone"),
+        help_text=_("Phone number of the sender (used for SMS)"),
     )
 
     # SMS
@@ -69,10 +74,25 @@ class MissiveCampaign(models.Model):
         blank=True,
         null=True,
     )
-    body_postal = BODY_FIELD(
+    body_postal = RichTextField(
         blank=True,
         verbose_name=_("Body Postal"),
         help_text=_("Campaign body Postal"),
+    )
+
+    acknowledgement = models.CharField(
+        max_length=50,
+        choices=AcknowledgementLevel.choices,
+        default=AcknowledgementLevel.BASIC_DELIVERY,
+        verbose_name=_("Acknowledgement Level"),
+        help_text=_("Desired acknowledgement level for delivery proof"),
+    )
+    priority = models.CharField(
+        max_length=20,
+        choices=MissivePriority.choices,
+        default=MissivePriority.NORMAL,
+        verbose_name=_("Priority"),
+        help_text=_("Priority level"),
     )
 
     objects = MissiveCampaignManager()
@@ -98,10 +118,10 @@ class MissiveCampaign(models.Model):
 
     def body_text_compiled(self):
         """Render body_text (email plain text) with campaign context."""
-        if not self.body_etxt:
+        if not self.body_text:
             return ""
         from django.template import Context, Template
-        return Template(str(self.body_etxt)).render(Context(self.campaign_context()))
+        return Template(str(self.body_text)).render(Context(self.campaign_context()))
 
     def body_postal_compiled(self):
         """Render body_postal with campaign context."""
@@ -109,6 +129,24 @@ class MissiveCampaign(models.Model):
             return ""
         from django.template import Context, Template
         return Template(str(self.body_postal)).render(Context(self.campaign_context()))
+
+    @property
+    def attachments(self):
+        from .choices import MissiveAttachmentType
+        from django.db.models import Q
+        return self.to_campaigndocument.filter(
+            Q(attachment_type=MissiveAttachmentType.ATTACHMENT)
+            | Q(attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT),
+        )
+
+    @property
+    def attachments_physical(self):
+        return self.attachments.filter(linked=False)
+
+    def get_serialized_attachments(self, linked=False):
+        """Get the attachments of the campaign."""
+        qs = self.attachments.filter(linked=linked)
+        return [attachment.get_serialized_attachment(linked=linked) for attachment in qs]
 
     def start_campaign(self):
         """Start the campaign."""

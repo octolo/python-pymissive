@@ -1,6 +1,6 @@
 """Admin configuration for django_pymissive."""
 
-from .document import MissiveDocumentAdmin
+from .attachment import MissiveAttachmentAdmin
 from .campaign import MissiveCampaignAdmin
 from .event import MissiveEventAdmin
 from .recipient import (
@@ -20,7 +20,7 @@ __all__ = [
     "ProviderAdmin",
     "MissiveCampaignAdmin",
     "MissiveAdmin",
-    "MissiveDocumentAdmin",
+    "MissiveAttachmentAdmin",
     "MissiveEventAdmin",
     "MissiveRelatedObjectAdmin",
     "MissiveRecipientAdmin",

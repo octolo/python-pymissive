@@ -17,17 +17,19 @@ from pymissive.config import (
 
 MissiveSupport = models.TextChoices(
     "MissiveSupport",
-    {
-        **{k.upper(): (k.lower(), _(k)) for k in MISSIVE_GENERIC_SUPPORT.keys()},
-    },
+    {k: (k, _(k.capitalize())) for k in MISSIVE_GENERIC_SUPPORT.keys()},
 )
 
 
-def get_missive_support_from_type(type: str) -> str:
+def get_missive_support_from_type(missive_type: str) -> str:
     """Get the missive support from the type."""
-    return next(
-        str(key) for key, values in MISSIVE_GENERIC_SUPPORT.items() if type in values
-    )
+    if not missive_type:
+        return ""
+    mt = str(missive_type).lower()
+    for key, values in MISSIVE_GENERIC_SUPPORT.items():
+        if mt in [str(v).lower() for v in values]:
+            return key
+    return ""
 
 
 _MISSIVE_EVENT_STYLE_MAP = {
@@ -115,26 +117,17 @@ AcknowledgementLevel = models.TextChoices(
 )
 
 
-class MissiveRecipientModel(models.TextChoices):
-    """Recipient models."""
-
-    EMAIL = "email", _("Email")
-    PHONE = "phone", _("Phone")
-    ADDRESS = "address", _("Address")
-    NOTIFICATION = "notification", _("Notification")
-
 class MissiveRecipientType(models.TextChoices):
     """Recipient types."""
 
     RECIPIENT = "recipient", _("Recipient")
-    SENDER = "sender", _("Sender")
     REPLY_TO = "reply_to", _("Reply To")
     CC = "cc", _("CC")
     BCC = "bcc", _("BCC")
 
 
-class MissiveDocumentType(models.TextChoices):
-    """Document types."""
+class MissiveAttachmentType(models.TextChoices):
+    """Attachment types."""
 
     VIRTUAL_ATTACHMENT = "virtual_attachment", _("Virtual Attachment")
     ATTACHMENT = "attachment", _("Attachment")

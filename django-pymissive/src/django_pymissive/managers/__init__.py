@@ -4,11 +4,10 @@ from .provider import ProviderManager
 from .missive import MissiveManager
 from .campaign import MissiveCampaignManager
 from .event import MissiveEventManager
-from .document import (
-    MissiveDocumentManager,
+from .attachment import (
+    MissiveBaseAttachmentManager,
     MissiveAttachmentManager,
     MissiveVirtualAttachmentManager,
-    CampaignDocumentManager,
     CampaignAttachmentManager,
     CampaignVirtualAttachmentManager,
 )
@@ -29,9 +28,11 @@ __all__ = [
     "MissiveManager",
     "MissiveCampaignManager",
     "MissiveEventManager",
-    "MissiveDocumentManager",
+    "MissiveBaseAttachmentManager",
     "MissiveAttachmentManager",
     "MissiveVirtualAttachmentManager",
+    "CampaignAttachmentManager",
+    "CampaignVirtualAttachmentManager",
     "MissiveRelatedObjectManager",
     "CampaignRelatedObjectManager",
     "MissiveRecipientManager",
@@ -39,7 +40,5 @@ __all__ = [
     "MissiveRecipientPhoneManager",
     "MissiveRecipientAddressManager",
     "MissiveRecipientNotificationManager",
-    "CampaignDocumentManager",
-    "CampaignAttachmentManager",
-    "CampaignVirtualAttachmentManager",
+
 ]

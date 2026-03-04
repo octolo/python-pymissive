@@ -12,7 +12,7 @@ from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
 from .choices import MissiveAttachmentType
-from ..managers.document import (
+from ..managers.attachment import (
     MissiveBaseAttachmentManager,
     MissiveAttachmentManager,
     MissiveVirtualAttachmentManager,
@@ -143,46 +143,42 @@ class MissiveBaseAttachment(models.Model):
         )
 
     def get_virtual_attachment(self):
-        """Gets the virtual attachment."""
-        get_method = self.document_object_arguments["method"]
-        args = self.document_object_arguments["args"]
-        kwargs = self.document_object_arguments["kwargs"]
-        return getattr(self.document_object, get_method)(*args, **kwargs)
+        """Gets the virtual attachment by calling the configured method on the related object."""
+        get_method = self.attachment_object_arguments["method"]
+        args = self.attachment_object_arguments.get("args", [])
+        kwargs = self.attachment_object_arguments.get("kwargs", {})
+        return getattr(self.attachment_object, get_method)(*args, **kwargs)
 
     def get_attachment(self):
-        """Gets the document."""
+        """Returns the raw file or virtual attachment object."""
         if self.attachment_type == MissiveAttachmentType.VIRTUAL_ATTACHMENT:
             return self.get_virtual_attachment()
-        return self.attachment
+        return self.attachment_file
 
     @property
     def attachment_url(self):
         return self.get_serialized_attachment(linked=True, ignore_content=True)
 
-    @property
-    def attachment(self):
-        return self.get_serialized_attachment(linked=True, ignore_content=False)
-
     def get_serialized_attachment(self, linked=False, ignore_content=False):
-        """Gets the serialized document."""
+        """Returns a serialized dict for this attachment."""
         attachment = self.get_attachment()
-        name = getattr(attachment, "name") or "unnamed_attachment"
-        url_name = "django_pymissive:missive_attachment_download"
-        url = reverse(url_name, args=[self.id])
+        name = getattr(attachment, "name", None) or "unnamed_attachment"
+        scope = "campaign" if self.campaign_id else "missive"
+        url = reverse("django_pymissive:missive_attachment_download", args=[scope, self.id])
         data = {
             "name": os.path.basename(name),
             "url": url,
         }
         if linked or ignore_content:
             return data
-        if hasattr(document, "seek"):
-            document.seek(0)
-        data["content"] = document.read()
+        if hasattr(attachment, "seek"):
+            attachment.seek(0)
+        data["content"] = attachment.read()
         return data
 
     def clean(self):
         """Validates attachment."""
-        if not self.attachment and not self.can_access_attachment():
+        if not self.attachment_file and not self.can_access_document():
             raise ValidationError(
                 _(
                     "You must provide either a local attachment or a method to access the attachment."

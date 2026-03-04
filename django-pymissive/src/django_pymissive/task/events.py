@@ -48,18 +48,45 @@ def _process_normalized_event(normalized):
     missive = Missive.objects.get(external_id=normalized["external_id"])
     recipient = _process_normalized_event_recipient(missive, normalized)
     occurred_at = _get_occurred_at(normalized.get("occurred_at"))
-    MissiveEvent.objects.get_or_create(
-        missive=missive,
-        recipient=recipient,
-        event=normalized["event"],
-        description=normalized["description"],
-        occurred_at=occurred_at,
-        trace=normalized["raw"],
-    )
+    data_event = {
+        "missive": missive,
+        "recipient": recipient,
+        "event": normalized["event"],
+        "description": normalized["description"],
+        "occurred_at": occurred_at,
+        "trace": normalized["raw"],
+    }
+
+    if normalized.get("user_action"):
+        data_event.update({
+            "user_action": normalized.get("user_action", False),
+            "billing_amount": normalized.get("billing_amount"),
+            "estimate_amount": normalized.get("estimate_amount"),
+            "is_billed": normalized.get("is_billed") or False,
+        })
+
+    if normalized.get("pk"):
+        MissiveEvent.objects.update_or_create(pk=normalized["pk"], defaults=data_event)
+    else:
+        MissiveEvent.objects.get_or_create(**data_event)
     return missive, recipient
 
 
+def _update_recipient_timestamps(recipient, event_type: str, occurred_at):
+    """Update recipient sent_at/delivered_at from event."""
+    if not recipient:
+        return
+    event_type = (event_type or "").lower()
+    if event_type == "sent" and not recipient.sent_at:
+        recipient.sent_at = occurred_at
+        recipient.save(update_fields=["sent_at"])
+    elif event_type == "delivered" and not recipient.delivered_at:
+        recipient.delivered_at = occurred_at
+        recipient.save(update_fields=["delivered_at"])
+
+
 def handle_events(events: list[dict] | dict):
+    """Handle events."""
     if isinstance(events, dict):
         events = [events]
     missive = None
@@ -68,6 +95,8 @@ def handle_events(events: list[dict] | dict):
         missive, recipient = _process_normalized_event(event)
         if recipient and recipient not in recipients:
             recipients.append(recipient)
+        occurred_at = _get_occurred_at(event.get("occurred_at"))
+        _update_recipient_timestamps(recipient, event.get("event"), occurred_at)
     if missive:
         missive.set_last_status()
     for recipient in recipients:

@@ -8,7 +8,7 @@ from .choices import (
     MissiveRecipientType,
     MissiveStatus,
     event_to_status,
-    MissiveRecipientModel,
+    MissiveSupport,
 )
 from ..managers.recipient import (
     MissiveRecipientManager,
@@ -29,10 +29,11 @@ class MissiveRecipient(models.Model):
         verbose_name=_("Missive"),
         help_text=_("Missive"),
     )
-    recipient_model = models.CharField(
+    recipient_support = models.CharField(
         max_length=255,
-        choices=MissiveRecipientModel.choices,
-        default=MissiveRecipientModel.EMAIL,
+        choices=MissiveSupport.choices,
+        blank=True,
+        null=True,
         verbose_name=_("Recipient Model"),
         help_text=_("Model of recipient"),
     )
@@ -95,10 +96,24 @@ class MissiveRecipient(models.Model):
     created_at = models.DateTimeField(
         auto_now_add=True,
         verbose_name=_("Created At"),
+        editable=False,
     )
     updated_at = models.DateTimeField(
         auto_now=True,
         verbose_name=_("Updated At"),
+        editable=False,
+    )
+    sent_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Sent At"),
+        help_text=_("When the missive was sent"),
+    )
+    delivered_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Delivered At"),
+        help_text=_("When the missive was delivered"),
     )
     objects = MissiveRecipientManager()
 
@@ -145,8 +160,8 @@ class MissiveRecipientEmail(MissiveRecipient):
         verbose_name_plural = _("Email Recipients")
 
     def save(self, *args, **kwargs):
-        if not self.recipient_model:
-            self.recipient_model = MissiveRecipientModel.EMAIL
+        if not self.recipient_support:
+            self.recipient_support = MissiveSupport.EMAIL
         super().save(*args, **kwargs)
 
 
@@ -159,8 +174,8 @@ class MissiveRecipientPhone(MissiveRecipient):
         verbose_name_plural = _("Phone Recipients")
 
     def save(self, *args, **kwargs):
-        if not self.recipient_model:
-            self.recipient_model = MissiveRecipientModel.PHONE
+        if not self.recipient_support:
+            self.recipient_support = MissiveSupport.PHONE
         super().save(*args, **kwargs)
 
 
@@ -173,8 +188,8 @@ class MissiveRecipientAddress(MissiveRecipient):
         verbose_name_plural = _("Address Recipients")
 
     def save(self, *args, **kwargs):
-        if not self.recipient_model:
-            self.recipient_model = MissiveRecipientModel.ADDRESS
+        if not self.recipient_support:
+            self.recipient_support = MissiveSupport.ADDRESS
         super().save(*args, **kwargs)
 
 
@@ -187,6 +202,6 @@ class MissiveRecipientNotification(MissiveRecipient):
         verbose_name_plural = _("Notification Recipients")
 
     def save(self, *args, **kwargs):
-        if not self.recipient_model:
-            self.recipient_model = MissiveRecipientModel.NOTIFICATION
+        if not self.recipient_support:
+            self.recipient_support = MissiveSupport.NOTIFICATION
         super().save(*args, **kwargs)

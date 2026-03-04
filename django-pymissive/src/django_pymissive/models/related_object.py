@@ -30,12 +30,10 @@ class BaseRelatedObject(models.Model):
             "String representation of the related object (saved for reference if object is deleted)"
         ),
     )
-
     created_at = models.DateTimeField(
         auto_now_add=True,
         verbose_name=_("Created At"),
     )
-
     objects = MissiveRelatedObjectManager()
 
     class Meta:

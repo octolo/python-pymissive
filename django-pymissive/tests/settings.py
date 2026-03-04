@@ -100,7 +100,7 @@ MISSIVE_SCALEWAY_SNS_SECRET_KEY = (
 INSTALLED_APPS += [
     "djrichtextfield",
 ]
-PYMISSIVE_RICHTEXT_FIELD = "djrichtextfield.models.RichTextField"
+PYMISSIVE_RICHTEXT_WIDGET = "djrichtextfield.widgets.RichTextWidget"
 DJRICHTEXTFIELD_CONFIG = {
     'js': [f'//cdn.tiny.cloud/1/{os.getenv("TINYMCE_API_KEY")}/tinymce/5/tinymce.min.js'],
     'init_template': 'djrichtextfield/init/tinymce.js',

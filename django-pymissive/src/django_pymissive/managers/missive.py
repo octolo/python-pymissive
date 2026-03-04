@@ -1,9 +1,9 @@
 from django.db import models
 from django.db.models.expressions import Subquery, OuterRef
-from django.db.models import F, Max, Q
+from django.db.models import F, Max, Q, Sum
 from django.db.models.functions import Coalesce
 
-from ..models.choices import MissiveRecipientType, MissiveDocumentType
+from ..models.choices import MissiveRecipientType, MissiveAttachmentType
 
 
 class MissiveManager(models.Manager):
@@ -52,10 +52,7 @@ class MissiveManager(models.Manager):
                 "to_missiverecipient",
                 distinct=True,
                 filter=~Q(
-                    to_missiverecipient__recipient_type__in=[
-                        MissiveRecipientType.SENDER,
-                        MissiveRecipientType.REPLY_TO,
-                    ],
+                    to_missiverecipient__recipient_type=MissiveRecipientType.REPLY_TO,
                 ),
             ),
             last_event=self.last_event_subquery(field="event"),
@@ -65,5 +62,23 @@ class MissiveManager(models.Manager):
             ),
             last_campaign_send_date=self.last_scheduled_subquery("send_date"),
             last_campaign_ended_at=self.last_scheduled_subquery("ended_at"),
+            total_billing_amount=Sum("to_missiveevent__billing_amount"),
+            total_estimate_amount=Sum("to_missiveevent__estimate_amount"),
+            total_billed_amount=Sum("to_missiveevent__billing_amount", filter=Q(to_missiveevent__is_billed=True)),
+        ).annotate(
+            is_billable=models.Case(
+                models.When(total_billing_amount__gt=0, then=True),
+                default=False,
+                output_field=models.BooleanField(),
+            ),
+            is_billed=models.Case(
+                models.When(
+                    Q(total_billing_amount__gt=0)
+                    & Q(total_billing_amount=F("total_billed_amount")),
+                    then=True,
+                ),
+                default=False,
+                output_field=models.BooleanField(),
+            ),
         )
         return qs

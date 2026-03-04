@@ -11,7 +11,7 @@ from django_boosted import AdminBoostModel
 from django_boosted.decorators import admin_boost_view
 
 from ..models.campaign import MissiveCampaign, MissiveScheduledCampaign
-from .document import CampaignAttachmentInline, CampaignVirtualAttachmentInline
+from .attachment import CampaignAttachmentInline, CampaignVirtualAttachmentInline
 from .related_object import CampaignRelatedObjectInline 
 
 
@@ -90,7 +90,7 @@ class MissiveCampaignAdmin(AdminBoostModel):
         )
         self.add_to_fieldset(
             _("SMS"),
-            ["body_sms", "buttons_show_and_preview_sms"],
+            ["sender_phone", "body_sms", "buttons_show_and_preview_sms"],
         )
         self.add_to_fieldset(
             _("Postal"),
@@ -99,10 +99,10 @@ class MissiveCampaignAdmin(AdminBoostModel):
 
     def _preview_buttons(self, obj, preview_type):
         """Show and Preview buttons for a given type (email, sms, postal)."""
-        base_url = reverse("django_pymissive:campaign_preview", args=[obj.pk])
-        preview_url = reverse("django_pymissive:campaign_preview_form")
+        preview_url = reverse("django_pymissive:preview_form", args=["campaign"])
         buttons_html = []
         if obj.pk:
+            base_url = reverse("django_pymissive:preview", args=["campaign", obj.pk])
             buttons_html.append(
                 format_html(
                     '<a class="button" href="{}?type={}" target="_blank">{}</a>',
@@ -111,11 +111,13 @@ class MissiveCampaignAdmin(AdminBoostModel):
                     _("Show"),
                 )
             )
+        pk_param = f"&pk={obj.pk}" if obj.pk else ""
         buttons_html.append(
             format_html(
-                '<button type="submit" form="missivecampaign_form" formaction="{}?type={}" formmethod="post" formtarget="_blank" class="button" name="_preview" value="{}" style="margin-left: 10px;">{}</button>',
+                '<button type="submit" form="missivecampaign_form" formaction="{}?type={}{}" formmethod="post" formtarget="_blank" class="button" name="_preview" value="{}" style="margin-left: 10px;">{}</button>',
                 preview_url,
                 preview_type,
+                pk_param,
                 preview_type,
                 _("Preview"),
             )

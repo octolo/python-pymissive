@@ -1,10 +1,9 @@
 """Models for django_pymissive."""
 
-from .document import (
-    MissiveDocument,
+from .attachment import (
+    MissiveBaseAttachment,
     MissiveAttachment,
     MissiveVirtualAttachment,
-    CampaignDocument,
     CampaignAttachment,
     CampaignVirtualAttachment,
 )
@@ -30,14 +29,13 @@ from .recipient import (
 )
 
 __all__ = [
-    "CampaignDocument",
     "CampaignAttachment",
     "CampaignVirtualAttachment",
     "MissiveCampaign",
     "MissiveScheduledCampaign",
     "MissiveProviderModel",
     "Missive",
-    "MissiveDocument",
+    "MissiveBaseAttachment",
     "MissiveAttachment",
     "MissiveVirtualAttachment",
     "MissiveEvent",

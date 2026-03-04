@@ -6,7 +6,9 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django_boosted import AdminBoostModel
-
+from urllib.parse import unquote
+from django.contrib import messages
+from django.shortcuts import redirect
 from phonenumber_field.modelfields import PhoneNumberField
 from phonenumber_field.formfields import SplitPhoneNumberField
 
@@ -18,14 +20,50 @@ from .recipient import (
     MissiveRecipientAddressInline,
     MissiveRecipientNotificationInline,
 )
-from .document import MissiveAttachmentInline, MissiveVirtualAttachmentInline
+from .attachment import MissiveAttachmentInline, MissiveVirtualAttachmentInline
 from .event import MissiveEventInline
 from .related_object import MissiveRelatedObjectInline
 from ..models.choices import get_missive_style, MissiveStatus
-from urllib.parse import unquote
-from django.contrib import messages
-from django.shortcuts import redirect
 
+
+class IsBillableListFilter(admin.SimpleListFilter):
+    """Custom filter for is_billable annotation (not a model field)."""
+
+    title = _("Is billable")
+    parameter_name = "is_billable"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("1", _("Yes")),
+            ("0", _("No")),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value() == "1":
+            return queryset.filter(is_billable=True)
+        if self.value() == "0":
+            return queryset.filter(is_billable=False)
+        return queryset
+
+
+class IsBilledListFilter(admin.SimpleListFilter):
+    """Custom filter for is_billed annotation (not a model field)."""
+
+    title = _("Is billed")
+    parameter_name = "is_billed"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("1", _("Yes")),
+            ("0", _("No")),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value() == "1":
+            return queryset.filter(is_billed=True)
+        if self.value() == "0":
+            return queryset.filter(is_billed=False)
+        return queryset
 
 
 @admin.register(Missive)
@@ -39,12 +77,14 @@ class MissiveAdmin(AdminBoostModel):
         "campaign_display",
         "status_display",
         "event_display",
+        "billing_display",
     ]
     list_filter = [
         "missive_type",
         "status",
         "priority",
-        "is_billed",
+        IsBillableListFilter,
+        IsBilledListFilter,
         "provider",
         "created_at",
     ]
@@ -60,10 +100,15 @@ class MissiveAdmin(AdminBoostModel):
         "missive_support",
         "created_at",
         "updated_at",
-        "sent_at",
-        "delivered_at",
         "external_id",
         "buttons_show_and_preview",
+        "external_id_display",
+        "total_billed_amount_display",
+        "total_billing_amount_display",
+        "total_estimate_amount_display",
+        "is_billable_display",
+        "is_billed_display",
+        "billing_display",
     ]
     raw_id_fields = [
         "campaign",
@@ -103,6 +148,7 @@ class MissiveAdmin(AdminBoostModel):
         "billing_amount_missive": _("Billing Amount"),
         "estimate_amount_missive": _("Estimate Amount"),
         "duplicate_missive": _("Duplicate"),
+        "set_billed": _("Mark as paid"),
     }
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
@@ -122,13 +168,33 @@ class MissiveAdmin(AdminBoostModel):
 
     recipient_display.short_description = _("Recipient")
 
+    def billing_display(self, obj):
+        tpl = self.boolean_icon_html(obj.is_billed)
+        if obj.total_billed_amount is not None:
+            tpl += "&nbsp;"
+            label_type = "success" if obj.is_billed else "warning"
+            tpl += self.format_label(f"{obj.total_billed_amount:.3f}", size="small", label_type=label_type)
+        if obj.total_billing_amount is not None:
+            tpl += "&nbsp;"
+            label_type = "info" if obj.is_billed else "danger"
+            tpl += self.format_label(f"{obj.total_billing_amount:.3f}", size="small", label_type=label_type)
+        return mark_safe(tpl)
+
     def sender_display(self, obj):
-        sender = obj.sender
-        if isinstance(sender, MissiveRecipient):
-            return self.format_with_help_text(sender.name, sender.target)
-        return sender
+        sender = obj.get_sender()
+        name = sender["name"] or ""
+        target = sender[obj.missive_support.lower()] or ""
+        text = name or target or _("No sender")
+        return self.format_with_help_text(text, target) if target else text
 
     sender_display.short_description = _("Sender")
+
+    def external_id_display(self, obj):
+        if not obj.external_id:
+            return "-"
+        return self.format_label(obj.external_id, size="large", label_type="success")
+    
+    external_id_display.short_description = _("External ID")
 
     def provider_display(self, obj):
         return self.format_with_help_text(
@@ -162,12 +228,14 @@ class MissiveAdmin(AdminBoostModel):
     def button_show(self, obj):
         return format_html(
             '<a class="button" href="{}" target="_blank">{}</a>',
-            reverse("django_pymissive:missive_preview", args=[obj.pk]),
+            reverse("django_pymissive:preview", args=["missive", obj.pk]),
             _("Show"),
         )
 
     def button_preview(self, obj):
-        preview_url = reverse("django_pymissive:missive_preview_form")
+        preview_url = reverse("django_pymissive:preview_form", args=["missive"])
+        if obj.pk:
+            preview_url = f"{preview_url}?pk={obj.pk}"
         return format_html(
             '<button type="submit" form="missive_form" formaction="{}" formmethod="post" formtarget="_blank" class="button" name="_preview" style="margin-left: 10px;">{}</button>',
             preview_url,
@@ -209,19 +277,16 @@ class MissiveAdmin(AdminBoostModel):
         self.add_to_fieldset(
             None,
             [
-                "campaign",
+
                 "provider",
-                "missive_support",
                 "missive_type",
-                "brand_name",
                 "acknowledgement",
-                "status",
                 "priority",
             ],
         )
         self.add_to_fieldset(
-            _("Billing"),
-            ["is_billed", "billing_amount", "estimate_amount"],
+            _("Sender"),
+            ["brand_name", "sender_name", "sender_email", "sender_phone", "sender_address"],
         )
         self.add_to_fieldset(
             _("Content"),
@@ -229,16 +294,52 @@ class MissiveAdmin(AdminBoostModel):
         )
         self.add_to_fieldset(
             _("Tracking"),
-            ["webhook_url", "external_id", "metadata"],
+            ["campaign", "status", "webhook_url", "external_id_display", "missive_support", "additional_config", "metadata"],
         )
         self.add_to_fieldset(
             _("Timestamps"),
-            ["created_at", "updated_at", "sent_at", "delivered_at"],
+            ["created_at", "updated_at"],
         )
         self.add_to_fieldset(
             _("Billing"),
-            ["is_billed"],
+            [
+                "total_billed_amount_display",
+                "total_billing_amount_display",
+                "total_estimate_amount_display",
+                "is_billable_display",
+                "is_billed_display",
+            ],
         )
+
+    def total_billed_amount_display(self, obj):
+        if obj.total_billed_amount is None:
+            return "-"
+        label_type = "success" if obj.is_billed else "warning"
+        return self.format_label(f"{obj.total_billed_amount:.3f}", size="small", label_type=label_type)
+    total_billed_amount_display.short_description = _("Total Billed Amount")
+
+    def total_billing_amount_display(self, obj):
+        if obj.total_billing_amount is None:
+            return "-"
+        label_type = "info" if obj.is_billed else "danger"
+        return self.format_label(f"{obj.total_billing_amount:.3f}", size="small", label_type=label_type)
+    total_billing_amount_display.short_description = _("Total Billing Amount")
+
+    def total_estimate_amount_display(self, obj):
+        if obj.total_estimate_amount is None:
+            return "-"
+        return self.format_label(f"{obj.total_estimate_amount:.3f}", size="small", label_type="info")
+    total_estimate_amount_display.short_description = _("Total Estimate Amount")
+
+    def is_billable_display(self, obj):
+        return obj.is_billable
+    is_billable_display.short_description = _("Is billable")
+    is_billable_display.boolean = True
+
+    def is_billed_display(self, obj):
+        return obj.is_billed
+    is_billed_display.short_description = _("Is Billed")
+    is_billed_display.boolean = True
 
     def provider_has_service(self, obj, service):
         service_name = f"{service}_{obj.missive_type}".lower()
@@ -301,7 +402,18 @@ class MissiveAdmin(AdminBoostModel):
             recipient.external_id = None
             recipient.missive = missive
             recipient.status = MissiveStatus.DRAFT
+            recipient.sent_at = None
+            recipient.delivered_at = None
             recipient.save()
 
         messages.success(request, _("Missive duplicated successfully."))
         return redirect(reverse("admin:django_pymissive_missive_change", args=[missive.pk]))
+
+    def has_set_billed_permission(self, request, obj=None):
+        return obj and obj.is_billable
+
+    def handle_set_billed(self, request, object_id):
+        object_id = unquote(object_id)
+        obj = self.get_object(request, object_id)
+        obj.set_billed()
+        messages.success(request, _("Missive marked as paid successfully."))

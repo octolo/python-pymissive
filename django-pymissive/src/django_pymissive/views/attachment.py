@@ -1,12 +1,26 @@
+from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import redirect
 from django.views.generic import DetailView
-from django.http import FileResponse, HttpResponse
 
-from ..models.document import CampaignDocument, MissiveDocument
+from ..models.attachment import MissiveBaseAttachment
+
+_ATTACHMENT_QUERYSETS = {
+    "missive": MissiveBaseAttachment.objects.filter(missive__isnull=False, campaign__isnull=True),
+    "campaign": MissiveBaseAttachment.objects.filter(campaign__isnull=False, missive__isnull=True),
+}
 
 
-class BaseDocumentDownloadView(DetailView):
-    """Base view for downloading a document by id."""
+class MissiveAttachmentDownloadView(DetailView):
+    """Download an attachment by id, scoped to missive or campaign."""
+
+    model = MissiveBaseAttachment
+
+    def get_queryset(self):
+        key = self.kwargs.get("campaign_or_missive", "")
+        qs = _ATTACHMENT_QUERYSETS.get(key)
+        if qs is None:
+            raise Http404
+        return qs
 
     def _build_response(self, doc_obj, doc):
         """Build HTTP response from document object and document content."""
@@ -24,27 +38,11 @@ class BaseDocumentDownloadView(DetailView):
             name = (getattr(doc_obj, "document_metadata", None) or {}).get(
                 "name", "unnamed_document"
             )
-        response = HttpResponse(
-            content,
-            content_type="application/octet-stream",
-        )
+        response = HttpResponse(content, content_type="application/octet-stream")
         response["Content-Disposition"] = f'attachment; filename="{name}"'
         return response
 
     def get(self, request, *args, **kwargs):
-        """Handle GET request."""
         doc_obj = self.get_object()
-        doc = doc_obj.get_document()
+        doc = doc_obj.get_attachment()
         return self._build_response(doc_obj, doc)
-
-
-class MissiveDocumentDownloadView(BaseDocumentDownloadView):
-    """Download a missive document by id."""
-
-    model = MissiveDocument
-
-
-class CampaignDocumentDownloadView(BaseDocumentDownloadView):
-    """Download a campaign document by id."""
-
-    model = CampaignDocument

@@ -20,6 +20,7 @@ class MissiveRecipientInline(admin.TabularInline):
 
     model = MissiveRecipient
     extra = 0
+    readonly_fields = ["sent_at", "delivered_at"]
     fields = [
         "recipient_type",
         "status",
@@ -29,6 +30,8 @@ class MissiveRecipientInline(admin.TabularInline):
         "address",
         "notification_id",
         "external_id",
+        "sent_at",
+        "delivered_at",
     ]
 
 class MissiveRecipientEmailInline(admin.TabularInline):
@@ -36,12 +39,15 @@ class MissiveRecipientEmailInline(admin.TabularInline):
 
     model = MissiveRecipientEmail
     extra = 0
+    readonly_fields = ["created_at", "updated_at", "sent_at", "delivered_at"]
     fields = [
         "recipient_type",
         "status",
         "name",
         "email",
         "external_id",
+        "sent_at",
+        "delivered_at",
     ]
 
 class MissiveRecipientPhoneInline(admin.TabularInline):
@@ -49,12 +55,15 @@ class MissiveRecipientPhoneInline(admin.TabularInline):
 
     model = MissiveRecipientPhone
     extra = 0
+    readonly_fields = ["created_at", "updated_at", "sent_at", "delivered_at"]
     fields = [
         "recipient_type",
         "status",
         "name",
         "phone",
         "external_id",
+        "sent_at",
+        "delivered_at",
     ]
 
 class MissiveRecipientAddressInline(admin.TabularInline):
@@ -62,12 +71,15 @@ class MissiveRecipientAddressInline(admin.TabularInline):
 
     model = MissiveRecipientAddress
     extra = 0
+    readonly_fields = ["created_at", "updated_at", "sent_at", "delivered_at"]
     fields = [
         "recipient_type",
         "status",
         "name",
         "address",
         "external_id",
+        "sent_at",
+        "delivered_at",
     ]
 
 class MissiveRecipientNotificationInline(admin.TabularInline):
@@ -75,12 +87,15 @@ class MissiveRecipientNotificationInline(admin.TabularInline):
 
     model = MissiveRecipientNotification
     extra = 0
+    readonly_fields = ["created_at", "updated_at", "sent_at", "delivered_at"]
     fields = [
         "recipient_type",
         "status",
         "name",
         "notification_id",
         "external_id",
+        "sent_at",
+        "delivered_at",
     ]
 
 
@@ -90,12 +105,12 @@ class MissiveRecipientAdmin(AdminBoostModel):
 
     list_display = [
         "recipient_display",
-        "recipient_model",
+        "recipient_support",
         "missive_display",
         "recipient_type_display",
     ]
     list_filter = [
-        "recipient_model",
+        "recipient_support",
         "recipient_type",
         "status",
     ]
@@ -107,7 +122,11 @@ class MissiveRecipientAdmin(AdminBoostModel):
         "address",
     ]
     readonly_fields = [
+        "created_at",
+        "updated_at",
         "status",
+        "sent_at",
+        "delivered_at",
     ]
     raw_id_fields = [
         "missive",
@@ -115,8 +134,12 @@ class MissiveRecipientAdmin(AdminBoostModel):
 
     def change_fieldsets(self):
         """Configure fieldsets for change view."""
-        self.add_to_fieldset(None, ["missive", "recipient_model", "recipient_type", "status", "name"])
+        self.add_to_fieldset(None, ["missive", "recipient_support", "recipient_type", "status", "name"])
         self.add_to_fieldset(_("Target"), ["email", "phone", "address", "notification_id", "external_id"])
+        self.add_to_fieldset(
+            _("Timestamps"),
+            ["created_at", "updated_at", "sent_at", "delivered_at"],
+        )
 
     def recipient_display(self, obj):
         """Display the recipient name and email or phone or address."""

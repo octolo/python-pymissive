@@ -67,6 +67,9 @@ where = ["src"]
 include = ["django_pymissive*"]
 exclude = ["tests*", "docs*"]
 
+[tool.setuptools.package-data]
+django_pymissive = ["templates/**/*"]
+
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
 testpaths = ["tests"]
