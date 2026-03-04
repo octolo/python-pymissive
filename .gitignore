@@ -40,3 +40,4 @@ poetry.lock
 *.sqlite3
 db.sqlite3
 db.sqlite3-journal
+django-pymissive/missive/
