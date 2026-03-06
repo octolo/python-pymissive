@@ -233,7 +233,7 @@ class ScalewayProvider(MissiveProviderBase):
             self._email_data["text"] = ""
 
     def _add_reply_to(self, kwargs):
-        reply_to = kwargs.get("reply_to")
+        reply_to = kwargs.get("reply_to", {})
         if reply_to:
             value = reply_to["email"] if isinstance(reply_to, dict) else reply_to
             self._email_data["additional_headers"].append({

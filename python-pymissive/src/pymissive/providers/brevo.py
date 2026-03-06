@@ -200,11 +200,10 @@ class BrevoAPIProvider(MissiveProviderBase):
         self.delete_blocked_emails(kwargs)
         sender = kwargs.get("sender", {})
         recipients = kwargs.get("recipients", [])
-        reply_to = kwargs.get("reply_to")
+        reply_to = kwargs.get("reply_to", {})
         cc = kwargs.get("cc", [])
         bcc = kwargs.get("bcc", [])
         attachments = self._build_attachments(kwargs.get("attachments", []))
-
         send_kwargs: dict[str, Any] = {
             "subject": kwargs["subject"],
             "sender": SendTransacEmailRequestSender(
@@ -224,6 +223,7 @@ class BrevoAPIProvider(MissiveProviderBase):
         if kwargs.get("body_text"):
             send_kwargs["text_content"] = kwargs["body_text"]
         if reply_to:
+            print("reply_to", reply_to)
             send_kwargs["reply_to"] = SendTransacEmailRequestReplyTo(
                 email=reply_to["email"],
                 name=reply_to.get("name", ""),
