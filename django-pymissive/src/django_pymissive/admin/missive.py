@@ -11,8 +11,8 @@ from django.contrib import messages
 from django.shortcuts import redirect
 from phonenumber_field.modelfields import PhoneNumberField
 from phonenumber_field.formfields import SplitPhoneNumberField
-
-from ..models.missive import Missive
+from urllib.parse import urlencode
+from ..models.missive import Missive, MissiveMessage, MissiveHistory
 from ..models.recipient import MissiveRecipient
 from .recipient import (
     MissiveRecipientEmailInline,
@@ -23,8 +23,8 @@ from .recipient import (
 from .attachment import MissiveAttachmentInline, MissiveVirtualAttachmentInline
 from .event import MissiveEventInline
 from .related_object import MissiveRelatedObjectInline
-from ..models.choices import get_missive_style, MissiveStatus
-
+from ..models.choices import get_missive_style, MissiveStatus, MissiveThreadType
+from django_boosted import admin_boost_view, admin_boost_action
 
 class IsBillableListFilter(admin.SimpleListFilter):
     """Custom filter for is_billable annotation (not a model field)."""
@@ -66,6 +66,42 @@ class IsBilledListFilter(admin.SimpleListFilter):
         return queryset
 
 
+class HistoryOrMessageListFilter(admin.SimpleListFilter):
+    """Custom filter for history_or_message annotation (not a model field)."""
+
+    title = _("Thread Type")
+    parameter_name = "thread_type"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("history", _("History")),
+            ("message", _("Message")),
+            ("all", _("All")),
+        ]
+
+    def choices(self, changelist):
+        yield {
+            "selected": self.value() is None,
+            "query_string": changelist.get_query_string(remove=[self.parameter_name]),
+            "display": _("Missives"),
+        }
+
+        for lookup, title in self.lookup_choices:
+            yield {
+                "selected": self.value() == str(lookup),
+                "query_string": changelist.get_query_string({self.parameter_name: lookup}),
+                "display": title,
+            }
+
+    def queryset(self, request, queryset):
+        if self.value() == "history":
+            return queryset.filter(thread_type=MissiveThreadType.HISTORY)
+        if self.value() == "message":
+            return queryset.filter(therad_type=MissiveThreadType.MESSAGE)
+        if self.value() == "all":
+            return queryset
+        return queryset.filter(thread_type=MissiveThreadType.MISSIVE)
+
 @admin.register(Missive)
 class MissiveAdmin(AdminBoostModel):
     """Admin for missive model."""
@@ -77,6 +113,7 @@ class MissiveAdmin(AdminBoostModel):
         "campaign_display",
         "status_display",
         "event_display",
+        "thread_display",
         "billing_display",
     ]
     list_filter = [
@@ -85,6 +122,7 @@ class MissiveAdmin(AdminBoostModel):
         "priority",
         IsBillableListFilter,
         IsBilledListFilter,
+        HistoryOrMessageListFilter,
         "provider",
         "created_at",
     ]
@@ -109,10 +147,24 @@ class MissiveAdmin(AdminBoostModel):
         "is_billable_display",
         "is_billed_display",
         "billing_display",
+        "thread_display",
+        "thread_id",
+        "thread_type",
     ]
     raw_id_fields = [
         "campaign",
     ]
+    inlines = [
+        MissiveRecipientEmailInline,
+        MissiveRecipientPhoneInline,
+        MissiveRecipientAddressInline,
+        MissiveRecipientNotificationInline,
+        MissiveAttachmentInline,
+        MissiveVirtualAttachmentInline,
+        MissiveEventInline,
+        MissiveRelatedObjectInline,
+    ]
+
 
     def get_readonly_fields(self, request, obj=None):
         """Make all fields readonly if missive has events."""
@@ -130,27 +182,6 @@ class MissiveAdmin(AdminBoostModel):
 
         return readonly
 
-    inlines = [
-        MissiveRecipientEmailInline,
-        MissiveRecipientPhoneInline,
-        MissiveRecipientAddressInline,
-        MissiveRecipientNotificationInline,
-        MissiveAttachmentInline,
-        MissiveVirtualAttachmentInline,
-        MissiveEventInline,
-        MissiveRelatedObjectInline,
-    ]
-    changeform_actions = {
-        "prepare_missive": _("Prepare"),
-        "send_missive": _("Send"),
-        "cancel_missive": _("Cancel"),
-        "status_missive": _("Status"),
-        "billing_amount_missive": _("Billing Amount"),
-        "estimate_amount_missive": _("Estimate Amount"),
-        "duplicate_missive": _("Duplicate"),
-        "set_billed": _("Mark as paid"),
-    }
-
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         if isinstance(db_field, PhoneNumberField):
             kwargs.setdefault("required", False)
@@ -161,8 +192,8 @@ class MissiveAdmin(AdminBoostModel):
         recipient = obj.first_recipient
         if isinstance(recipient, MissiveRecipient):
             text = recipient.name
-            if obj.count_target > 1:
-                text += f" (+{obj.count_target - 1})"
+            if obj.count_recipient > 1:
+                text += f" (+{obj.count_recipient - 1})"
             return self.format_with_help_text(text, recipient.target)
         return self.format_label(_("No recipient"), label_type="warning")
 
@@ -224,6 +255,15 @@ class MissiveAdmin(AdminBoostModel):
         return self.format_with_help_text(html, obj.last_event_date)
 
     status_display.short_description = _("Status / Last Event Date")
+
+    def thread_display(self, obj):
+        message = self.format_label(f"{obj.count_message or 0} message(s)", size="small", label_type="primary")
+        history = self.format_label(f"{obj.count_history or 0} history(s)", size="small", label_type="secondary")
+        thread_type = self.format_label(obj.get_thread_type_display(), size="small", label_type=get_missive_style(obj.thread_type))
+        html = format_html("{} {} {}", thread_type, message, history)
+        return self.format_with_help_text(html, str(obj.thread_id))
+
+    thread_display.short_description = _("Message(s)/History(s)/Thread")
 
     def button_show(self, obj):
         return format_html(
@@ -289,17 +329,27 @@ class MissiveAdmin(AdminBoostModel):
             ["brand_name", "sender_name", "sender_email", "sender_phone", "sender_address"],
         )
         self.add_to_fieldset(
+            _("Reply-To"),
+            ["reply_to_name", "reply_to_email", "reply_to_address"],
+        )
+        self.add_to_fieldset(
             _("Content"),
             ["subject", "body", "body_text", "buttons_show_and_preview"],
         )
         self.add_to_fieldset(
             _("Tracking"),
-            ["campaign", "status", "webhook_url", "external_id_display", "missive_support", "additional_config", "metadata"],
+            [
+                "campaign", 
+                "status",
+                "webhook_url",
+                "external_id_display",
+                "missive_support",
+                "thread_id",
+                "thread_type",
+            ],
         )
-        self.add_to_fieldset(
-            _("Timestamps"),
-            ["created_at", "updated_at"],
-        )
+        self.add_to_fieldset(_("Comment/Timestamps"), ["comment", "created_at", "updated_at"], classes=("wide", "collapse"))
+        self.add_to_fieldset(_("Configs"), ["additional_context", "metadata", "additional_config"], classes=("wide", "collapse"))
         self.add_to_fieldset(
             _("Billing"),
             [
@@ -349,6 +399,7 @@ class MissiveAdmin(AdminBoostModel):
     def has_prepare_missive_permission(self, request, obj=None):
         return obj and obj.pk and self.provider_has_service(obj, "prepare")
 
+    @admin_boost_action("prepare_missive", _("Prepare"))
     def handle_prepare_missive(self, request, object_id):
         object_id = unquote(object_id)
         obj = self.get_object(request, object_id)
@@ -358,15 +409,39 @@ class MissiveAdmin(AdminBoostModel):
     def has_send_missive_permission(self, request, obj=None):
         return obj and obj.can_send()
 
+    def has_resend_missive_permission(self, request, obj=None):
+        return obj and obj.can_resend()
+
+    @admin_boost_action("resend_missive", _("Resend"))
+    def handle_resend_missive(self, request, object_id):
+        object_id = unquote(object_id)
+        obj = self.get_object(request, object_id)
+        return redirect(reverse("admin:django_pymissive_missive_resend_missive", args=[obj.pk]))
+
+    @admin_boost_view("confirm", _("Resend"), hidden=True)
+    def resend_missive(self, request, obj, confirmed=False):
+        if not confirmed:
+            return {"confirm": _("Are you sure you want to resend this missive?")}  
+        obj.resend_missive()
+        messages.success(request, _("Missive resent successfully."))
+
     def handle_send_missive(self, request, object_id):
         object_id = unquote(object_id)
         obj = self.get_object(request, object_id)
+        return redirect(reverse("admin:django_pymissive_missive_send_missive", args=[obj.pk]))
+
+    @admin_boost_view("confirm", _("Send"), hidden=True)
+    def send_missive(self, request, obj, confirmed=False):
+        if not confirmed:
+            return {"confirm": _("Are you sure you want to send this missive?")}
         obj.send_missive()
         messages.success(request, _("Missive sent successfully."))
+        return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
 
     def has_cancel_missive_permission(self, request, obj=None):
         return obj and obj.pk and self.provider_has_service(obj, "cancel")
 
+    @admin_boost_action("cancel_missive", _("Cancel"))
     def handle_cancel_missive(self, request, object_id):
         object_id = unquote(object_id)
         obj = self.get_object(request, object_id)
@@ -376,6 +451,7 @@ class MissiveAdmin(AdminBoostModel):
     def has_status_missive_permission(self, request, obj=None):
         return obj and obj.pk and self.provider_has_service(obj, "status") and obj.external_id
 
+    @admin_boost_action("status_missive", _("Status"))
     def handle_status_missive(self, request, object_id):
         object_id = unquote(object_id)
         obj = self.get_object(request, object_id)
@@ -385,35 +461,40 @@ class MissiveAdmin(AdminBoostModel):
     def has_duplicate_missive_permission(self, request, obj=None):
         return obj and obj.pk
 
+    @admin_boost_action("duplicate_missive", _("Duplicate"))
     def handle_duplicate_missive(self, request, object_id):
         """Duplicate a missive by creating a copy."""
         object_id = unquote(object_id)
         missive = self.get_object(request, object_id)
-        recipients = missive.to_missiverecipient.all()
-        missive.pk = None
-        missive.id = None
-        missive.external_id = None
-        missive.status = MissiveStatus.DRAFT
-        missive.save()
-
-        for recipient in recipients:
-            recipient.pk = None
-            recipient.id = None
-            recipient.external_id = None
-            recipient.missive = missive
-            recipient.status = MissiveStatus.DRAFT
-            recipient.sent_at = None
-            recipient.delivered_at = None
-            recipient.save()
-
+        new_missive = missive.duplicate_missive()
         messages.success(request, _("Missive duplicated successfully."))
-        return redirect(reverse("admin:django_pymissive_missive_change", args=[missive.pk]))
+        return redirect(reverse("admin:django_pymissive_missive_change", args=[new_missive.pk]))
 
     def has_set_billed_permission(self, request, obj=None):
         return obj and obj.is_billable
 
+    @admin_boost_action("set_billed", _("Mark as paid"))
     def handle_set_billed(self, request, object_id):
         object_id = unquote(object_id)
         obj = self.get_object(request, object_id)
         obj.set_billed()
         messages.success(request, _("Missive marked as paid successfully."))
+
+    @admin_boost_view("redirect", _("Show history"))
+    def handle_history(self, request, obj):
+        url = reverse("admin:django_pymissive_missive_changelist")
+        data = {
+            "thread_type": MissiveThreadType.HISTORY,
+            "thread_id": obj.thread_id,
+        }
+        return url + "?" + urlencode(data)
+
+    @admin_boost_view("redirect", _("Show message"))
+    def handle_message(self, request, obj):
+        url = reverse("admin:django_pymissive_missive_changelist")
+        data = {
+            "thread_type": MissiveThreadType.MESSAGE,
+            "thread_id": obj.thread_id,
+        }
+        return url + "?" + urlencode(data)
+    

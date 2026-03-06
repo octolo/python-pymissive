@@ -10,11 +10,15 @@
     <div class="postal-header">
         <div class="sender-address">
             <h3>{% trans 'Sender' %}</h3>
-            <p>{{ missive.sender_name }}</p>
-            {% if missive.sender_address %}
-                {% for key, value in missive.sender_address.items %}
-                    {% if value %}<p>{{ value }}</p>{% endif %}
-                {% endfor %}
+            {% if missive.sender.name %}<p>{{ missive.sender.name }}</p>{% endif %}
+            {% if missive.sender.address %}
+                {% if missive.sender.address.items %}
+                    {% for key, value in missive.sender.address.items %}
+                        {% if value %}<p>{{ value }}</p>{% endif %}
+                    {% endfor %}
+                {% else %}
+                    <p>{{ missive.sender.address }}</p>
+                {% endif %}
             {% endif %}
         </div>
         <div class="recipient-address">

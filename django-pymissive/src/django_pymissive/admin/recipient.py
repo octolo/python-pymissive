@@ -136,10 +136,7 @@ class MissiveRecipientAdmin(AdminBoostModel):
         """Configure fieldsets for change view."""
         self.add_to_fieldset(None, ["missive", "recipient_support", "recipient_type", "status", "name"])
         self.add_to_fieldset(_("Target"), ["email", "phone", "address", "notification_id", "external_id"])
-        self.add_to_fieldset(
-            _("Timestamps"),
-            ["created_at", "updated_at", "sent_at", "delivered_at"],
-        )
+        self.add_to_fieldset(_("Comment/Timestamps"), ["comment", "created_at", "updated_at"])
 
     def recipient_display(self, obj):
         """Display the recipient name and email or phone or address."""

@@ -97,17 +97,30 @@ MISSIVE_SCALEWAY_SNS_SECRET_KEY = (
     "fckt8EDSXXG5VOrQpWKDlwCtTuHleANDdE7kYIfWwXHcl70UEbWjmC5Q6QQ7q2l1"
 )
 
-INSTALLED_APPS += [
-    "djrichtextfield",
-]
-PYMISSIVE_RICHTEXT_WIDGET = "djrichtextfield.widgets.RichTextWidget"
-DJRICHTEXTFIELD_CONFIG = {
-    'js': [f'//cdn.tiny.cloud/1/{os.getenv("TINYMCE_API_KEY")}/tinymce/5/tinymce.min.js'],
-    'init_template': 'djrichtextfield/init/tinymce.js',
-    'settings': {
-        'menubar': False,
-        'plugins': 'link image',
-        'toolbar': 'bold italic | link image | removeformat',
-        'width': 700
+try:
+    from django_json_widget.widgets import JSONEditorWidget
+    INSTALLED_APPS += [
+        "django_json_widget",
+    ]
+    PYMISSIVE_JSON_WIDGET = "django_json_widget.widgets.JSONEditorWidget"
+except ImportError:
+    pass
+
+try:
+    import djrichtextfield
+    INSTALLED_APPS += [
+        "djrichtextfield",
+    ]
+    #PYMISSIVE_RICHTEXT_WIDGET = "djrichtextfield.widgets.RichTextWidget"
+    DJRICHTEXTFIELD_CONFIG = {
+        'js': [f'//cdn.tiny.cloud/1/{os.getenv("TINYMCE_API_KEY")}/tinymce/5/tinymce.min.js'],
+        'init_template': 'djrichtextfield/init/tinymce.js',
+        'settings': {
+            'menubar': False,
+            'plugins': 'link image',
+            'toolbar': 'bold italic | link image | removeformat',
+            'width': 700
+        }
     }
-}
+except ImportError:
+    pass

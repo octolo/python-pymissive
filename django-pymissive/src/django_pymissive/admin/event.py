@@ -97,6 +97,8 @@ class MissiveEventAdmin(AdminBoostModel, BaseMissiveEventAdmin):
         "occurred_at",
         "user_action",
         "billing_display",
+        "created_at",
+        "updated_at",
     ]
     raw_id_fields = ["missive", "recipient"]
     changeform_actions = {
@@ -122,12 +124,13 @@ class MissiveEventAdmin(AdminBoostModel, BaseMissiveEventAdmin):
         """Configure fieldsets for change view."""
         self.add_to_fieldset(
             _("Details"),
-            ["metadata", "occurred_at", "trace", "user_action"],
+            ["occurred_at", "trace", "user_action", "metadata",],
         )
         self.add_to_fieldset(
             _("Billing"),
             ["billing_amount", "estimate_amount", "is_billed"],
         )
+        self.add_to_fieldset(_("Comment/Timestamps"), ["comment", "created_at", "updated_at"])
 
     def has_add_permission(self, request):
         return False

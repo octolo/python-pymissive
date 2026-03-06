@@ -3,13 +3,14 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+from .base import CommentTimestampedModel
 from .choices import MissiveEventType
 from ..managers.event import MissiveEventManager
 from django.utils import timezone
+from ..fields import JSONField
 
 
-
-class MissiveEvent(models.Model):
+class MissiveEvent(CommentTimestampedModel):
     """Event tracking for missives (status changes, webhooks, etc.)."""
 
     missive = models.ForeignKey(
@@ -47,14 +48,14 @@ class MissiveEvent(models.Model):
         help_text=_("Description or details about this event"),
     )
 
-    metadata = models.JSONField(
+    metadata = JSONField(
         default=dict,
         blank=True,
         verbose_name=_("Metadata"),
         help_text=_("Additional metadata as JSON"),
     )
 
-    trace = models.JSONField(
+    trace = JSONField(
         default=dict,
         blank=True,
         verbose_name=_("Trace"),

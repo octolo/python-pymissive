@@ -2,7 +2,7 @@
 
 import uuid
 from typing import Optional
-
+from django.db import transaction
 from django.core.exceptions import ValidationError, ObjectDoesNotExist
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -25,9 +25,16 @@ from .choices import (
     get_missive_support_from_type,
     MissiveRecipientType,
     MissiveAttachmentType,
+    MissiveThreadType,
 )
-from ..managers import MissiveManager
-from ..fields import RichTextField
+from ..managers import (
+    MissiveManager,
+    MissiveMessageManager,
+    MissiveHistoryManager,
+)
+from ..models.base import CommentTimestampedModel
+from ..fields import RichTextField, JSONField
+from django.core import signing
 
 
 SEPARATOR = "\n--------------------------------\n"
@@ -46,9 +53,14 @@ PREVIEW_TPL_HTML = """<a href='{url}' target='_blank' rel='noopener' style='{sty
 </a>"""
 
 
-class Missive(models.Model):
+class Missive(CommentTimestampedModel):
     """Multi-channel missive model (email, SMS, postal, WhatsApp, etc.)."""
-
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name=_("ID"),
+    )
     campaign = models.ForeignKey(
         "django_pymissive.MissiveCampaign",
         on_delete=models.SET_NULL,
@@ -58,11 +70,19 @@ class Missive(models.Model):
         verbose_name=_("Campaign"),
         help_text=_("Optional campaign this missive belongs to"),
     )
-    id = models.UUIDField(
-        primary_key=True,
+    thread_id = models.UUIDField(
         default=uuid.uuid4,
         editable=False,
-        verbose_name=_("ID"),
+        verbose_name=_("Thread"),
+        help_text=_("Thread ID for the missive"),
+        db_index=True,
+    )
+    thread_type = models.CharField(
+        max_length=50,
+        choices=MissiveThreadType.choices,
+        default=MissiveThreadType.MISSIVE,
+        verbose_name=_("Thread Type"),
+        help_text=_("Type of thread (missive, message, history)"),
     )
     provider = ProviderField(
         package_name="pymissive",
@@ -162,6 +182,33 @@ class Missive(models.Model):
         help_text=_("Postal address of the sender"),
     )
 
+    # Reply-To (email only)
+    reply_to_name = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name=_("Reply-To name"),
+        help_text=_("Display name for reply-to address"),
+    )
+    reply_to_email = models.EmailField(
+        blank=True,
+        null=True,
+        verbose_name=_("Reply-To email"),
+        help_text=_("Email address for replies"),
+    )
+    reply_to_address = GeoaddressField(
+        max_length=512,
+        blank=True,
+        null=True,
+        verbose_name=_("Reply-To address"),
+        help_text=_("Postal address for replies"),
+    )
+    additional_context = JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("Additional context"),
+        help_text=_("Additional context as JSON"),
+    )
     external_id = models.CharField(
         max_length=255,
         blank=True,
@@ -170,25 +217,17 @@ class Missive(models.Model):
         verbose_name=_("External ID"),
         help_text=_("External identifier from the provider"),
     )
-    metadata = models.JSONField(
+    metadata = JSONField(
         default=dict,
         blank=True,
         verbose_name=_("Metadata"),
         help_text=_("Additional metadata as JSON"),
     )
-    additional_config = models.JSONField(
+    additional_config = JSONField(
         default=dict,
         blank=True,
-        verbose_name=_("Additional Config"),
+        verbose_name=_("Additional configuration"),
         help_text=_("Additional configuration as JSON"),
-    )
-    created_at = models.DateTimeField(
-        auto_now_add=True,
-        verbose_name=_("Created At"),
-    )
-    updated_at = models.DateTimeField(
-        auto_now=True,
-        verbose_name=_("Updated At"),
     )
     webhook_url = models.URLField(
         max_length=255,
@@ -196,6 +235,15 @@ class Missive(models.Model):
         null=True,
         verbose_name=_("Webhook URL"),
         help_text=_("Webhook URL for the missive"),
+    )
+    message_by = models.ForeignKey(
+        "django_pymissive.MissiveRecipient",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="to_missivemessageby",
+        verbose_name=_("Reply by"),
+        help_text=_("Recipient who sent this reply (for inbound exchanges)"),
     )
 
     objects = MissiveManager()
@@ -219,16 +267,16 @@ class Missive(models.Model):
         if not self.acknowledgement:
             self.acknowledgement = self.campaign.acknowledgement if self.campaign else AcknowledgementLevel.BASIC_DELIVERY
         super().save(*args, **kwargs)
-        if not self.priority:
-            self.priority = self.campaign.priority if self.campaign else MissivePriority.NORMAL
-        if not self.acknowledgement:
-            self.acknowledgement = self.campaign.acknowledgement if self.campaign else AcknowledgementLevel.BASIC_DELIVERY
-        super().save(*args, **kwargs)
 
     def has_service(self, service):
         service_name = f"{service}_{self.missive_type}".lower()
         if self.provider:
             return hasattr(self.provider._provider, service_name)
+
+    @property
+    def token_missive(self):
+        data = {"id": str(self.id)}
+        return signing.dumps(data)
 
     @property
     def can_be_modified(self):
@@ -238,13 +286,46 @@ class Missive(models.Model):
     def last_event_display(self):
         return dict(MissiveEventType.choices).get(self.last_event, self.last_event)
 
+    def get_locally_or_campaign_value(self, field, fallback=None):
+        locally = getattr(self, field, fallback)
+        if not locally and self.campaign and getattr(self.campaign, field):
+            return getattr(self.campaign, field)
+        return locally
+
+    @property
+    def sender(self):
+        return self.get_sender()
+
+    @property
+    def reply_to(self):
+        return self.get_reply_to()
+
     def get_sender(self):
         support = self.missive_support.lower()
-        sender = getattr(self, f"sender_{support}")
+        name = (
+            self.get_locally_or_campaign_value(f"sender_{support}_name")
+            or self.get_locally_or_campaign_value("sender_name")
+        )
+        sender = self.get_locally_or_campaign_value(f"sender_{support}", getattr(self, f"sender_{support}", None))
         return {
-            "name": self.sender_name or "",
+            "name": name or "",
             support: str(sender) if sender else "",
         }
+
+    def get_reply_to(self):
+        """Return reply_to dict for provider (email only)."""
+        support = self.missive_support.lower()
+        name = (
+            self.get_locally_or_campaign_value(f"reply_to_{support}_name")
+            or self.get_locally_or_campaign_value("reply_to_name")
+        )
+        reply_to = self.get_locally_or_campaign_value(f"reply_to_{support}", getattr(self, f"reply_to_{support}", None))
+        if reply_to:
+            return {
+                "name": name or "",
+                support: str(reply_to),
+            }
+        return None
 
     def get_serialized_data(self):
         """Serialize missive data to a dictionary for provider calls."""
@@ -258,13 +339,11 @@ class Missive(models.Model):
             and not field.name.startswith("_")
             and field.name not in ["body", "body_text"]
         }
-        missive_data["body"] = self.body_compiled()
-        missive_data["body_text"] = self.body_text_compiled()
+        missive_data["body"] = self.body_compiled
+        missive_data["body_text"] = self.body_text_compiled
         missive_data["recipients"] = [
             recipient.get_serialized_data() for recipient in self.recipients
         ]
-        if isinstance(self.reply_to, MissiveRecipient) and self.reply_to:
-            missive_data["reply_to"] = self.reply_to.get_serialized_data()
         if self.cc:
             missive_data["cc"] = [
                 recipient.get_serialized_data() for recipient in self.cc
@@ -274,6 +353,7 @@ class Missive(models.Model):
                 recipient.get_serialized_data() for recipient in self.bcc
             ]
         missive_data["sender"] = self.get_sender()
+        missive_data["reply_to"] = self.get_reply_to()
         missive_data["attachments"] = self.get_serialized_attachments(linked=False)
         missive_data.update(self.additional_config)
         return missive_data
@@ -288,6 +368,12 @@ class Missive(models.Model):
     #########################################################
 
     def can_send(self):
+        if self.has_service("send") and not self.external_id:
+            service_method = f"check_{self.missive_type}"
+            return getattr(self, service_method)() if hasattr(self, service_method) else True
+        return False
+
+    def can_resend(self):
         if self.has_service("send"):
             service_method = f"check_{self.missive_type}"
             return getattr(self, service_method)() if hasattr(self, service_method) else True
@@ -327,24 +413,51 @@ class Missive(models.Model):
 
     def missive_context(self):
         """Get the context of the missive."""
-        return {
+        context = getattr(self.campaign, "additional_context", {})
+        context.update(self.additional_context or {})
+        context.update({
             "show_preview_browser": self.show_preview_browser,
             "show_preview_browser_text": self.show_preview_browser_text,
             "show_attahcments_linked": self.show_attachments_linked,
             "show_attachments_linked_text": self.show_attachments_linked_text,
-        }
+        })
+        return context
 
+    @property
+    def subject_compiled(self):
+        """Compile the subject of the missive."""
+        context = self.missive_context()
+        tpl = self.get_locally_or_campaign_value("subject")
+        return Template(tpl).render(Context(context))
+
+    @property
     def body_compiled(self):
         """Compile the body of the missive."""
         context = self.missive_context()
-        tpl = self.body or self.campain.get_body("body", self.missive_type)
-        return Template(self.body).render(Context(context))
+        tpl = self.get_locally_or_campaign_value("body")
+        return Template(tpl).render(Context(context))
 
+    @property
     def body_text_compiled(self):
         """Compile the body text of the missive."""
         context = self.missive_context()
-        tpl = self.body_text or self.campaign.get_body("body_text", self.missive_type)
-        return Template(self.body_text).render(Context(context))
+        tpl = self.get_locally_or_campaign_value("body_text")
+        return Template(tpl).render(Context(context))
+
+
+    @property
+    def body_sms_compiled(self):
+        """Compile the body SMS of the missive."""
+        context = self.missive_context()
+        tpl = self.get_locally_or_campaign_value("body_sms", self.body_text)
+        return Template(tpl).render(Context(context))
+
+    @property
+    def body_postal_compiled(self):
+        """Compile the body postal of the missive."""
+        context = self.missive_context()
+        tpl = self.get_locally_or_campaign_value("body_postal", self.body)
+        return Template(tpl).render(Context(context))
 
     #########################################################
     # Attachments
@@ -407,6 +520,40 @@ class Missive(models.Model):
     # Services
     #########################################################
 
+    @transaction.atomic
+    def resend_missive(self):
+        """Resend the missive."""
+        if not self.can_resend():
+            raise ValidationError(_("Missive cannot be resend"))
+        new_missive = self.duplicate_missive(thread_type=MissiveThreadType.HISTORY, thread_id=self.thread_id)
+        new_missive.send_missive()
+        return new_missive
+
+    @transaction.atomic
+    def duplicate_missive(self, thread_type=MissiveThreadType.MISSIVE, thread_id=None):
+        """Duplicate the missive."""
+        new_missive = self
+        new_missive.pk = None
+        new_missive.id = None
+        new_missive.external_id = None
+        new_missive.thread_id = thread_id or uuid.uuid4()
+        new_missive.thread_type = thread_type
+        new_missive.status = MissiveStatus.DRAFT
+        new_missive.save()
+
+        for recipient in self.to_missiverecipient.all():
+            new_recipient = recipient
+            new_recipient.pk = None
+            new_recipient.id = None
+            new_recipient.external_id = None
+            new_recipient.missive = new_missive
+            new_recipient.status = MissiveStatus.DRAFT
+            new_recipient.sent_at = None
+            new_recipient.delivered_at = None
+            new_recipient.save()
+
+        return new_missive
+
     def prepare_missive(self):
         """Prepare the missive for sending."""
         self.status = MissiveStatus.PROCESSING
@@ -468,15 +615,6 @@ class Missive(models.Model):
     #########################################################
     # Recipients
     #########################################################
-
-    @property
-    def reply_to(self):
-        try:
-            return self.to_missiverecipient.get(
-                recipient_type=MissiveRecipientType.REPLY_TO
-            )
-        except ObjectDoesNotExist:
-            return _("Unknown reply to")
 
     @property
     def recipients(self):
@@ -542,3 +680,25 @@ class Missive(models.Model):
             raise ValidationError({
                 "body": _("Body or attachments are required (in missive or campaign)"),
             })
+
+
+class MissiveHistory(Missive):
+    """Missive history model."""
+    objects = MissiveHistoryManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Missive History")
+        verbose_name_plural = _("Missive Histories")
+        ordering = ["-created_at"]
+
+
+class MissiveMessage(Missive):
+    """Missive message model."""
+    objects = MissiveMessageManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Missive Message")
+        verbose_name_plural = _("Missive Messages")
+        ordering = ["-created_at"]

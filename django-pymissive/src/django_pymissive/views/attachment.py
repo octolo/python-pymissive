@@ -22,27 +22,27 @@ class MissiveAttachmentDownloadView(DetailView):
             raise Http404
         return qs
 
-    def _build_response(self, doc_obj, doc):
-        """Build HTTP response from document object and document content."""
-        if hasattr(doc, "read") and hasattr(doc, "name"):
-            doc.open("rb")
-            name = (doc.name and doc.name.split("/")[-1]) or "unnamed_document"
-            return FileResponse(doc, as_attachment=True, filename=name)
-        if isinstance(doc, dict) and "url" in doc:
-            return redirect(doc["url"])
-        if isinstance(doc, dict) and "content" in doc:
-            content = doc["content"]
-            name = doc.get("name", "unnamed_document")
+    def _build_response(self, attachment_obj, attachment):
+        """Build HTTP response from attachment object and attachment content."""
+        if hasattr(attachment, "read") and hasattr(attachment, "name"):
+            attachment.open("rb")
+            name = (attachment.name and attachment.name.split("/")[-1]) or "unnamed_attachment"
+            return FileResponse(attachment, as_attachment=True, filename=name)
+        if isinstance(attachment, dict) and "url" in attachment:
+            return redirect(attachment["url"])
+        if isinstance(attachment, dict) and "content" in attachment:
+            content = attachment["content"]
+            name = attachment.get("name", "unnamed_attachment")
         else:
-            content = doc
-            name = (getattr(doc_obj, "document_metadata", None) or {}).get(
-                "name", "unnamed_document"
+            content = attachment
+            name = (getattr(attachment_obj, "metadata", None) or {}).get(
+                "name", "unnamed_attachment"
             )
         response = HttpResponse(content, content_type="application/octet-stream")
         response["Content-Disposition"] = f'attachment; filename="{name}"'
         return response
 
     def get(self, request, *args, **kwargs):
-        doc_obj = self.get_object()
-        doc = doc_obj.get_attachment()
-        return self._build_response(doc_obj, doc)
+        attachment_obj = self.get_object()
+        attachment = attachment_obj.get_attachment()
+        return self._build_response(attachment_obj, attachment)

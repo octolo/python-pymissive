@@ -28,6 +28,10 @@
     margin-bottom: 20px;
 }
 
+.email-html > pre {
+    white-space: break-spaces;
+}
+
 .empty {
     color: #999;
     font-style: italic;

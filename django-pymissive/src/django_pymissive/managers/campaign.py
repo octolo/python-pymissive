@@ -29,6 +29,7 @@ class MissiveCampaignManager(models.Manager):
             last_send_date=self.last_scheduled_subquery("send_date"),
             last_ended_at=self.last_scheduled_subquery("ended_at"),
             count_missive=models.Count("to_missive", distinct=True),
+            count_missive_draft=models.Count("to_missive", filter=Q(to_missive__status=MissiveStatus.DRAFT), distinct=True),
             count_recipient=models.Count(
                 "to_missive__to_missiverecipient", distinct=True
             ),

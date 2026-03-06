@@ -79,6 +79,9 @@ MISSIVE_STYLE_MAP = {
     "NORMAL": "secondary",
     "HIGH": "warning",
     "URGENT": "danger",
+    "history": "secondary",
+    "message": "primary",
+    "missive": "info",
 }
 
 
@@ -121,9 +124,15 @@ class MissiveRecipientType(models.TextChoices):
     """Recipient types."""
 
     RECIPIENT = "recipient", _("Recipient")
-    REPLY_TO = "reply_to", _("Reply To")
     CC = "cc", _("CC")
     BCC = "bcc", _("BCC")
+
+
+class MessageDirection(models.TextChoices):
+    """Message direction in an exchange."""
+
+    INBOUND = "inbound", _("Inbound")
+    OUTBOUND = "outbound", _("Outbound")
 
 
 class MissiveAttachmentType(models.TextChoices):
@@ -135,3 +144,11 @@ class MissiveAttachmentType(models.TextChoices):
     RECEIPT = "receipt", _("Receipt")
     PROOF = "proof", _("Proof")
     OTHER = "other", _("Other")
+
+
+class MissiveThreadType(models.TextChoices):
+    """Thread types."""
+
+    MISSIVE = "missive", _("Missive")
+    MESSAGE = "message", _("Message")
+    HISTORY = "history", _("History")

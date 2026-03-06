@@ -127,16 +127,17 @@ def _phone_from_post(post_data, prefix):
 
 def _build_sms_context(instance, post_data=None):
     """SMS sender context; fallback to POST when instance is empty."""
-    phone = getattr(instance, "sender_phone", None)
+    sender = getattr(instance, "sender", None) or getattr(instance, "phone_sender", {}) or {}
     ctx = {
-        "sender_name": getattr(instance, "sender_name", "") or "",
-        "sender_phone": str(phone) if phone else "",
+        "sender": sender,
     }
-    if post_data and (not ctx["sender_phone"] or not ctx["sender_name"]):
-        if not ctx["sender_phone"]:
-            ctx["sender_phone"] = _phone_from_post(post_data, "sender_phone")
-        if not ctx["sender_name"]:
-            ctx["sender_name"] = post_data.get("sender_name", "")
+    if post_data and (not sender.get("phone") or not sender.get("name")):
+        updated = dict(sender)
+        if not updated.get("phone"):
+            updated["phone"] = _phone_from_post(post_data, "sender_phone")
+        if not updated.get("name"):
+            updated["name"] = post_data.get("sender_phone_name", "") or post_data.get("sender_name", "")
+        ctx["sender"] = updated
     return ctx
 
 
@@ -153,11 +154,11 @@ def _build_context_by_type(preview_type, instance, post_data=None):
 
 def _build_email_context(instance):
     """Email header context; recipients from to_missiverecipient when saved."""
+    sender = getattr(instance, "sender", None) or getattr(instance, "email_sender", None) or {}
+    reply_to = getattr(instance, "reply_to", None) or getattr(instance, "email_reply_to", None)
     context = {
-        "sender_name": getattr(instance, "sender_name", "") or "",
-        "sender_email": getattr(instance, "sender_email", "") or "",
-        "reply_to_name": "",
-        "reply_to_email": "",
+        "sender": sender,
+        "reply_to": reply_to,
         "to_recipients": [],
         "cc_recipients": [],
         "bcc_recipients": [],
@@ -169,17 +170,15 @@ def _build_email_context(instance):
 
     try:
         for r in recipient_manager.all():
-            email = _format_recipient_email(r)
-            item = {"name": r.name or "", "email": email}
-            if r.recipient_type == MissiveRecipientType.REPLY_TO:
-                context["reply_to_name"] = r.name or ""
-                context["reply_to_email"] = email
-            elif r.recipient_type == MissiveRecipientType.RECIPIENT:
-                context["to_recipients"].append(item)
+            if r.recipient_type == MissiveRecipientType.RECIPIENT:
+                email = _format_recipient_email(r)
+                context["to_recipients"].append({"name": r.name or "", "email": email})
             elif r.recipient_type == MissiveRecipientType.CC:
-                context["cc_recipients"].append(item)
+                email = _format_recipient_email(r)
+                context["cc_recipients"].append({"name": r.name or "", "email": email})
             elif r.recipient_type == MissiveRecipientType.BCC:
-                context["bcc_recipients"].append(item)
+                email = _format_recipient_email(r)
+                context["bcc_recipients"].append({"name": r.name or "", "email": email})
     except Exception:
         pass
 
@@ -204,20 +203,17 @@ def _campaign_to_missive_preview(campaign, preview_type):
             body_text=campaign.body_text,
             body_compiled=campaign.body_compiled,
             body_text_compiled=campaign.body_text_compiled,
-            sender_name=campaign.sender_name or "",
-            sender_email=campaign.sender_email or "",
-            sender_phone="",
-            recipient_name="",
-            sender_address=None,
-            recipient_address=None,
+            sender=campaign.email_sender or {},
+            reply_to=campaign.email_reply_to,
             attachments_physical=attachments_physical,
         )
     if preview_type == "sms":
+        body_sms = getattr(campaign, "body_sms", "") or ""
         return SimpleNamespace(
-            body_text=getattr(campaign, "body_sms", "") or "",
+            body_text=body_sms,
+            body_sms_compiled=body_sms,
             body="",
-            sender_name=campaign.sender_name or "",
-            sender_phone=getattr(campaign, "sender_phone", "") or "",
+            sender=campaign.phone_sender or {},
             attachments_physical=attachments_physical,
         )
     # postal
@@ -228,8 +224,7 @@ def _campaign_to_missive_preview(campaign, preview_type):
             else getattr(campaign, "body_postal", "") or ""
         ),
         body_text="",
-        sender_name=campaign.sender_name or "",
-        sender_address=getattr(campaign, "sender_address", None),
+        sender=campaign.address_sender or {},
         recipient_name="",
         recipient_address=None,
         attachments_physical=attachments_physical,

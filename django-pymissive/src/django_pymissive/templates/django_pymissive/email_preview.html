@@ -9,13 +9,11 @@
 <div class="email-preview">
     <div class="email-header">
         <p><strong>{% trans 'From' %}:</strong>
-            {% if sender_name %}{{ sender_name }} {% endif %}
-            &lt;{{ sender_email }}&gt;
+            {% if sender.name %}{{ sender.name }} {% endif %}&lt;{{ sender.email }}&gt;
         </p>
-        {% if reply_to_email %}
+        {% if reply_to %}
         <p><strong>{% trans 'Reply-To' %}:</strong>
-            {% if reply_to_name %}{{ reply_to_name }} {% endif %}
-            &lt;{{ reply_to_email }}&gt;
+            {% if reply_to.name %}{{ reply_to.name }} {% endif %}&lt;{{ reply_to.email }}&gt;
         </p>
         {% endif %}
         <p><strong>{% trans 'To' %}:</strong>
@@ -35,24 +33,24 @@
             {% for r in bcc_recipients %}{% if not forloop.first %}, {% endif %}{% if r.name %}{{ r.name }} {% endif %}&lt;{{ r.email }}&gt;{% endfor %}
         </p>
         {% endif %}
-        {% if missive.subject %}
-        <p><strong>{% trans 'Subject' %}:</strong> {{ missive.subject }}</p>
+        {% if missive.subject_compiled %}
+        <p><strong>{% trans 'Subject' %}:</strong> {{ missive.subject_compiled }}</p>
         {% endif %}
     </div>
     <div class="email-body">
-        {% if missive.body %}
+        {% if missive.body_compiled %}
             <fieldset class="email-html">
                 <legend>HTML Content</legend>
                 {{ missive.body_compiled|safe }}
             </fieldset>
         {% endif %}
-        {% if missive.body_text %}
+        {% if missive.body_text_compiled %}
             <fieldset class="email-html">
                 <legend>Plain Text Content</legend>
                 <pre>{{ missive.body_text_compiled }}</pre>
             </fieldset>
         {% endif %}
-        {% if not missive.body and not missive.body_text %}
+        {% if not missive.body_compiled and not missive.body_text_compiled %}
             <p class="empty">{% trans 'No content' %}</p>
         {% endif %}
     </div>

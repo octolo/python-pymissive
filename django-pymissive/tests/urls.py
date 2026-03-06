@@ -14,8 +14,16 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("geoaddress/", include("django_geoaddress.urls")),
     path("missive/", include("django_pymissive.urls")),
-    path('djrichtextfield/', include('djrichtextfield.urls'))
+
 ]
+
+try:
+    import djrichtextfield
+    urlpatterns += [
+        path('djrichtextfield/', include('djrichtextfield.urls'))
+    ]
+except ImportError:
+    pass
 
 _version = f"(Django {django.get_version()}, pymissive {pymissive.__version__}/{django_pymissive.__version__})"
 admin.site.site_header = f"Django Pymissive - Administration {_version}"

@@ -5,10 +5,11 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+from .base import CommentTimestampedModel
 from ..managers.related_object import MissiveRelatedObjectManager, CampaignRelatedObjectManager
 
 
-class BaseRelatedObject(models.Model):
+class BaseRelatedObject(CommentTimestampedModel):
     """Model to link a missive or campaign to any other Django model."""
 
     content_type = models.ForeignKey(
@@ -29,10 +30,6 @@ class BaseRelatedObject(models.Model):
         help_text=_(
             "String representation of the related object (saved for reference if object is deleted)"
         ),
-    )
-    created_at = models.DateTimeField(
-        auto_now_add=True,
-        verbose_name=_("Created At"),
     )
     objects = MissiveRelatedObjectManager()
 

@@ -4,6 +4,7 @@ from django.utils.translation import gettext_lazy as _
 from phonenumber_field.modelfields import PhoneNumberField
 from django_geoaddress.fields import GeoaddressField
 
+from .base import CommentTimestampedModel
 from .choices import (
     MissiveRecipientType,
     MissiveStatus,
@@ -19,7 +20,7 @@ from ..managers.recipient import (
 )
 
 
-class MissiveRecipient(models.Model):
+class MissiveRecipient(CommentTimestampedModel):
     """Recipient model"""
 
     missive = models.ForeignKey(
@@ -93,16 +94,6 @@ class MissiveRecipient(models.Model):
         help_text=_("External identifier from the provider"),
     )
 
-    created_at = models.DateTimeField(
-        auto_now_add=True,
-        verbose_name=_("Created At"),
-        editable=False,
-    )
-    updated_at = models.DateTimeField(
-        auto_now=True,
-        verbose_name=_("Updated At"),
-        editable=False,
-    )
     sent_at = models.DateTimeField(
         null=True,
         blank=True,

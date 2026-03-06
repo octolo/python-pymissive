@@ -24,12 +24,16 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
         "scheduled_send_date",
         "send_date",
         "ended_at",
+        "comment",
+        "additional_config",
     ]
     readonly_fields = [
         "campaign",
         "scheduled_send_date",
         "send_date",
         "ended_at",
+        "created_at",
+        "updated_at",
     ]
 
 
@@ -38,6 +42,12 @@ class MissiveScheduledCampaignInline(admin.TabularInline):
 
     model = MissiveScheduledCampaign
     extra = 0
+    fields = [
+        "scheduled_send_date",
+        "additional_config",
+        "send_date",
+        "ended_at",
+    ]
     readonly_fields = [
         "campaign",
         "send_date",
@@ -64,6 +74,8 @@ class MissiveCampaignAdmin(AdminBoostModel):
         "buttons_show_and_preview_email",
         "buttons_show_and_preview_sms",
         "buttons_show_and_preview_postal",
+        "created_at",
+        "updated_at",
     ]
     inlines = [MissiveScheduledCampaignInline, CampaignAttachmentInline, CampaignVirtualAttachmentInline, CampaignRelatedObjectInline]
     changeform_actions = {
@@ -76,7 +88,7 @@ class MissiveCampaignAdmin(AdminBoostModel):
             {
                 "fields": (
                     "subject",
-                    "sender_name",
+                    "description",
                 )
             },
         ),
@@ -86,16 +98,38 @@ class MissiveCampaignAdmin(AdminBoostModel):
         """Configure fieldsets for change view."""
         self.add_to_fieldset(
             _("Email"),
-            ["sender_email", "body_text", "body", "buttons_show_and_preview_email"],
+            [
+                "sender_email_name",
+                "sender_email",
+                "reply_to_email_name",
+                "reply_to_email",
+                "body_text",
+                "body",
+                "buttons_show_and_preview_email",
+            ],
         )
         self.add_to_fieldset(
             _("SMS"),
-            ["sender_phone", "body_sms", "buttons_show_and_preview_sms"],
+            [
+                "sender_phone_name",
+                "sender_phone",
+                "body_sms",
+                "buttons_show_and_preview_sms",
+            ],
         )
         self.add_to_fieldset(
             _("Postal"),
-            ["sender_address", "body_postal", "buttons_show_and_preview_postal"],
+            [
+                "sender_address_name",
+                "sender_address",
+                "reply_to_address_name",
+                "reply_to_address",
+                "body_postal",
+                "buttons_show_and_preview_postal",
+            ],
         )
+        self.add_to_fieldset(_("Comment/Timestamps"), ["comment", "created_at", "updated_at"], classes=("wide", "collapse"))
+        self.add_to_fieldset(_("Configs"), ["metadata", "additional_context", "additional_config"], classes=("wide", "collapse"))
 
     def _preview_buttons(self, obj, preview_type):
         """Show and Preview buttons for a given type (email, sms, postal)."""

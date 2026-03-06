@@ -34,6 +34,8 @@ class MissiveAttachmentAdmin(AdminBoostModel):
     ]
     readonly_fields = [
         "attachment_object",
+        "created_at",
+        "updated_at",
     ]
     raw_id_fields = ["missive", "campaign",]
 
@@ -46,7 +48,6 @@ class MissiveAttachmentAdmin(AdminBoostModel):
                     "missive",
                     "order",
                     "attachment_file",
-                    "attachment_metadata",
                     "linked",
                 )
             },
@@ -64,6 +65,8 @@ class MissiveAttachmentAdmin(AdminBoostModel):
                 "attachment_object",
             ],
         )
+        self.add_to_fieldset(_("Comment/Timestamps"), ["comment", "created_at", "updated_at"])
+        self.add_to_fieldset(_("Configs"), ["metadata"])
 
 
 class MissiveAttachmentInline(admin.TabularInline):

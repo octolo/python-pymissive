@@ -21,6 +21,8 @@ __all__ = [
     "MissiveCampaignAdmin",
     "MissiveAdmin",
     "MissiveAttachmentAdmin",
+    "MessageAdmin",
+    "MessageInline",
     "MissiveEventAdmin",
     "MissiveRelatedObjectAdmin",
     "MissiveRecipientAdmin",

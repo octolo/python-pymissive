@@ -1,7 +1,11 @@
 """Managers for django_pymissive."""
 
 from .provider import ProviderManager
-from .missive import MissiveManager
+from .missive import (
+    MissiveManager,
+    MissiveMessageManager,
+    MissiveHistoryManager,
+)
 from .campaign import MissiveCampaignManager
 from .event import MissiveEventManager
 from .attachment import (

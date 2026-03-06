@@ -3,10 +3,10 @@ from django.db.models.expressions import Subquery, OuterRef
 from django.db.models import F, Max, Q, Sum
 from django.db.models.functions import Coalesce
 
-from ..models.choices import MissiveRecipientType, MissiveAttachmentType
+from ..models.choices import MissiveAttachmentType, MissiveThreadType
 
 
-class MissiveManager(models.Manager):
+class BaseMissiveManager(models.Manager):
     """Manager for the Missive model."""
 
     def last_event_subquery(self, field: str = "event"):
@@ -34,7 +34,7 @@ class MissiveManager(models.Manager):
             output_field=models.CharField(),
         )
 
-    def get_queryset(self):
+    def get_queryset_annotated(self):
         qs = super().get_queryset()
         qs = qs.select_related("campaign")
         qs = qs.prefetch_related(
@@ -48,13 +48,6 @@ class MissiveManager(models.Manager):
             count_related_object=models.Count("to_missiverelatedobject", distinct=True),
             count_recipient=models.Count("to_missiverecipient", distinct=True),
             count_attachment=models.Count("to_missivedocument", distinct=True),
-            count_target=models.Count(
-                "to_missiverecipient",
-                distinct=True,
-                filter=~Q(
-                    to_missiverecipient__recipient_type=MissiveRecipientType.REPLY_TO,
-                ),
-            ),
             last_event=self.last_event_subquery(field="event"),
             last_event_description=self.last_event_subquery(field="description"),
             last_event_date=Coalesce(
@@ -81,4 +74,56 @@ class MissiveManager(models.Manager):
                 output_field=models.BooleanField(),
             ),
         )
+        return qs
+
+
+class MissiveManager(BaseMissiveManager):
+    """Manager for the Missive model."""
+
+
+    def count_history(self):
+        # Use _base_manager to avoid recursion (get_queryset annotates with count_history)
+        qs = self.model._base_manager.get_queryset().filter(
+            thread_type=MissiveThreadType.HISTORY, thread_id=OuterRef("thread_id")
+        )
+        return Subquery(
+            qs.values("thread_id").annotate(count=models.Count("id")).values("count"),
+            output_field=models.IntegerField(),
+        )
+
+    def count_message(self):
+        # Use _base_manager to avoid recursion (get_queryset annotates with count_message)
+        qs = self.model._base_manager.get_queryset().filter(
+            thread_type=MissiveThreadType.MESSAGE, thread_id=OuterRef("thread_id")
+        )
+        return Subquery(
+            qs.values("thread_id").annotate(count=models.Count("id")).values("count"),
+            output_field=models.IntegerField(),
+        )
+
+    def get_queryset(self):
+        qs = super().get_queryset_annotated()
+        qs = qs.annotate(
+            count_history=self.count_history(),
+            count_message=self.count_message(),
+        )
+        return qs
+
+
+class MissiveHistoryManager(BaseMissiveManager):
+    """Manager for the MissiveHistory model."""
+
+    def get_queryset(self):
+        qs = super().get_queryset_annotated()
+        qs = qs.filter(thread_type=MissiveThreadType.HISTORY)
+        return qs
+
+
+class MissiveMessageManager(BaseMissiveManager):
+    """Manager for the MissiveMessage model."""
+
+    def get_queryset(self):
+        qs = super().get_queryset_annotated()
+        qs = qs.select_related("message_by")
+        qs = qs.filter(thread_type=MissiveThreadType.MESSAGE)
         return qs

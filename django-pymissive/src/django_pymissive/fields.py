@@ -16,3 +16,16 @@ class RichTextField(models.TextField):
 
         kwargs["widget"] = widget_class
         return super().formfield(**kwargs)
+
+
+class JSONField(models.JSONField):
+
+    def formfield(self, **kwargs):
+        from django.conf import settings
+        from django.utils.module_loading import import_string
+
+        widget_path = getattr(settings, "PYMISSIVE_JSON_WIDGET", None)
+        if widget_path:
+            widget_class = import_string(widget_path)
+            kwargs["widget"] = widget_class
+        return super().formfield(**kwargs)

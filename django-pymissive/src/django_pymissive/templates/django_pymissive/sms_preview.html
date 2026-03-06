@@ -17,18 +17,16 @@
                 <div class="notification">
                     <div class="notification-header">
                         <div class="notification-icon">💬</div>
-                    {% if sender_name or sender_phone %}
+                    {% if sender.name or sender.phone %}
                         <div class="notification-info">
-                            <div class="notification-title">{{ sender_name|default:sender_phone|default:_('Unknown') }}</div>
+                            <div class="notification-title">{{ sender.name|default:sender.phone|default:_('Unknown') }}</div>
                             <div class="notification-time">now</div>
                         </div>
                     {% endif %}
                     </div>
                     <div class="notification-body">
-                        {% if missive.body_text %}
-                            {{ missive.body_text|truncatewords:20 }}
-                        {% elif missive.body %}
-                            {{ missive.body|striptags|truncatewords:20 }}
+                        {% if missive.body_sms_compiled %}
+                            {{ missive.body_sms_compiled|truncatewords:20 }}
                         {% else %}
                             <span class="empty">{% trans 'No content' %}</span>
                         {% endif %}
@@ -39,19 +37,15 @@
         <div class="phone-container">
             <div class="phone-screen phone-opened">
                 <div class="sms-header">
-                    <div class="sms-contact-name">{{ sender_name|default:_('Unknown') }}</div>
-                    {% if sender_phone %}
-                    <div class="sms-contact-phone">{{ sender_phone }}</div>
+                    <div class="sms-contact-name">{{ sender.name|default:_('Unknown') }}</div>
+                    {% if sender.phone %}
+                    <div class="sms-contact-phone">{{ sender.phone }}</div>
                     {% endif %}
                 </div>
                 <div class="sms-body">
-                    {% if missive.body_text %}
+                    {% if missive.body_sms_compiled %}
                         <div class="sms-text sms-received">
-                            {{ missive.body_text }}
-                        </div>
-                    {% elif missive.body %}
-                        <div class="sms-text sms-received">
-                            {{ missive.body|striptags }}
+                            {{ missive.body_sms_compiled }}
                         </div>
                     {% else %}
                         <p class="empty">{% trans 'No content' %}</p>

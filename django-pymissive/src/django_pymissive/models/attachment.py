@@ -11,6 +11,7 @@ from django.db import models
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
+from .base import CommentTimestampedModel
 from .choices import MissiveAttachmentType
 from ..managers.attachment import (
     MissiveBaseAttachmentManager,
@@ -19,16 +20,16 @@ from ..managers.attachment import (
     CampaignAttachmentManager,
     CampaignVirtualAttachmentManager,
 )
-
+from ..fields import JSONField
 
 def _attachment_upload_to(instance, filename):
-    """Return upload path based on document class: missivedocument/ or campaigndocument/."""
+    """Return upload path based on attachment class."""
     today = date.today()
-    prefix = "campaigndocument" if instance.campaign else "missivedocument"
+    prefix = "campaignattachment" if instance.campaign else "missiveattachment"
     return f"missive/{prefix}/{today:%Y/%m/%d}/{filename}"
 
 
-class MissiveBaseAttachment(models.Model):
+class MissiveBaseAttachment(CommentTimestampedModel):
     """File attachment for missives or any other model."""
 
     id = models.UUIDField(
@@ -63,7 +64,7 @@ class MissiveBaseAttachment(models.Model):
         choices=MissiveAttachmentType.choices,
         default=MissiveAttachmentType.ATTACHMENT,
         verbose_name=_("Attachment Type"),
-        help_text=_("Type of document (attachment, signature, receipt, proof, other)"),
+        help_text=_("Type of attachment (attachment, signature, receipt, proof, other)"),
     )
 
     attachment_content_type = models.ForeignKey(
@@ -82,7 +83,7 @@ class MissiveBaseAttachment(models.Model):
         help_text=_("ID of the object to which this file is attached"),
     )
 
-    attachment_object_arguments = models.JSONField(
+    attachment_object_arguments = JSONField(
         default=dict({"method": "get_attachment", "args": [], "kwargs": {}}),
         blank=True,
         verbose_name=_("Attachment Object Arguments"),
@@ -97,11 +98,11 @@ class MissiveBaseAttachment(models.Model):
         help_text=_("Leave blank if the attachment is hosted externally"),
     )
 
-    attachment_metadata = models.JSONField(
+    metadata = JSONField(
         default=dict,
         blank=True,
-        verbose_name=_("Attachment Metadata"),
-        help_text=_("Metadata of the attachment"),
+        verbose_name=_("Metadata"),
+        help_text=_("Additional metadata as JSON"),
     )
 
     linked = models.BooleanField(
@@ -178,7 +179,7 @@ class MissiveBaseAttachment(models.Model):
 
     def clean(self):
         """Validates attachment."""
-        if not self.attachment_file and not self.can_access_document():
+        if not self.attachment_file and not self.can_access_attachment():
             raise ValidationError(
                 _(
                     "You must provide either a local attachment or a method to access the attachment."

@@ -10,12 +10,14 @@ from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
 from ..managers.campaign import MissiveCampaignManager
+from ..models.base import CommentTimestampedModel
 from ..models.choices import MissiveStatus, MissivePriority, AcknowledgementLevel
 from django_geoaddress.fields import GeoaddressField
 from phonenumber_field.modelfields import PhoneNumberField
-from ..fields import RichTextField
+from ..fields import RichTextField, JSONField
 
-class MissiveCampaign(models.Model):
+
+class MissiveCampaign(CommentTimestampedModel):
     """Campaign grouping missives for batch sending."""
     id = models.UUIDField(
         primary_key=True,
@@ -28,18 +30,58 @@ class MissiveCampaign(models.Model):
         verbose_name=_("Subject"),
         help_text=_("Campaign subject"),
     )
-    sender_name = models.CharField(
-        max_length=255,
-        verbose_name=_("Sender name"),
-        help_text=_("Campaign sender name"),
+    description = RichTextField(
+        blank=True,
+        verbose_name=_("Description"),
+        help_text=_("Campaign description"),
     )
 
     # Email
+    sender_email_name = models.CharField(
+        max_length=255,
+        verbose_name=_("Sender email name"),
+        help_text=_("Campaign sender email name"),
+        blank=True,
+        null=True,
+    )
     sender_email = models.EmailField(
         verbose_name=_("Sender email"),
         help_text=_("Campaign sender email"),
         blank=True,
         null=True,
+    )
+    reply_to_email_name = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name=_("Reply-To name"),
+        help_text=_("Display name for reply-to address"),
+    )
+    reply_to_email = models.EmailField(
+        blank=True,
+        null=True,
+        verbose_name=_("Reply-To email"),
+        help_text=_("Email address for replies"),
+    )
+    reply_to_address_name = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name=_("Reply-To address name"),
+        help_text=_("Display name for reply-to address"),
+    )
+    reply_to_address = GeoaddressField(
+        max_length=512,
+        blank=True,
+        null=True,
+        verbose_name=_("Reply-To address"),
+        help_text=_("Postal address for replies"),
+    )
+    additional_context = JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("Additional context"),
+        help_text=_("Additional context as JSON"),
     )
 
     body = RichTextField(
@@ -53,6 +95,13 @@ class MissiveCampaign(models.Model):
         help_text=_("Campaign body text"),
     )
 
+    sender_phone_name = models.CharField(
+        max_length=255,
+        verbose_name=_("Sender phone name"),
+        help_text=_("Campaign sender phone name"),
+        blank=True,
+        null=True,
+    )
     sender_phone = PhoneNumberField(
         blank=True,
         null=True,
@@ -68,6 +117,13 @@ class MissiveCampaign(models.Model):
     )
 
     # Postal
+    sender_address_name = models.CharField(
+        max_length=255,
+        verbose_name=_("Sender address name"),
+        help_text=_("Campaign sender address name"),
+        blank=True,
+        null=True,
+    )
     sender_address = GeoaddressField(
         verbose_name=_("Sender address"),
         help_text=_("Campaign sender address"),
@@ -94,6 +150,18 @@ class MissiveCampaign(models.Model):
         verbose_name=_("Priority"),
         help_text=_("Priority level"),
     )
+    metadata = JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("Metadata"),
+        help_text=_("Additional metadata as JSON"),
+    )
+    additional_config = JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("Additional configuration"),
+        help_text=_("Additional configuration as JSON"),
+    )
 
     objects = MissiveCampaignManager()
 
@@ -108,6 +176,44 @@ class MissiveCampaign(models.Model):
     def campaign_context(self):
         """Context for template rendering."""
         return {}
+
+
+    @property
+    def email_reply_to(self):
+        """Reply-to dict for email; None when no reply address."""
+        if not self.reply_to_email:
+            return None
+        return {
+            "name": self.reply_to_email_name or "",
+            "email": str(self.reply_to_email),
+        }
+
+    @property
+    def address_reply_to(self):
+        return {
+            "name": self.reply_to_address_name or "",
+            "address": self.reply_to_address or "",
+        }
+
+    @property
+    def phone_sender(self):
+        return {
+            "name": self.sender_phone_name or "",
+            "phone": self.sender_phone or "",
+        }
+
+    @property
+    def email_sender(self):
+        return {
+            "name": self.sender_email_name or "",
+            "email": self.sender_email or "",
+        }
+    @property
+    def address_sender(self):
+        return {
+            "name": self.sender_address_name or "",
+            "address": self.sender_address or "",
+        }
 
     def body_compiled(self):
         """Render body (email HTML) with campaign context."""
@@ -157,7 +263,7 @@ class MissiveCampaign(models.Model):
         scheduled.start_scheduled_campaign()
 
 
-class MissiveScheduledCampaign(models.Model):
+class MissiveScheduledCampaign(CommentTimestampedModel):
     """Scheduled send for a campaign."""
 
     campaign = models.ForeignKey(
@@ -188,6 +294,12 @@ class MissiveScheduledCampaign(models.Model):
         editable=False,
         verbose_name=_("Ended at"),
         help_text=_("Actual ended date for the campaign"),
+    )
+    additional_config = JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("Additional configuration"),
+        help_text=_("Additional configuration as JSON"),
     )
 
     class Meta:
