@@ -1,0 +1,18 @@
+{% load static i18n %}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - {% trans 'Missive Preview' %}</title>
+    <link rel="stylesheet" href="{% static 'django_pymissive/css/base_preview.css' %}">
+    {% block preview_stylesheet %}{% endblock %}
+</head>
+<body>
+    <div class="missive-preview">
+        <div class="preview-content">
+            {% block preview_content %}{% endblock %}
+        </div>
+    </div>
+</body>
+</html>

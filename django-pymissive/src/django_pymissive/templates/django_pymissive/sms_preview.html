@@ -1,0 +1,58 @@
+{% extends "django_pymissive/base_preview.html" %}
+{% load static i18n %}
+
+{% block preview_stylesheet %}
+<link rel="stylesheet" href="{% static 'django_pymissive/css/sms_preview.css' %}">
+{% endblock %}
+
+{% block preview_content %}
+<div class="sms-preview">
+    <div class="phones-container">
+        <div class="phone-container">
+            <div class="phone-screen phone-locked">
+                <div class="lock-screen-content">
+                    <div class="lock-time">{% now "H:i" %}</div>
+                    <div class="lock-date">{% now "l, F j" %}</div>
+                </div>
+                <div class="notification">
+                    <div class="notification-header">
+                        <div class="notification-icon">💬</div>
+                    {% if sender.name or sender.phone %}
+                        <div class="notification-info">
+                            <div class="notification-title">{{ sender.name|default:sender.phone|default:_('Unknown') }}</div>
+                            <div class="notification-time">now</div>
+                        </div>
+                    {% endif %}
+                    </div>
+                    <div class="notification-body">
+                        {% if missive.body_sms_compiled %}
+                            {{ missive.body_sms_compiled|truncatewords:20 }}
+                        {% else %}
+                            <span class="empty">{% trans 'No content' %}</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="phone-container">
+            <div class="phone-screen phone-opened">
+                <div class="sms-header">
+                    <div class="sms-contact-name">{{ sender.name|default:_('Unknown') }}</div>
+                    {% if sender.phone %}
+                    <div class="sms-contact-phone">{{ sender.phone }}</div>
+                    {% endif %}
+                </div>
+                <div class="sms-body">
+                    {% if missive.body_sms_compiled %}
+                        <div class="sms-text sms-received">
+                            {{ missive.body_sms_compiled }}
+                        </div>
+                    {% else %}
+                        <p class="empty">{% trans 'No content' %}</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

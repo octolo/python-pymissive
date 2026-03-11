@@ -1,0 +1,82 @@
+{% extends "django_pymissive/base_preview.html" %}
+{% load static i18n %}
+
+{% block preview_stylesheet %}
+<link rel="stylesheet" href="{% static 'django_pymissive/css/postal_preview.css' %}">
+{% endblock %}
+
+{% block preview_content %}
+<div class="postal-preview">
+
+    <div class="envelope">
+        <div class="address-block sender-block">
+            <div class="address-label">{% trans "Sender" %}</div>
+            {% if sender.name %}<div class="address-name">{{ sender.name }}</div>{% endif %}
+            {% for line in sender_address_lines %}
+            <div class="address-line">{{ line }}</div>
+            {% empty %}
+            <div class="address-empty">-</div>
+            {% endfor %}
+        </div>
+        {% if delivery_mode_display or priority_display or acknowledgement_display %}
+        <div class="postal-meta">
+            {% if delivery_mode_display %}
+            <span class="meta-badge meta-delivery">{{ delivery_mode_display }}<small>{% trans "Delivery Mode" %}</small></span>
+            {% endif %}
+            {% if priority_display %}
+            <span class="meta-badge meta-priority">{{ priority_display }}<small>{% trans "Priority" %}</small></span>
+            {% endif %}
+            {% if acknowledgement_display %}
+            <span class="meta-badge meta-ack">{{ acknowledgement_display }}<small>{% trans "Acknowledgement Level" %}</small></span>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="a4-page">
+        <div class="a4-header">
+            <div class="a4-recipient">
+                {% if postal_recipients %}
+                    {% with postal_recipients.0 as r %}
+                    {% if r.name %}<div class="address-name">{{ r.name }}</div>{% endif %}
+                    {% for line in r.address_lines %}
+                    <div class="address-line">{{ line }}</div>
+                    {% empty %}
+                    <div class="address-empty">-</div>
+                    {% endfor %}
+                    {% endwith %}
+                {% else %}
+                    <div class="address-empty">{% trans "No recipient" %}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="a4-body">
+            {% if missive.body_postal_compiled %}
+                {{ missive.body_postal_compiled|safe }}
+            {% elif missive.body_html %}
+                {{ missive.body_html|safe }}
+            {% elif missive.body_text %}
+                <pre>{{ missive.body_text }}</pre>
+            {% else %}
+                <p class="empty">{% trans "No content" %}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if missive.attachments_physical %}
+    <div class="postal-attachments">
+        <div class="attachments-label">{% trans "Attachments:" %}</div>
+        <div class="attachments-list">
+            {% for doc in missive.attachments_physical %}
+            <a href="{{ doc.attachment_url.url }}" target="_blank" rel="noopener" class="attachment-item">
+                <span class="attachment-icon">&#128196;</span>
+                <small>{{ doc.attachment_url.name|default:"unnamed" }}</small>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}

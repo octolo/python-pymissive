@@ -1,0 +1,1753 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-03-11 09:34+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#: src/django_pymissive/admin/attachment.py:62
+msgid "Attachment Object"
+msgstr "Objet pièce jointe"
+
+#: src/django_pymissive/admin/attachment.py:70
+#: src/django_pymissive/admin/campaign.py:144
+#: src/django_pymissive/admin/event.py:133
+#: src/django_pymissive/admin/missive.py:366
+#: src/django_pymissive/admin/recipient.py:139
+#: src/django_pymissive/admin/related_object.py:134
+msgid "Comment/Timestamps"
+msgstr "Commentaire/Horodatages"
+
+#: src/django_pymissive/admin/attachment.py:71
+#: src/django_pymissive/admin/campaign.py:149
+#: src/django_pymissive/admin/missive.py:367
+msgid "Configs"
+msgstr "Configurations"
+
+#: src/django_pymissive/admin/campaign.py:91
+msgid "Send Campaign"
+msgstr "Envoyer la campagne"
+
+#: src/django_pymissive/admin/campaign.py:108
+#: src/django_pymissive/translation_catalog.py:41
+msgid "Email"
+msgstr "E-mail"
+
+#: src/django_pymissive/admin/campaign.py:121
+#: src/django_pymissive/translation_catalog.py:92
+msgid "SMS"
+msgstr "SMS"
+
+#: src/django_pymissive/admin/campaign.py:130
+#: src/django_pymissive/translation_catalog.py:65
+msgid "Postal"
+msgstr "Courrier"
+
+#: src/django_pymissive/admin/campaign.py:165
+#: src/django_pymissive/admin/missive.py:283
+msgid "Show"
+msgstr "Afficher"
+
+#: src/django_pymissive/admin/campaign.py:176
+#: src/django_pymissive/admin/missive.py:293
+msgid "Preview"
+msgstr "Aperçu"
+
+#: src/django_pymissive/admin/campaign.py:184
+msgid "Email: Show and Preview"
+msgstr "E-mail : afficher et prévisualiser"
+
+#: src/django_pymissive/admin/campaign.py:189
+msgid "SMS: Show and Preview"
+msgstr "SMS : afficher et prévisualiser"
+
+#: src/django_pymissive/admin/campaign.py:194
+msgid "Postal: Show and Preview"
+msgstr "Courrier : afficher et prévisualiser"
+
+#: src/django_pymissive/admin/campaign.py:198
+#: src/django_pymissive/admin/campaign.py:225
+msgid "{} missive(s)"
+msgstr "{} missive(s)"
+
+#: src/django_pymissive/admin/campaign.py:199
+msgid "{} recipient(s)"
+msgstr "{} destinataire(s)"
+
+#: src/django_pymissive/admin/campaign.py:207
+#: src/django_pymissive/admin/missive.py:313
+msgid "{} related(s)"
+msgstr "{} objet(s) lié(s)"
+
+#: src/django_pymissive/admin/campaign.py:208
+msgid "{} attachment(s)"
+msgstr "{} pièce(s) jointe(s)"
+
+#: src/django_pymissive/admin/campaign.py:220
+msgid "Types"
+msgstr "Types"
+
+#: src/django_pymissive/admin/campaign.py:226
+#: src/django_pymissive/admin/missive.py:309
+msgid "{} event(s)"
+msgstr "{} événement(s)"
+
+#: src/django_pymissive/admin/campaign.py:230
+#, python-format
+msgid "{}% failed"
+msgstr "{}% en échec"
+
+#: src/django_pymissive/admin/campaign.py:235
+#, fuzzy, python-format
+#| msgid "{}% success"
+msgid "{}% success"
+msgstr "{}% en succès"
+
+#: src/django_pymissive/admin/campaign.py:240
+msgid "{}% processing"
+msgstr "{}% en cours"
+
+#: src/django_pymissive/admin/campaign.py:247
+msgid "Stats"
+msgstr "Statistiques"
+
+#: src/django_pymissive/admin/campaign.py:253
+msgid "Last send date"
+msgstr "Dernier envoi"
+
+#: src/django_pymissive/admin/campaign.py:259
+msgid "Last ended at"
+msgstr "Terminé le"
+
+#: src/django_pymissive/admin/campaign.py:265
+msgid "Campaign started successfully."
+msgstr "Campagne démarrée avec succès."
+
+#: src/django_pymissive/admin/campaign.py:267
+msgid "Show missives"
+msgstr "Afficher les missives"
+
+#: src/django_pymissive/admin/campaign.py:273
+msgid "Send missive"
+msgstr "Envoyer une missive"
+
+#: src/django_pymissive/admin/event.py:30
+#: src/django_pymissive/models/event.py:88
+msgid "Billing Amount"
+msgstr "Montant facturé"
+
+#: src/django_pymissive/admin/event.py:105
+msgid "Replay"
+msgstr "Rejouer"
+
+#: src/django_pymissive/admin/event.py:106
+#: src/django_pymissive/admin/missive.py:511
+msgid "Mark as paid"
+msgstr "Marquer comme payé"
+
+#: src/django_pymissive/admin/event.py:126
+msgid "Details"
+msgstr "Détails"
+
+#: src/django_pymissive/admin/event.py:130
+#: src/django_pymissive/admin/missive.py:369
+msgid "Billing"
+msgstr "Facturation"
+
+#: src/django_pymissive/admin/event.py:149
+msgid "Event replayed successfully."
+msgstr "Événement rejoué avec succès."
+
+#: src/django_pymissive/admin/event.py:156
+msgid "Billed status updated successfully."
+msgstr "Statut de facturation mis à jour avec succès."
+
+#: src/django_pymissive/admin/missive.py:33
+#: src/django_pymissive/admin/missive.py:401
+msgid "Is billable"
+msgstr "Facturable"
+
+#: src/django_pymissive/admin/missive.py:38
+#: src/django_pymissive/admin/missive.py:58
+msgid "Yes"
+msgstr "Oui"
+
+#: src/django_pymissive/admin/missive.py:39
+#: src/django_pymissive/admin/missive.py:59
+msgid "No"
+msgstr "Non"
+
+#: src/django_pymissive/admin/missive.py:53
+msgid "Is billed"
+msgstr "Facturé"
+
+#: src/django_pymissive/admin/missive.py:73
+#: src/django_pymissive/models/missive.py:86
+msgid "Thread Type"
+msgstr "Type de fil"
+
+#: src/django_pymissive/admin/missive.py:78
+#: src/django_pymissive/models/choices.py:177
+msgid "History"
+msgstr "Historique"
+
+#: src/django_pymissive/admin/missive.py:79
+#: src/django_pymissive/models/choices.py:176
+msgid "Message"
+msgstr "Message"
+
+#: src/django_pymissive/admin/missive.py:80
+msgid "All"
+msgstr "Tout"
+
+#: src/django_pymissive/admin/missive.py:87
+#: src/django_pymissive/models/missive.py:262
+msgid "Missives"
+msgstr "Missives"
+
+#: src/django_pymissive/admin/missive.py:199
+#: src/django_pymissive/templates/django_pymissive/postal_preview.html:49
+msgid "No recipient"
+msgstr "Aucun destinataire"
+
+#: src/django_pymissive/admin/missive.py:201
+#: src/django_pymissive/admin/recipient.py:146
+#: src/django_pymissive/models/choices.py:149
+#: src/django_pymissive/models/event.py:31
+#: src/django_pymissive/models/recipient.py:112
+msgid "Recipient"
+msgstr "Destinataire"
+
+#: src/django_pymissive/admin/missive.py:219
+msgid "No sender"
+msgstr "Aucun expéditeur"
+
+#: src/django_pymissive/admin/missive.py:222
+#: src/django_pymissive/admin/missive.py:343
+#: src/django_pymissive/templates/django_pymissive/postal_preview.html:13
+msgid "Sender"
+msgstr "Expéditeur"
+
+#: src/django_pymissive/admin/missive.py:229
+#: src/django_pymissive/models/attachment.py:124
+#: src/django_pymissive/models/missive.py:226
+#: src/django_pymissive/models/recipient.py:93
+msgid "External ID"
+msgstr "ID externe"
+
+#: src/django_pymissive/admin/missive.py:239
+#: src/django_pymissive/admin/webhook.py:18
+#: src/django_pymissive/models/missive.py:92
+#: src/django_pymissive/models/provider.py:31
+#: src/django_pymissive/models/webhook.py:32
+msgid "Provider"
+msgstr "Fournisseur"
+
+#: src/django_pymissive/admin/missive.py:260
+msgid "Status / Last Event Date"
+msgstr "Statut / Date du dernier événement"
+
+#: src/django_pymissive/admin/missive.py:264
+msgid "{} message(s)"
+msgstr "{} message(s)"
+
+#: src/django_pymissive/admin/missive.py:269
+msgid "{} history(s)"
+msgstr "{} historique(s)"
+
+#: src/django_pymissive/admin/missive.py:277
+msgid "Message(s)/History(s)/Thread"
+msgstr "Message(s)/Historique(s)/Fil"
+
+#: src/django_pymissive/admin/missive.py:303
+msgid "Show and Preview"
+msgstr "Afficher et prévisualiser"
+
+#: src/django_pymissive/admin/missive.py:319
+msgid "Event(s)/Related(s)/Subject"
+msgstr "Événement(s)/Objet(s) lié(s)/Sujet"
+
+#: src/django_pymissive/admin/missive.py:327
+msgid "Campaign / Last Send Date"
+msgstr "Campagne / Dernier envoi"
+
+#: src/django_pymissive/admin/missive.py:347
+#: src/django_pymissive/templates/django_pymissive/email_preview.html:15
+msgid "Reply-To"
+msgstr "Répondre à"
+
+#: src/django_pymissive/admin/missive.py:351
+msgid "Content"
+msgstr "Contenu"
+
+#: src/django_pymissive/admin/missive.py:355
+msgid "Tracking"
+msgstr "Suivi"
+
+#: src/django_pymissive/admin/missive.py:384
+msgid "Total Billed Amount"
+msgstr "Montant total facturé"
+
+#: src/django_pymissive/admin/missive.py:391
+msgid "Total Billing Amount"
+msgstr "Montant total à facturer"
+
+#: src/django_pymissive/admin/missive.py:397
+msgid "Total Estimate Amount"
+msgstr "Montant estimé total"
+
+#: src/django_pymissive/admin/missive.py:406
+msgid "Is Billed"
+msgstr "Facturé"
+
+#: src/django_pymissive/admin/missive.py:426
+#: src/django_pymissive/translation_catalog.py:68
+msgid "Prepare"
+msgstr "Préparer"
+
+#: src/django_pymissive/admin/missive.py:431
+msgid "Missive prepared successfully."
+msgstr "Missive préparée avec succès."
+
+#: src/django_pymissive/admin/missive.py:436
+msgid "Update"
+msgstr "Mettre à jour"
+
+#: src/django_pymissive/admin/missive.py:441
+msgid "Missive updated successfully."
+msgstr "Missive mise à jour avec succès."
+
+#: src/django_pymissive/admin/missive.py:446
+#: src/django_pymissive/admin/missive.py:452
+msgid "Resend"
+msgstr "Renvoyer"
+
+#: src/django_pymissive/admin/missive.py:455
+msgid "Are you sure you want to resend this missive?"
+msgstr "Êtes-vous sûr de vouloir renvoyer cette missive ?"
+
+#: src/django_pymissive/admin/missive.py:457
+msgid "Missive resent successfully."
+msgstr "Missive renvoyée avec succès."
+
+#: src/django_pymissive/admin/missive.py:462
+#: src/django_pymissive/admin/missive.py:468
+msgid "Send"
+msgstr "Envoyer"
+
+#: src/django_pymissive/admin/missive.py:471
+msgid "Are you sure you want to send this missive?"
+msgstr "Êtes-vous sûr de vouloir envoyer cette missive ?"
+
+#: src/django_pymissive/admin/missive.py:473
+msgid "Missive sent successfully."
+msgstr "Missive envoyée avec succès."
+
+#: src/django_pymissive/admin/missive.py:479
+msgid "Cancel"
+msgstr "Annuler"
+
+#: src/django_pymissive/admin/missive.py:484
+msgid "Missive cancelled successfully."
+msgstr "Missive annulée avec succès."
+
+#: src/django_pymissive/admin/missive.py:489
+#: src/django_pymissive/models/missive.py:99
+#: src/django_pymissive/models/recipient.py:52
+msgid "Status"
+msgstr "Statut"
+
+#: src/django_pymissive/admin/missive.py:494
+msgid "Missive status updated successfully."
+msgstr "Statut de la missive mis à jour avec succès."
+
+#: src/django_pymissive/admin/missive.py:499
+msgid "Duplicate"
+msgstr "Dupliquer"
+
+#: src/django_pymissive/admin/missive.py:505
+msgid "Missive duplicated successfully."
+msgstr "Missive dupliquée avec succès."
+
+#: src/django_pymissive/admin/missive.py:516
+msgid "Missive marked as paid successfully."
+msgstr "Missive marquée comme payée avec succès."
+
+#: src/django_pymissive/admin/missive.py:518
+msgid "Show history"
+msgstr "Afficher l'historique"
+
+#: src/django_pymissive/admin/missive.py:527
+msgid "Show message"
+msgstr "Afficher le message"
+
+#: src/django_pymissive/admin/recipient.py:138
+msgid "Target"
+msgstr "Cible"
+
+#: src/django_pymissive/admin/recipient.py:169
+#: src/django_pymissive/models/recipient.py:45
+msgid "Recipient Type"
+msgstr "Type de destinataire"
+
+#: src/django_pymissive/admin/recipient.py:177
+#: src/django_pymissive/models/attachment.py:56
+#: src/django_pymissive/models/choices.py:175
+#: src/django_pymissive/models/event.py:20
+#: src/django_pymissive/models/missive.py:261
+#: src/django_pymissive/models/recipient.py:30
+#: src/django_pymissive/models/recipient.py:31
+#: src/django_pymissive/models/related_object.py:58
+msgid "Missive"
+msgstr "Missive"
+
+#: src/django_pymissive/admin/related_object.py:25
+msgid "Object URL Link"
+msgstr "Lien URL de l'objet"
+
+#: src/django_pymissive/admin/related_object.py:84
+msgid "Timestamps"
+msgstr "Horodatages"
+
+#: src/django_pymissive/admin/webhook.py:97
+msgid "Infos"
+msgstr "Infos"
+
+#: src/django_pymissive/models/attachment.py:39
+#: src/django_pymissive/models/campaign.py:26
+#: src/django_pymissive/models/missive.py:64
+msgid "ID"
+msgstr "ID"
+
+#: src/django_pymissive/models/attachment.py:46
+#: src/django_pymissive/models/campaign.py:181
+#: src/django_pymissive/models/campaign.py:285
+#: src/django_pymissive/models/missive.py:72
+#: src/django_pymissive/models/related_object.py:83
+msgid "Campaign"
+msgstr "Campagne"
+
+#: src/django_pymissive/models/attachment.py:49
+msgid "Campaign to which this file is attached"
+msgstr "Campagne à laquelle ce fichier est attaché"
+
+#: src/django_pymissive/models/attachment.py:59
+msgid "Missive to which this file is attached"
+msgstr "Missive à laquelle ce fichier est attaché"
+
+#: src/django_pymissive/models/attachment.py:66
+msgid "Attachment Type"
+msgstr "Type de pièce jointe"
+
+#: src/django_pymissive/models/attachment.py:67
+msgid "Type of attachment (attachment, signature, receipt, proof, other)"
+msgstr ""
+"Type de pièce jointe (pièce jointe, signature, récépissé, preuve, autre)"
+
+#: src/django_pymissive/models/attachment.py:75
+msgid "Object Type"
+msgstr "Type d'objet"
+
+#: src/django_pymissive/models/attachment.py:76
+msgid "Type of model to which this file is attached"
+msgstr "Type de modèle auquel ce fichier est attaché"
+
+#: src/django_pymissive/models/attachment.py:82
+#: src/django_pymissive/models/related_object.py:22
+msgid "Object ID"
+msgstr "ID de l'objet"
+
+#: src/django_pymissive/models/attachment.py:83
+msgid "ID of the object to which this file is attached"
+msgstr "ID de l'objet auquel ce fichier est attaché"
+
+#: src/django_pymissive/models/attachment.py:89
+msgid "Attachment Object Arguments"
+msgstr "Arguments de l'objet pièce jointe"
+
+#: src/django_pymissive/models/attachment.py:90
+msgid "Arguments to pass to the file method (as dict for **kwargs)"
+msgstr ""
+"Arguments à passer à la méthode du fichier (sous forme de dict pour **kwargs)"
+
+#: src/django_pymissive/models/attachment.py:97
+msgid "Attachment File"
+msgstr "Fichier pièce jointe"
+
+#: src/django_pymissive/models/attachment.py:98
+msgid "Leave blank if the attachment is hosted externally"
+msgstr "Laisser vide si la pièce jointe est hébergée en externe"
+
+#: src/django_pymissive/models/attachment.py:104
+#: src/django_pymissive/models/campaign.py:174
+#: src/django_pymissive/models/event.py:56
+#: src/django_pymissive/models/missive.py:232
+msgid "Metadata"
+msgstr "Métadonnées"
+
+#: src/django_pymissive/models/attachment.py:105
+#: src/django_pymissive/models/campaign.py:175
+#: src/django_pymissive/models/event.py:57
+#: src/django_pymissive/models/missive.py:233
+msgid "Additional metadata as JSON"
+msgstr "Métadonnées supplémentaires en JSON"
+
+#: src/django_pymissive/models/attachment.py:110
+msgid "Linked"
+msgstr "Lié"
+
+#: src/django_pymissive/models/attachment.py:111
+msgid "Indicates if the attachment is linked to a related object"
+msgstr "Indique si la pièce jointe est liée à un objet associé"
+
+#: src/django_pymissive/models/attachment.py:116
+#: src/django_pymissive/models/campaign.py:150
+#: src/django_pymissive/models/missive.py:143
+#: src/django_pymissive/templates/django_pymissive/postal_preview.html:27
+msgid "Priority"
+msgstr "Priorité"
+
+#: src/django_pymissive/models/attachment.py:117
+msgid "Page order (1=first page from letter body, attachments start at 2)"
+msgstr ""
+"Ordre des pages (1=première page du corps, pièces jointes à partir de 2)"
+
+#: src/django_pymissive/models/attachment.py:125
+msgid "External ID of the attachment"
+msgstr "ID externe de la pièce jointe"
+
+#: src/django_pymissive/models/attachment.py:131
+msgid "Page count"
+msgstr "Nombre de pages"
+
+#: src/django_pymissive/models/attachment.py:132
+msgid "Number of pages in the document"
+msgstr "Nombre de pages dans le document"
+
+#: src/django_pymissive/models/attachment.py:139
+#: src/django_pymissive/models/attachment.py:255
+#: src/django_pymissive/models/choices.py:165
+msgid "Attachment"
+msgstr "Pièce jointe"
+
+#: src/django_pymissive/models/attachment.py:140
+#: src/django_pymissive/models/attachment.py:256
+msgid "Attachments"
+msgstr "Pièces jointes"
+
+#: src/django_pymissive/models/attachment.py:266
+#: src/django_pymissive/models/choices.py:164
+msgid "Virtual Attachment"
+msgstr "Pièce jointe virtuelle"
+
+#: src/django_pymissive/models/attachment.py:267
+msgid "Virtual Attachments"
+msgstr "Pièces jointes virtuelles"
+
+#: src/django_pymissive/models/attachment.py:277
+msgid "Campaign Attachment"
+msgstr "Pièce jointe de campagne"
+
+#: src/django_pymissive/models/attachment.py:278
+msgid "Campaign Attachments"
+msgstr "Pièces jointes de campagne"
+
+#: src/django_pymissive/models/attachment.py:288
+msgid "Campaign Virtual Attachment"
+msgstr "Pièce jointe virtuelle de campagne"
+
+#: src/django_pymissive/models/attachment.py:289
+msgid "Campaign Virtual Attachments"
+msgstr "Pièces jointes virtuelles de campagne"
+
+#: src/django_pymissive/models/base.py:13
+msgid "Comment"
+msgstr "Commentaire"
+
+#: src/django_pymissive/models/base.py:14
+msgid "Internal comment or note"
+msgstr "Commentaire ou note interne"
+
+#: src/django_pymissive/models/base.py:19
+msgid "Created At"
+msgstr "Créé le"
+
+#: src/django_pymissive/models/base.py:24
+msgid "Updated At"
+msgstr "Mis à jour le"
+
+#: src/django_pymissive/models/campaign.py:30
+#: src/django_pymissive/models/missive.py:148
+#: src/django_pymissive/templates/django_pymissive/email_preview.html:37
+msgid "Subject"
+msgstr "Sujet"
+
+#: src/django_pymissive/models/campaign.py:31
+msgid "Campaign subject"
+msgstr "Sujet de la campagne"
+
+#: src/django_pymissive/models/campaign.py:35
+#: src/django_pymissive/models/event.py:49
+msgid "Description"
+msgstr "Description"
+
+#: src/django_pymissive/models/campaign.py:36
+msgid "Campaign description"
+msgstr "Description de la campagne"
+
+#: src/django_pymissive/models/campaign.py:44
+#: src/django_pymissive/models/campaign.py:136
+#: src/django_pymissive/models/missive.py:127
+#: src/django_pymissive/templates/django_pymissive/postal_preview.html:30
+msgid "Acknowledgement Level"
+msgstr "Niveau d'accusé de réception"
+
+#: src/django_pymissive/models/campaign.py:45
+#: src/django_pymissive/models/campaign.py:137
+#: src/django_pymissive/models/missive.py:128
+msgid "Desired acknowledgement level for delivery proof"
+msgstr "Niveau d'accusé de réception souhaité pour la preuve de livraison"
+
+#: src/django_pymissive/models/campaign.py:49
+msgid "Sender email name"
+msgstr "Nom de l'expéditeur (e-mail)"
+
+#: src/django_pymissive/models/campaign.py:50
+msgid "Campaign sender email name"
+msgstr "Nom de l'expéditeur e-mail de la campagne"
+
+#: src/django_pymissive/models/campaign.py:55
+#: src/django_pymissive/models/missive.py:178
+msgid "Sender email"
+msgstr "E-mail de l'expéditeur"
+
+#: src/django_pymissive/models/campaign.py:56
+msgid "Campaign sender email"
+msgstr "E-mail de l'expéditeur de la campagne"
+
+#: src/django_pymissive/models/campaign.py:64
+#: src/django_pymissive/models/missive.py:199
+msgid "Reply-To name"
+msgstr "Nom de réponse"
+
+#: src/django_pymissive/models/campaign.py:65
+#: src/django_pymissive/models/campaign.py:123
+#: src/django_pymissive/models/missive.py:200
+msgid "Display name for reply-to address"
+msgstr "Nom d'affichage pour l'adresse de réponse"
+
+#: src/django_pymissive/models/campaign.py:70
+#: src/django_pymissive/models/missive.py:205
+msgid "Reply-To email"
+msgstr "E-mail de réponse"
+
+#: src/django_pymissive/models/campaign.py:71
+#: src/django_pymissive/models/missive.py:206
+msgid "Email address for replies"
+msgstr "Adresse e-mail pour les réponses"
+
+#: src/django_pymissive/models/campaign.py:75
+#: src/django_pymissive/models/missive.py:155
+msgid "Body HTML"
+msgstr "Corps HTML"
+
+#: src/django_pymissive/models/missive.py:158
+msgid "HTML message body (email) or rich content (postal)"
+msgstr "Corps du message HTML (e-mail) ou contenu riche (courrier)"
+
+#: src/django_pymissive/models/campaign.py:74
+msgid "Body HTML"
+msgstr "Corps HTML"
+
+#: src/django_pymissive/models/campaign.py:76
+msgid "Campaign email HTML body"
+msgstr "Corps HTML e-mail de la campagne"
+
+#: src/django_pymissive/models/campaign.py:80
+msgid "Body text"
+msgstr "Texte brut"
+
+#: src/django_pymissive/models/campaign.py:81
+msgid "Campaign body text"
+msgstr "Texte brut de la campagne"
+
+#: src/django_pymissive/models/campaign.py:87
+msgid "Sender phone name"
+msgstr "Nom de l'expéditeur (téléphone)"
+
+#: src/django_pymissive/models/campaign.py:88
+msgid "Campaign sender phone name"
+msgstr "Nom de l'expéditeur téléphone de la campagne"
+
+#: src/django_pymissive/models/campaign.py:95
+#: src/django_pymissive/models/missive.py:184
+msgid "Sender phone"
+msgstr "Téléphone de l'expéditeur"
+
+#: src/django_pymissive/models/campaign.py:96
+#: src/django_pymissive/models/missive.py:185
+msgid "Phone number of the sender (used for SMS)"
+msgstr "Numéro de téléphone de l'expéditeur (pour SMS)"
+
+#: src/django_pymissive/models/campaign.py:100
+msgid "Body SMS"
+msgstr "Corps SMS"
+
+#: src/django_pymissive/models/campaign.py:101
+msgid "Campaign body SMS"
+msgstr "Corps SMS de la campagne"
+
+#: src/django_pymissive/models/campaign.py:107
+msgid "Sender address name"
+msgstr "Nom de l'expéditeur (adresse)"
+
+#: src/django_pymissive/models/campaign.py:108
+msgid "Campaign sender address name"
+msgstr "Nom de l'expéditeur adresse de la campagne"
+
+#: src/django_pymissive/models/campaign.py:113
+#: src/django_pymissive/models/missive.py:190
+msgid "Sender address"
+msgstr "Adresse de l'expéditeur"
+
+#: src/django_pymissive/models/campaign.py:114
+msgid "Campaign sender address"
+msgstr "Adresse de l'expéditeur de la campagne"
+
+#: src/django_pymissive/models/campaign.py:122
+msgid "Reply-To address name"
+msgstr "Nom de l'adresse de réponse"
+
+#: src/django_pymissive/models/campaign.py:129
+#: src/django_pymissive/models/missive.py:212
+msgid "Reply-To address"
+msgstr "Adresse de réponse"
+
+#: src/django_pymissive/models/campaign.py:130
+#: src/django_pymissive/models/missive.py:213
+msgid "Postal address for replies"
+msgstr "Adresse postale pour les réponses"
+
+#: src/django_pymissive/models/campaign.py:143
+#: src/django_pymissive/models/missive.py:135
+#: src/django_pymissive/templates/django_pymissive/postal_preview.html:24
+msgid "Delivery Mode"
+msgstr "Mode de livraison"
+
+#: src/django_pymissive/models/campaign.py:144
+#: src/django_pymissive/models/missive.py:136
+msgid "Delivery mode (email, SMS, postal, etc.)"
+msgstr "Mode de livraison (e-mail, SMS, courrier, etc.)"
+
+#: src/django_pymissive/models/campaign.py:151
+#: src/django_pymissive/models/missive.py:144
+msgid "Priority level"
+msgstr "Niveau de priorité"
+
+#: src/django_pymissive/models/campaign.py:155
+msgid "Body Postal"
+msgstr "Corps courrier"
+
+#: src/django_pymissive/models/campaign.py:156
+msgid "Campaign body Postal"
+msgstr "Corps courrier de la campagne"
+
+#: src/django_pymissive/models/campaign.py:162
+#: src/django_pymissive/models/missive.py:218
+msgid "Additional context"
+msgstr "Contexte supplémentaire"
+
+#: src/django_pymissive/models/campaign.py:163
+#: src/django_pymissive/models/missive.py:219
+msgid "Additional context as JSON"
+msgstr "Contexte supplémentaire en JSON"
+
+#: src/django_pymissive/models/campaign.py:168
+#: src/django_pymissive/models/campaign.py:313
+#: src/django_pymissive/models/missive.py:238
+msgid "Additional configuration"
+msgstr "Configuration supplémentaire"
+
+#: src/django_pymissive/models/campaign.py:169
+#: src/django_pymissive/models/campaign.py:314
+#: src/django_pymissive/models/missive.py:239
+msgid "Additional configuration as JSON"
+msgstr "Configuration supplémentaire en JSON"
+
+#: src/django_pymissive/models/campaign.py:182
+msgid "Campaigns"
+msgstr "Campagnes"
+
+#: src/django_pymissive/models/campaign.py:291
+msgid "Scheduled send date"
+msgstr "Date d'envoi programmée"
+
+#: src/django_pymissive/models/campaign.py:293
+msgid ""
+"Scheduled send date for the campaign (leave blank for immediate sending)"
+msgstr "Date d'envoi programmée (laisser vide pour un envoi immédiat)"
+
+#: src/django_pymissive/models/campaign.py:300
+msgid "Send date"
+msgstr "Date d'envoi"
+
+#: src/django_pymissive/models/campaign.py:301
+msgid "Actual send date for the campaign"
+msgstr "Date réelle d'envoi de la campagne"
+
+#: src/django_pymissive/models/campaign.py:307
+msgid "Ended at"
+msgstr "Terminé le"
+
+#: src/django_pymissive/models/campaign.py:308
+msgid "Actual ended date for the campaign"
+msgstr "Date réelle de fin de la campagne"
+
+#: src/django_pymissive/models/campaign.py:318
+msgid "Campaign send"
+msgstr "Envoi de campagne"
+
+#: src/django_pymissive/models/campaign.py:319
+msgid "Campaign sends"
+msgstr "Envois de campagne"
+
+#: src/django_pymissive/models/choices.py:52
+#: src/django_pymissive/translation_catalog.py:34
+msgid "Draft"
+msgstr "Brouillon"
+
+#: src/django_pymissive/models/choices.py:53
+#: src/django_pymissive/translation_catalog.py:70
+msgid "Processing"
+msgstr "En cours de traitement"
+
+#: src/django_pymissive/models/choices.py:54
+msgid "Success"
+msgstr "Succès"
+
+#: src/django_pymissive/models/choices.py:55
+#: src/django_pymissive/translation_catalog.py:45
+msgid "Failed"
+msgstr "Échoué"
+
+#: src/django_pymissive/models/choices.py:56
+#: src/django_pymissive/translation_catalog.py:42
+msgid "Error"
+msgstr "Erreur"
+
+#: src/django_pymissive/models/choices.py:57
+#: src/django_pymissive/translation_catalog.py:26
+msgid "Cancelled"
+msgstr "Annulé"
+
+#: src/django_pymissive/models/choices.py:132
+msgid "HTTPS"
+msgstr "HTTPS"
+
+#: src/django_pymissive/models/choices.py:133
+msgid "HTTP"
+msgstr "HTTP"
+
+#: src/django_pymissive/models/choices.py:150
+msgid "CC"
+msgstr "CC"
+
+#: src/django_pymissive/models/choices.py:151
+msgid "BCC"
+msgstr "CCI"
+
+#: src/django_pymissive/models/choices.py:157
+msgid "Inbound"
+msgstr "Entrant"
+
+#: src/django_pymissive/models/choices.py:158
+msgid "Outbound"
+msgstr "Sortant"
+
+#: src/django_pymissive/models/choices.py:166
+msgid "Signature"
+msgstr "Signature"
+
+#: src/django_pymissive/models/choices.py:167
+msgid "Receipt"
+msgstr "Récépissé"
+
+#: src/django_pymissive/models/choices.py:168
+msgid "Proof"
+msgstr "Preuve"
+
+#: src/django_pymissive/models/choices.py:169
+msgid "Other"
+msgstr "Autre"
+
+#: src/django_pymissive/models/config.py:19
+#, fuzzy
+#| msgid "Missive Type"
+msgid "Missive type"
+msgstr "Type de missive"
+
+#: src/django_pymissive/models/config.py:20
+#, fuzzy
+#| msgid "Type of missive (email, SMS, postal, etc.)"
+msgid "Type of missive (email, sms, postal, etc.)"
+msgstr "Type de missive (e-mail, SMS, courrier, etc.)"
+
+#: src/django_pymissive/models/config.py:25
+msgid "Default provider"
+msgstr "Fournisseur par défaut"
+
+#: src/django_pymissive/models/config.py:26
+#, fuzzy
+#| msgid "Provider name (e.g., sendgrid)"
+msgid "Provider name (e.g. brevo, sendgrid). Leave empty for no default."
+msgstr "Nom du fournisseur (ex. sendgrid)"
+
+#: src/django_pymissive/models/config.py:30
+#, fuzzy
+#| msgid "Additional configuration"
+msgid "Configuration"
+msgstr "Configuration supplémentaire"
+
+#: src/django_pymissive/models/config.py:31
+#, fuzzy
+#| msgid "Configs"
+msgid "Configurations"
+msgstr "Configurations"
+
+#: src/django_pymissive/models/event.py:21
+msgid "Missive associated with this event"
+msgstr "Missive associée à cet événement"
+
+#: src/django_pymissive/models/event.py:32
+msgid "Recipient associated with this event"
+msgstr "Destinataire associé à cet événement"
+
+#: src/django_pymissive/models/event.py:43
+#: src/django_pymissive/models/event.py:103
+msgid "Event"
+msgstr "Événement"
+
+#: src/django_pymissive/models/event.py:44
+msgid "Event type (sent, delivered, read, failed, etc.)"
+msgstr "Type d'événement (envoyé, livré, lu, échec, etc.)"
+
+#: src/django_pymissive/models/event.py:50
+msgid "Description or details about this event"
+msgstr "Description ou détails de cet événement"
+
+#: src/django_pymissive/models/event.py:63
+msgid "Trace"
+msgstr "Trace"
+
+#: src/django_pymissive/models/event.py:64
+msgid "Raw trace data (webhook payload, API response, etc.)"
+msgstr "Données brutes de trace (payload webhook, réponse API, etc.)"
+
+#: src/django_pymissive/models/event.py:69
+msgid "User Action"
+msgstr "Action utilisateur"
+
+#: src/django_pymissive/models/event.py:70
+msgid "Indicates if the event was triggered by a user action"
+msgstr "Indique si l'événement a été déclenché par une action utilisateur"
+
+#: src/django_pymissive/models/event.py:74
+msgid "Occurred At"
+msgstr "Survenu le"
+
+#: src/django_pymissive/models/event.py:75
+msgid "When this event occurred"
+msgstr "Date de survenue de cet événement"
+
+#: src/django_pymissive/models/event.py:80
+msgid "Billed"
+msgstr "Facturé"
+
+#: src/django_pymissive/models/event.py:81
+msgid "Indicates if the missive has been billed"
+msgstr "Indique si la missive a été facturée"
+
+#: src/django_pymissive/models/event.py:89
+msgid "Amount billed for the missive"
+msgstr "Montant facturé pour la missive"
+
+#: src/django_pymissive/models/event.py:96
+msgid "Estimate Amount"
+msgstr "Montant estimé"
+
+#: src/django_pymissive/models/event.py:97
+msgid "Estimated amount for the missive"
+msgstr "Montant estimé pour la missive"
+
+#: src/django_pymissive/models/event.py:104
+msgid "Events"
+msgstr "Événements"
+
+#: src/django_pymissive/models/missive.py:73
+msgid "Optional campaign this missive belongs to"
+msgstr "Campagne optionnelle à laquelle cette missive appartient"
+
+#: src/django_pymissive/models/missive.py:78
+msgid "Thread"
+msgstr "Fil"
+
+#: src/django_pymissive/models/missive.py:79
+msgid "Thread ID for the missive"
+msgstr "ID du fil pour la missive"
+
+#: src/django_pymissive/models/missive.py:87
+msgid "Type of thread (missive, message, history)"
+msgstr "Type de fil (missive, message, historique)"
+
+#: src/django_pymissive/models/missive.py:93
+#: src/django_pymissive/models/webhook.py:33
+msgid "Provider used to send this missive"
+msgstr "Fournisseur utilisé pour envoyer cette missive"
+
+#: src/django_pymissive/models/missive.py:100
+#: src/django_pymissive/models/recipient.py:53
+msgid "Current status of the missive"
+msgstr "Statut actuel de la missive"
+
+#: src/django_pymissive/models/missive.py:105
+msgid "Missive Support"
+msgstr "Support de la missive"
+
+#: src/django_pymissive/models/missive.py:106
+msgid "Support for the missive (email, SMS, postal, etc.)"
+msgstr "Support de la missive (e-mail, SMS, courrier, etc.)"
+
+#: src/django_pymissive/models/missive.py:113
+msgid "Brand Name"
+msgstr "Nom de marque"
+
+#: src/django_pymissive/models/missive.py:114
+msgid "Brand name used to send this missive"
+msgstr "Nom de marque utilisé pour envoyer cette missive"
+
+#: src/django_pymissive/models/missive.py:119
+msgid "Missive Type"
+msgstr "Type de missive"
+
+#: src/django_pymissive/models/missive.py:120
+msgid "Type of missive (email, SMS, postal, etc.)"
+msgstr "Type de missive (e-mail, SMS, courrier, etc.)"
+
+#: src/django_pymissive/models/missive.py:149
+msgid "Subject line (for email, SMS, etc.)"
+msgstr "Ligne d'objet (pour e-mail, SMS, etc.)"
+
+#: src/django_pymissive/models/missive.py:158
+msgid "Message body/content"
+msgstr "Corps/contenu du message"
+
+#: src/django_pymissive/models/missive.py:163
+msgid "Body Text"
+msgstr "Texte brut"
+
+#: src/django_pymissive/models/missive.py:164
+msgid "Plain text version of the message"
+msgstr "Version texte brut du message"
+
+#: src/django_pymissive/models/missive.py:172
+msgid "Sender name"
+msgstr "Nom de l'expéditeur"
+
+#: src/django_pymissive/models/missive.py:173
+msgid "Display name of the sender"
+msgstr "Nom d'affichage de l'expéditeur"
+
+#: src/django_pymissive/models/missive.py:179
+msgid "Email address of the sender"
+msgstr "Adresse e-mail de l'expéditeur"
+
+#: src/django_pymissive/models/missive.py:191
+msgid "Postal address of the sender"
+msgstr "Adresse postale de l'expéditeur"
+
+#: src/django_pymissive/models/missive.py:227
+#: src/django_pymissive/models/recipient.py:94
+msgid "External identifier from the provider"
+msgstr "Identifiant externe du fournisseur"
+
+#: src/django_pymissive/models/missive.py:245
+msgid "Webhook URL"
+msgstr "URL du webhook"
+
+#: src/django_pymissive/models/missive.py:246
+msgid "Webhook URL for the missive"
+msgstr "URL du webhook pour la missive"
+
+#: src/django_pymissive/models/missive.py:254
+msgid "Reply by"
+msgstr "Répondu par"
+
+#: src/django_pymissive/models/missive.py:255
+msgid "Recipient who sent this reply (for inbound exchanges)"
+msgstr "Destinataire ayant envoyé cette réponse (pour les échanges entrants)"
+
+#: src/django_pymissive/models/missive.py:266
+#: src/django_pymissive/templates/django_pymissive/sms_preview.html:22
+#: src/django_pymissive/templates/django_pymissive/sms_preview.html:40
+msgid "Unknown"
+msgstr "Inconnu"
+
+#: src/django_pymissive/models/missive.py:455
+msgid "Preview in browser"
+msgstr "Aperçu dans le navigateur"
+
+#: src/django_pymissive/models/missive.py:578
+#: src/django_pymissive/templates/django_pymissive/postal_preview.html:69
+msgid "Attachments:"
+msgstr "Pièces jointes :"
+
+#: src/django_pymissive/models/missive.py:611
+msgid "Missive cannot be resend"
+msgstr "La missive ne peut pas être renvoyée"
+
+#: src/django_pymissive/models/missive.py:679
+msgid "Missive cannot be sent"
+msgstr "La missive ne peut pas être envoyée"
+
+#: src/django_pymissive/models/missive.py:748
+msgid "Unknown recipient"
+msgstr "Destinataire inconnu"
+
+#: src/django_pymissive/models/missive.py:771
+msgid "Subject or Campaign is required"
+msgstr "Le sujet ou la campagne est requis"
+
+#: src/django_pymissive/models/missive.py:780
+#: src/django_pymissive/models/missive.py:781
+msgid "Body or body text is required (in missive or campaign)"
+msgstr "Le corps ou le texte brut est requis (dans la missive ou la campagne)"
+
+#: src/django_pymissive/models/missive.py:790
+msgid "Body text is required (in missive or campaign)"
+msgstr "Le texte brut est requis (dans la missive ou la campagne)"
+
+#: src/django_pymissive/models/missive.py:799
+msgid "Body or attachments are required (in missive or campaign)"
+msgstr ""
+"Le corps ou les pièces jointes sont requis (dans la missive ou la campagne)"
+
+#: src/django_pymissive/models/missive.py:809
+msgid "Missive History"
+msgstr "Historique de missive"
+
+#: src/django_pymissive/models/missive.py:810
+msgid "Missive Histories"
+msgstr "Historiques de missives"
+
+#: src/django_pymissive/models/missive.py:820
+msgid "Missive Message"
+msgstr "Message de missive"
+
+#: src/django_pymissive/models/missive.py:821
+msgid "Missive Messages"
+msgstr "Messages de missives"
+
+#: src/django_pymissive/models/provider.py:21
+#: src/django_pymissive/models/recipient.py:58
+msgid "Name"
+msgstr "Nom"
+
+#: src/django_pymissive/models/provider.py:22
+msgid "Provider name (e.g., sendgrid)"
+msgstr "Nom du fournisseur (ex. sendgrid)"
+
+#: src/django_pymissive/models/provider.py:32
+msgid "Providers"
+msgstr "Fournisseurs"
+
+#: src/django_pymissive/models/recipient.py:38
+msgid "Recipient Model"
+msgstr "Modèle de destinataire"
+
+#: src/django_pymissive/models/recipient.py:39
+msgid "Model of recipient"
+msgstr "Modèle du destinataire"
+
+#: src/django_pymissive/models/recipient.py:46
+msgid "Type of recipient"
+msgstr "Type de destinataire"
+
+#: src/django_pymissive/models/recipient.py:59
+msgid "Full name or company name"
+msgstr "Nom complet ou raison sociale"
+
+#: src/django_pymissive/models/recipient.py:65
+msgid "Recipient Email"
+msgstr "E-mail du destinataire"
+
+#: src/django_pymissive/models/recipient.py:66
+msgid "Recipient's email address"
+msgstr "Adresse e-mail du destinataire"
+
+#: src/django_pymissive/models/recipient.py:72
+#: src/django_pymissive/translation_catalog.py:64
+msgid "Phone"
+msgstr "Téléphone"
+
+#: src/django_pymissive/models/recipient.py:73
+msgid "Phone number"
+msgstr "Numéro de téléphone"
+
+#: src/django_pymissive/models/recipient.py:78
+#: src/django_pymissive/models/recipient.py:79
+msgid "Address"
+msgstr "Adresse"
+
+#: src/django_pymissive/models/recipient.py:85
+#: src/django_pymissive/models/recipient.py:86
+msgid "Notification ID"
+msgstr "ID de notification"
+
+#: src/django_pymissive/models/recipient.py:100
+msgid "Sent At"
+msgstr "Envoyé le"
+
+#: src/django_pymissive/models/recipient.py:101
+msgid "When the missive was sent"
+msgstr "Date d'envoi de la missive"
+
+#: src/django_pymissive/models/recipient.py:106
+msgid "Delivered At"
+msgstr "Livré le"
+
+#: src/django_pymissive/models/recipient.py:107
+msgid "When the missive was delivered"
+msgstr "Date de livraison de la missive"
+
+#: src/django_pymissive/models/recipient.py:113
+msgid "Recipients"
+msgstr "Destinataires"
+
+#: src/django_pymissive/models/recipient.py:151
+msgid "Email Recipient"
+msgstr "Destinataire e-mail"
+
+#: src/django_pymissive/models/recipient.py:152
+msgid "Email Recipients"
+msgstr "Destinataires e-mail"
+
+#: src/django_pymissive/models/recipient.py:165
+msgid "Phone Recipient"
+msgstr "Destinataire téléphone"
+
+#: src/django_pymissive/models/recipient.py:166
+msgid "Phone Recipients"
+msgstr "Destinataires téléphone"
+
+#: src/django_pymissive/models/recipient.py:179
+msgid "Address Recipient"
+msgstr "Destinataire adresse"
+
+#: src/django_pymissive/models/recipient.py:180
+msgid "Address Recipients"
+msgstr "Destinataires adresse"
+
+#: src/django_pymissive/models/recipient.py:193
+msgid "Notification Recipient"
+msgstr "Destinataire notification"
+
+#: src/django_pymissive/models/recipient.py:194
+msgid "Notification Recipients"
+msgstr "Destinataires notification"
+
+#: src/django_pymissive/models/related_object.py:18
+msgid "Content Type"
+msgstr "Type de contenu"
+
+#: src/django_pymissive/models/related_object.py:19
+msgid "Type of the related object"
+msgstr "Type de l'objet lié"
+
+#: src/django_pymissive/models/related_object.py:23
+msgid "ID of the related object"
+msgstr "ID de l'objet lié"
+
+#: src/django_pymissive/models/related_object.py:29
+msgid "Object String Representation"
+msgstr "Représentation texte de l'objet"
+
+#: src/django_pymissive/models/related_object.py:31
+msgid ""
+"String representation of the related object (saved for reference if object "
+"is deleted)"
+msgstr ""
+"Représentation texte de l'objet lié (sauvegardée si l'objet est supprimé)"
+
+#: src/django_pymissive/models/related_object.py:38
+msgid "Related Object"
+msgstr "Objet lié"
+
+#: src/django_pymissive/models/related_object.py:39
+msgid "Related Objects"
+msgstr "Objets liés"
+
+#: src/django_pymissive/models/related_object.py:59
+msgid "Missive to which this object is related"
+msgstr "Missive à laquelle cet objet est lié"
+
+#: src/django_pymissive/models/related_object.py:65
+msgid "Missive Related Object"
+msgstr "Objet lié à la missive"
+
+#: src/django_pymissive/models/related_object.py:66
+msgid "Missive Related Objects"
+msgstr "Objets liés à la missive"
+
+#: src/django_pymissive/models/related_object.py:84
+msgid "Campaign to which this object is related"
+msgstr "Campagne à laquelle cet objet est lié"
+
+#: src/django_pymissive/models/related_object.py:90
+msgid "Campaign Related Object"
+msgstr "Objet lié à la campagne"
+
+#: src/django_pymissive/models/related_object.py:91
+msgid "Campaign Related Objects"
+msgstr "Objets liés à la campagne"
+
+#: src/django_pymissive/models/service.py:13
+msgid "Provider Service"
+msgstr "Service fournisseur"
+
+#: src/django_pymissive/models/service.py:14
+msgid "Provider Services"
+msgstr "Services fournisseur"
+
+#: src/django_pymissive/models/webhook.py:37
+#: src/django_pymissive/models/webhook.py:38
+msgid "Webhook ID"
+msgstr "ID du webhook"
+
+#: src/django_pymissive/models/webhook.py:46
+msgid "Scheme"
+msgstr "Schéma"
+
+#: src/django_pymissive/models/webhook.py:47
+msgid "HTTP or HTTPS"
+msgstr "HTTP ou HTTPS"
+
+#: src/django_pymissive/models/webhook.py:52
+msgid "Domain"
+msgstr "Domaine"
+
+#: src/django_pymissive/models/webhook.py:54
+msgid ""
+"Base domain (e.g. example.com). Webhook path is built from provider and type."
+msgstr ""
+"Domaine de base (ex. example.com). Le chemin du webhook est construit à "
+"partir du fournisseur et du type."
+
+#: src/django_pymissive/models/webhook.py:62
+msgid "Webhook"
+msgstr "Webhook"
+
+#: src/django_pymissive/models/webhook.py:63
+msgid "Webhooks"
+msgstr "Webhooks"
+
+#: src/django_pymissive/templates/django_pymissive/base_preview.html:7
+msgid "Missive Preview"
+msgstr "Aperçu de missive"
+
+#: src/django_pymissive/templates/django_pymissive/email_preview.html:11
+msgid "From"
+msgstr "De"
+
+#: src/django_pymissive/templates/django_pymissive/email_preview.html:19
+msgid "To"
+msgstr "À"
+
+#: src/django_pymissive/templates/django_pymissive/email_preview.html:23
+msgid "None"
+msgstr "Aucun"
+
+#: src/django_pymissive/templates/django_pymissive/email_preview.html:27
+msgid "Cc"
+msgstr "Cc"
+
+#: src/django_pymissive/templates/django_pymissive/email_preview.html:32
+msgid "Bcc"
+msgstr "CCI"
+
+#: src/django_pymissive/templates/django_pymissive/email_preview.html:54
+#: src/django_pymissive/templates/django_pymissive/postal_preview.html:62
+#: src/django_pymissive/templates/django_pymissive/sms_preview.html:31
+#: src/django_pymissive/templates/django_pymissive/sms_preview.html:51
+msgid "No content"
+msgstr "Aucun contenu"
+
+#: src/django_pymissive/translation_catalog.py:12
+msgid "Accepted"
+msgstr "Accepté"
+
+#: src/django_pymissive/translation_catalog.py:13
+msgid "Acknowledge button"
+msgstr "Bouton d'accusé de réception"
+
+#: src/django_pymissive/translation_catalog.py:14
+msgid "Acknowledgement of receipt"
+msgstr "Accusé de réception"
+
+#: src/django_pymissive/translation_catalog.py:15
+msgid "Archived"
+msgstr "Archivé"
+
+#: src/django_pymissive/translation_catalog.py:16
+msgid "Attempted delivery"
+msgstr "Livraison tentée"
+
+#: src/django_pymissive/translation_catalog.py:17
+msgid "Authenticated acknowledgement"
+msgstr "Accusé de réception authentifié"
+
+#: src/django_pymissive/translation_catalog.py:18
+msgid "Automated voice call"
+msgstr "Appel vocal automatisé"
+
+#: src/django_pymissive/translation_catalog.py:19
+msgid "Basic delivery"
+msgstr "Livraison basique"
+
+#: src/django_pymissive/translation_catalog.py:20
+msgid "Blocked"
+msgstr "Bloqué"
+
+#: src/django_pymissive/translation_catalog.py:21
+msgid "Blocklist created"
+msgstr "Liste noire créée"
+
+#: src/django_pymissive/translation_catalog.py:22
+msgid "Blocklisted"
+msgstr "Sur liste noire"
+
+#: src/django_pymissive/translation_catalog.py:23
+msgid "Bounced"
+msgstr "Rejeté"
+
+#: src/django_pymissive/translation_catalog.py:24
+msgid "Branded"
+msgstr "Marque"
+
+#: src/django_pymissive/translation_catalog.py:25
+msgid "Branded App messaging (WhatsApp, Slack, etc.)"
+msgstr "Messagerie d'application (WhatsApp, Slack, etc.)"
+
+#: src/django_pymissive/translation_catalog.py:27
+msgid "Carrier rejected"
+msgstr "Refusé par l'opérateur"
+
+#: src/django_pymissive/translation_catalog.py:28
+msgid "Clicked"
+msgstr "Cliqué"
+
+#: src/django_pymissive/translation_catalog.py:29
+msgid "Damaged"
+msgstr "Endommagé"
+
+#: src/django_pymissive/translation_catalog.py:30
+msgid "Deferred"
+msgstr "Reporté"
+
+#: src/django_pymissive/translation_catalog.py:31
+msgid "Delivered"
+msgstr "Livré"
+
+#: src/django_pymissive/translation_catalog.py:32
+msgid "Deposit Proof"
+msgstr "Preuve de dépôt"
+
+#: src/django_pymissive/translation_catalog.py:33
+msgid "Dispatched"
+msgstr "Expédié"
+
+#: src/django_pymissive/translation_catalog.py:35
+msgid "Dropped"
+msgstr "Abandonné"
+
+#: src/django_pymissive/translation_catalog.py:36
+msgid "Economic"
+msgstr "Économique"
+
+#: src/django_pymissive/translation_catalog.py:37
+msgid "eDelivery / eRegistered mail"
+msgstr "Courrier électronique recommandé"
+
+#: src/django_pymissive/translation_catalog.py:38
+msgid "eIDAS qualified signature"
+msgstr "Signature qualifiée eIDAS"
+
+#: src/django_pymissive/translation_catalog.py:39
+msgid "Electronic registered email (ERE)"
+msgstr "E-mail recommandé électronique (ERE)"
+
+#: src/django_pymissive/translation_catalog.py:40
+msgid "Electronic registered letter"
+msgstr "Lettre recommandée électronique"
+
+#: src/django_pymissive/translation_catalog.py:43
+msgid "Expired"
+msgstr "Expiré"
+
+#: src/django_pymissive/translation_catalog.py:44
+msgid "Express"
+msgstr "Express"
+
+#: src/django_pymissive/translation_catalog.py:46
+msgid "Hard bounce"
+msgstr "Rebond définitif"
+
+#: src/django_pymissive/translation_catalog.py:47
+msgid "High"
+msgstr "Haute"
+
+#: src/django_pymissive/translation_catalog.py:48
+msgid "In transit"
+msgstr "En transit"
+
+#: src/django_pymissive/translation_catalog.py:49
+msgid "In-app notification"
+msgstr "Notification dans l'application"
+
+#: src/django_pymissive/translation_catalog.py:50
+msgid "Invalid"
+msgstr "Invalide"
+
+#: src/django_pymissive/translation_catalog.py:51
+msgid "Lost"
+msgstr "Perdu"
+
+#: src/django_pymissive/translation_catalog.py:52
+msgid "Low"
+msgstr "Basse"
+
+#: src/django_pymissive/translation_catalog.py:53
+msgid "Mailbox not found"
+msgstr "Boîte mail introuvable"
+
+#: src/django_pymissive/translation_catalog.py:54
+msgid "Mailed"
+msgstr "Posté"
+
+#: src/django_pymissive/translation_catalog.py:55
+msgid "Marketing email"
+msgstr "E-mail marketing"
+
+#: src/django_pymissive/translation_catalog.py:56
+msgid "Message sent / delivered. No proof of reading or identity."
+msgstr "Message envoyé/livré. Pas de preuve de lecture ni d'identité."
+
+#: src/django_pymissive/translation_catalog.py:57
+msgid "MFA / OTP"
+msgstr "MFA / OTP"
+
+#: src/django_pymissive/translation_catalog.py:58
+msgid "Mobile push notification"
+msgstr "Notification push mobile"
+
+#: src/django_pymissive/translation_catalog.py:59
+msgid "Normal"
+msgstr "Normale"
+
+#: src/django_pymissive/translation_catalog.py:60
+msgid "Notification"
+msgstr "Notification"
+
+#: src/django_pymissive/translation_catalog.py:61
+msgid "Opened"
+msgstr "Ouvert"
+
+#: src/django_pymissive/translation_catalog.py:62
+msgid "Out for delivery"
+msgstr "En cours de livraison"
+
+#: src/django_pymissive/translation_catalog.py:63
+msgid "Pending"
+msgstr "En attente"
+
+#: src/django_pymissive/translation_catalog.py:66
+msgid "Postal mail"
+msgstr "Courrier postal"
+
+#: src/django_pymissive/translation_catalog.py:67
+msgid "Premium"
+msgstr "Premium"
+
+#: src/django_pymissive/translation_catalog.py:69
+msgid "Printed"
+msgstr "Imprimé"
+
+#: src/django_pymissive/translation_catalog.py:71
+msgid "Proof of Content"
+msgstr "Preuve de contenu"
+
+#: src/django_pymissive/translation_catalog.py:72
+msgid "Proofs of Delivery"
+msgstr "Preuves de livraison"
+
+#: src/django_pymissive/translation_catalog.py:73
+msgid "Qualified / legally binding acknowledgement"
+msgstr "Accusé de réception qualifié / juridiquement contraignant"
+
+#: src/django_pymissive/translation_catalog.py:74
+msgid "Queued"
+msgstr "En file d'attente"
+
+#: src/django_pymissive/translation_catalog.py:75
+msgid "RCS (Rich SMS)"
+msgstr "RCS (SMS enrichi)"
+
+#: src/django_pymissive/translation_catalog.py:76
+msgid "Read"
+msgstr "Lu"
+
+#: src/django_pymissive/translation_catalog.py:77
+msgid "Receipt + high-level verified identity + Qualified signature."
+msgstr "Réception + identité vérifiée de haut niveau + signature qualifiée."
+
+#: src/django_pymissive/translation_catalog.py:78
+msgid "Receipt confirmed. Authenticated identity (login, OTP, SSO)."
+msgstr "Réception confirmée. Identité authentifiée (connexion, OTP, SSO)."
+
+#: src/django_pymissive/translation_catalog.py:79
+msgid "Receipt confirmed. Electronic signature. Full traceability."
+msgstr "Réception confirmée. Signature électronique. Traçabilité complète."
+
+#: src/django_pymissive/translation_catalog.py:80
+msgid "Recipient confirms receipt. No strong identity verification."
+msgstr ""
+"Le destinataire confirme la réception. Pas de vérification d'identité forte."
+"Le destinataire confirme la réception. Pas de vérification d'identité forte."
+
+#: src/django_pymissive/translation_catalog.py:81
+msgid "Refused"
+msgstr "Refusé"
+
+#: src/django_pymissive/translation_catalog.py:82
+msgid "Rejected"
+msgstr "Rejeté"
+
+#: src/django_pymissive/translation_catalog.py:83
+msgid "Reply email"
+msgstr "E-mail de réponse"
+
+#: src/django_pymissive/translation_catalog.py:84
+msgid "Request"
+msgstr "Demande"
+
+#: src/django_pymissive/translation_catalog.py:85
+msgid "Return to sender"
+msgstr "Retour à l'expéditeur"
+
+#: src/django_pymissive/translation_catalog.py:86
+msgid "Scheduled"
+msgstr "Programmé"
+
+#: src/django_pymissive/translation_catalog.py:87
+msgid "Secure portal"
+msgstr "Portail sécurisé"
+
+#: src/django_pymissive/translation_catalog.py:88
+msgid "Sent"
+msgstr "Envoyé"
+
+#: src/django_pymissive/translation_catalog.py:89
+msgid "Shipped"
+msgstr "Expédié"
+
+#: src/django_pymissive/translation_catalog.py:90
+msgid "Signed acknowledgement"
+msgstr "Accusé de réception signé"
+
+#: src/django_pymissive/translation_catalog.py:91
+msgid "Simple or advanced e-signature"
+msgstr "Signature électronique simple ou avancée"
+
+#: src/django_pymissive/translation_catalog.py:93
+msgid "Soft bounce"
+msgstr "Rebond temporaire"
+
+#: src/django_pymissive/translation_catalog.py:94
+msgid "Spam"
+msgstr "Spam"
+
+#: src/django_pymissive/translation_catalog.py:95
+msgid "Strong legal value (eIDAS)"
+msgstr "Valeur juridique forte (eIDAS)"
+
+#: src/django_pymissive/translation_catalog.py:96
+msgid "Technical only"
+msgstr "Technique uniquement"
+
+#: src/django_pymissive/translation_catalog.py:97
+msgid "Undeliverable"
+msgstr "Non distribuable"
+
+#: src/django_pymissive/translation_catalog.py:98
+msgid "Undelivered"
+msgstr "Non livré"
+
+#: src/django_pymissive/translation_catalog.py:99
+msgid "Unknown type"
+msgstr "Type inconnu"
+
+#: src/django_pymissive/translation_catalog.py:100
+msgid "Urgent"
+msgstr "Urgent"
+
+#: src/django_pymissive/translation_catalog.py:101
+msgid "User account"
+msgstr "Compte utilisateur"
+
+#: src/django_pymissive/views/preview.py:356
+#: src/django_pymissive/views/preview.py:396
+msgid "Preview: {} ({})"
+msgstr "Aperçu : {} ({})"
+
+#: src/django_pymissive/views/preview.py:358
+#: src/django_pymissive/views/preview.py:400
+msgid "Preview: {}"
+msgstr "Aperçu : {}"
+
+#, fuzzy
+#~| msgid "Missive"
+#~ msgid "Missive config"
+#~ msgstr "Missive"
+
+#, fuzzy
+#~| msgid "Missives"
+#~ msgid "Missive configs"
+#~ msgstr "Missives"
+
+#~ msgid "URL"
+#~ msgstr "URL"
+
+#~ msgid "Order"
+#~ msgstr "Ordre"
+
+#~ msgid "Display order"
+#~ msgstr "Ordre d'affichage"
+
+#~ msgid ""
+#~ "You must provide either a local attachment or a method to access the "
+#~ "attachment."
+#~ msgstr ""
+#~ "Vous devez fournir soit une pièce jointe locale, soit une méthode pour y "
+#~ "accéder."

@@ -1,0 +1,215 @@
+.postal-preview {
+    max-width: 210mm;
+    margin: 0 auto;
+    padding: 20px 0;
+}
+
+/* Delivery info badges */
+.postal-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.meta-badge {
+    display: inline-flex;
+    flex-direction: column;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.meta-badge small {
+    display: block;
+    font-size: 9px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.7;
+    margin-top: 2px;
+}
+
+.meta-delivery {
+    background: #e3f2fd;
+    color: #1565c0;
+    border: 1px solid #90caf9;
+}
+
+.meta-priority {
+    background: #fff3e0;
+    color: #e65100;
+    border: 1px solid #ffcc80;
+}
+
+.meta-ack {
+    background: #f3e5f5;
+    color: #6a1b9a;
+    border: 1px solid #ce93d8;
+}
+
+/* Envelope / sender block */
+.envelope {
+    background: #fafaf5;
+    border: 2px solid #c5b99a;
+    border-radius: 2px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    position: relative;
+    overflow: hidden;
+}
+
+.envelope::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: repeating-linear-gradient(
+        90deg,
+        #d32f2f 0px, #d32f2f 12px,
+        #fff 12px, #fff 16px,
+        #1565c0 16px, #1565c0 28px,
+        #fff 28px, #fff 32px
+    );
+}
+
+.address-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #888;
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+.address-name {
+    font-weight: 700;
+    font-size: 14px;
+    color: #222;
+    margin-bottom: 2px;
+}
+
+.address-line {
+    font-size: 13px;
+    color: #444;
+    line-height: 1.5;
+}
+
+.address-empty {
+    font-style: italic;
+    color: #aaa;
+    font-size: 13px;
+}
+
+/* A4 page */
+.a4-page {
+    width: 210mm;
+    min-height: 297mm;
+    background: #fff;
+    border: 1px solid #ccc;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    padding: 20mm 25mm 25mm 25mm;
+    box-sizing: border-box;
+    position: relative;
+}
+
+/* Recipient address top-right */
+.a4-header {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 30mm;
+}
+
+.a4-recipient {
+    min-width: 70mm;
+    max-width: 90mm;
+    padding: 12px 16px;
+    border: 1px solid #ddd;
+    background: #fafafa;
+    border-radius: 2px;
+}
+
+.a4-recipient .address-name {
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+.a4-recipient .address-line {
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+/* Letter body */
+.a4-body {
+    font-size: 14px;
+    line-height: 1.8;
+    color: #222;
+}
+
+.a4-body pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: inherit;
+    margin: 0;
+}
+
+/* Attachments */
+.postal-attachments {
+    margin-top: 20px;
+    padding: 16px;
+    background: #fafafa;
+    border: 1px solid #eee;
+    border-radius: 4px;
+}
+
+.attachments-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #666;
+    margin-bottom: 10px;
+}
+
+.attachments-list {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.attachment-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 90px;
+    height: 90px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #f0f4ff;
+    text-decoration: none;
+    transition: background 0.2s;
+}
+
+.attachment-item:hover {
+    background: #dbe4ff;
+}
+
+.attachment-icon {
+    font-size: 24px;
+    margin-bottom: 4px;
+}
+
+.attachment-item small {
+    font-size: 10px;
+    color: #333;
+    text-align: center;
+    line-height: 1.2;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    padding: 0 4px;
+}

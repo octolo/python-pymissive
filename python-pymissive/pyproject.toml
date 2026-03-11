@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pymissive"
+version = "1.0.0"
+description = "Framework-agnostic messaging library for multi-channel communication."
+authors = [{ name = "Octolo", email = "dev@octolo.tech" }]
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["messaging", "email", "sms", "missive", "multi-channel", "notification"]
+dependencies = [
+  "clicommands>=0.1.0",
+]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.scripts]
+pymissive = "pymissive.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/octolo/python-missive"
+Repository = "https://github.com/octolo/python-missive"
+Documentation = "https://github.com/octolo/python-missive/tree/main/django-missive#readme"
+Issues = "https://github.com/octolo/python-missive/issues"
+
+[tool.setuptools]
+package-data = {pymissive = [".commands.json"]}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["tests*", "docs*"]

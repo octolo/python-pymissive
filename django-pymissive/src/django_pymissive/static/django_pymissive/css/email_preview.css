@@ -1,0 +1,85 @@
+.email-preview {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 20px;
+    margin: 20px 0;
+    background: #f9f9f9;
+}
+
+.email-header {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #ddd;
+}
+
+.email-header p {
+    margin: 5px 0;
+}
+
+.email-body {
+    margin-top: 20px;
+}
+
+.email-html {
+    background: #fff;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 20px;
+}
+
+.email-html > pre {
+    white-space: break-spaces;
+}
+
+.empty {
+    color: #999;
+    font-style: italic;
+    text-align: center;
+    padding: 40px;
+}
+
+.attachments {
+    display: flex;
+    gap: 10px;
+ }
+
+.attachments a {
+    border: 1px solid #ddd;
+    display: flex;
+    flex-direction: column;
+    text-align: center;
+    text-decoration: none;
+    justify-content: center;
+    border-radius: 4px;
+    /*display: flex;
+    align-items: center;
+    white-space: nowrap;
+    background: #b3acac;
+    border-radius: 4px;
+    padding: 10px;
+    overflow-wrap: break-word;
+    word-wrap: break-word;*/
+    width: 100px;
+    height: 100px;
+    background: #b7c7f3;
+
+}
+
+.attachments a span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    font-size: 24px;
+}
+
+.attachments a small {
+    font-size: 10px;
+    color: #000;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    padding: 5px;
+    line-height: 1;
+    background: #9cafe2;
+}

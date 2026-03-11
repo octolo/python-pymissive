@@ -1,0 +1,68 @@
+{% extends "django_pymissive/base_preview.html" %}
+{% load static i18n %}
+
+{% block preview_stylesheet %}
+<link rel="stylesheet" href="{% static 'django_pymissive/css/email_preview.css' %}">
+{% endblock %}
+
+{% block preview_content %}
+<div class="email-preview">
+    <div class="email-header">
+        <p><strong>{% trans 'From' %}:</strong>
+            {% if sender.name %}{{ sender.name }} {% endif %}&lt;{{ sender.email }}&gt;
+        </p>
+        {% if reply_to %}
+        <p><strong>{% trans 'Reply-To' %}:</strong>
+            {% if reply_to.name %}{{ reply_to.name }} {% endif %}&lt;{{ reply_to.email }}&gt;
+        </p>
+        {% endif %}
+        <p><strong>{% trans 'To' %}:</strong>
+            {% if to_recipients %}
+            {% for r in to_recipients %}{% if not forloop.first %}, {% endif %}{% if r.name %}{{ r.name }} {% endif %}&lt;{{ r.email }}&gt;{% endfor %}
+            {% else %}
+            {% trans 'None' %}
+            {% endif %}
+        </p>
+        {% if cc_recipients %}
+        <p><strong>{% trans 'Cc' %}:</strong>
+            {% for r in cc_recipients %}{% if not forloop.first %}, {% endif %}{% if r.name %}{{ r.name }} {% endif %}&lt;{{ r.email }}&gt;{% endfor %}
+        </p>
+        {% endif %}
+        {% if bcc_recipients %}
+        <p><strong>{% trans 'Bcc' %}:</strong>
+            {% for r in bcc_recipients %}{% if not forloop.first %}, {% endif %}{% if r.name %}{{ r.name }} {% endif %}&lt;{{ r.email }}&gt;{% endfor %}
+        </p>
+        {% endif %}
+        {% if missive.subject_compiled %}
+        <p><strong>{% trans 'Subject' %}:</strong> {{ missive.subject_compiled }}</p>
+        {% endif %}
+    </div>
+    <div class="email-body">
+        {% if missive.body_html_compiled %}
+            <fieldset class="email-html">
+                <legend>HTML Content</legend>
+                {{ missive.body_html_compiled|safe }}
+            </fieldset>
+        {% endif %}
+        {% if missive.body_text_compiled %}
+            <fieldset class="email-html">
+                <legend>Plain Text Content</legend>
+                <pre>{{ missive.body_text_compiled }}</pre>
+            </fieldset>
+        {% endif %}
+        {% if not missive.body_html_compiled and not missive.body_text_compiled %}
+            <p class="empty">{% trans 'No content' %}</p>
+        {% endif %}
+    </div>
+    {% if missive.attachments_physical %}
+    <div class="attachments">
+        {% for doc in missive.attachments_physical %}
+        <a href="{{ doc.attachment_url.url }}" target="_blank" rel="noopener">
+            <span>&#128196;</span>
+            <small>{{ doc.attachment_url.name|default:"unnamed" }}</small>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

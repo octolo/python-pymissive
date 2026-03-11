@@ -1,0 +1,86 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "django-pymissive"
+version = "1.0.0"
+description = "Django library for multi-channel missive management (email, SMS, push, postal, etc.)"
+readme = "README.md"
+authors = [
+    { name = "Octolo", email = "dev@octolo.tech" }
+]
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Framework :: Django",
+    "Framework :: Django :: 3.2",
+    "Framework :: Django :: 4.0",
+    "Framework :: Django :: 4.1",
+    "Framework :: Django :: 4.2",
+    "Framework :: Django :: 5.0",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+]
+keywords = ["django", "missive"]
+requires-python = ">=3.8"
+dependencies = [
+    "Django>=3.2",
+    "django-phonenumber-field[phonenumbers]>=7.0",
+    "babel>=2.0",
+    "pymissive>=0.1.0",
+    "boto3>=1.28",
+    "requests>=2.31",
+    "requests>=2.31",  # La Poste, LRE (AR24)
+    "phonenumbers>=8.13",  # Validation numéros de téléphone
+    "email-validator>=2.1",  # Validation emails
+]
+
+[project.optional-dependencies]
+messaging = [
+    "python-telegram-bot>=20.7",
+    "requests>=2.31",
+]
+brevo = [
+    "brevo-python>=4.0",
+]
+pdf = [
+    "weasyprint>=60.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/octolo/python-missive"
+Repository = "https://github.com/octolo/python-missive"
+Documentation = "https://github.com/octolo/python-missive/django-missive#readme"
+Issues = "https://github.com/octolo/python-missive/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["django_pymissive*"]
+exclude = ["tests*", "docs*"]
+
+[tool.setuptools.package-data]
+django_pymissive = ["templates/**/*", "static/**/*", "locale/**/*"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.pylint.main]
+ignore = ["migrations"]
+
+[tool.django-stubs]
+django_settings_module = "tests.settings"
+
