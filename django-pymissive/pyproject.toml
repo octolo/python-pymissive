@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django-pymissive"
-version = "1.0.0"
+version = "1.0.1"
 description = "Django library for multi-channel missive management (email, SMS, push, postal, etc.)"
 readme = "README.md"
 authors = [
@@ -71,7 +71,7 @@ include = ["django_pymissive*"]
 exclude = ["tests*", "docs*"]
 
 [tool.setuptools.package-data]
-django_pymissive = ["templates/**/*", "static/**/*", "locale/**/*"]
+django_pymissive = ["templates/**/*", "static/**/*", "locale/**/*", "migrations/**/*"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
