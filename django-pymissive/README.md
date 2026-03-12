@@ -1,63 +1,63 @@
 # Django Missive
 
-🚀 Une bibliothèque Django complète pour gérer l'envoi de **missives multi-canaux** : emails, SMS, WhatsApp, courrier postal, et notifications in-app.
+🚀 A complete Django library for managing **multi-channel missive sending**: email, SMS, WhatsApp, postal mail, and in-app notifications.
 
 ## ✨ Features
 
-### Fonctionnalités principales
+### Main features
 
-- 📧 **Multi-canaux** : 14 types supportés (Email, SMS, WhatsApp, Telegram, Signal, Messenger, RCS, Courrier postal, LRE, Appels vocaux, Notifications push, Slack, Teams)
-- 🔌 **15+ providers intégrés** : SendGrid, Mailgun, Twilio, La Poste, Telegram, FCM, APN, Slack, Teams, etc.
-- 📎 **Pièces jointes flexibles** : Fichiers locaux OU URLs externes (S3, Google Drive)
-- 🔔 **Webhooks unifiés** : Un seul endpoint `/missive/webhook/{provider}/`
-- 📊 **Tracking complet** : Historique, statuts, événements
-- 🎯 **Modèle Recipient** : Centralisation des coordonnées (email, téléphone, adresse)
-- 🔍 **Validation intégrée** : Tests de risque d'échec avant envoi
-- 👨‍💼 **Admin Django complet** : Interface de gestion avec actions de validation
-- 🔗 **GenericForeignKey** : Lien flexible avec vos modèles métier
-- 📝 **Templates réutilisables** : Créez des templates de missives
-- 📊 **Monitoring avancé** : Services, crédits, SLA et health check pour chaque provider
-- 🔄 **Fallback automatique** : Bascule vers un provider de secours en cas de panne
+- 📧 **Multi-channel**: 14 supported types (Email, SMS, WhatsApp, Telegram, Signal, Messenger, RCS, Postal mail, LRE, Voice calls, Push notifications, Slack, Teams)
+- 🔌 **15+ integrated providers**: SendGrid, Mailgun, Twilio, La Poste, Telegram, FCM, APN, Slack, Teams, etc.
+- 📎 **Flexible attachments**: Local files OR external URLs (S3, Google Drive)
+- 🔔 **Unified webhooks**: Single endpoint `/missive/webhook/{provider}/`
+- 📊 **Full tracking**: History, statuses, events
+- 🎯 **Recipient model**: Centralized contact details (email, phone, address)
+- 🔍 **Built-in validation**: Pre-send risk checks
+- 👨‍💼 **Complete Django admin**: Management interface with validation actions
+- 🔗 **GenericForeignKey**: Flexible link with your business models
+- 📝 **Reusable templates**: Create missive templates
+- 📊 **Advanced monitoring**: Services, credits, SLA and health check per provider
+- 🔄 **Automatic fallback**: Switch to backup provider on failure
 
-### Architecture technique
+### Technical architecture
 
-- ✅ Compatible Django 3.2+ et Python 3.9+
-- ✅ Structure modulaire par mixins (providers/base/)
-- ✅ Tests unitaires complets (8/8 ✅)
-- ✅ Documentation exhaustive (16 fichiers .md)
-- ✅ CI/CD avec GitHub Actions
-- ✅ Type hints et mypy
-- ✅ Code formaté avec Black + isort
+- ✅ Compatible with Django 3.2+ and Python 3.9+
+- ✅ Modular structure with mixins (providers/base/)
+- ✅ Comprehensive unit tests (8/8 ✅)
+- ✅ Exhaustive documentation (16 .md files)
+- ✅ CI/CD with GitHub Actions
+- ✅ Type hints and mypy
+- ✅ Code formatted with Black + isort
 
 ## Installation
 
-### 🔧 Mode développement (projet local)
+### 🔧 Development mode (local project)
 
 ```bash
-# Core uniquement (Django + validation)
+# Core only (Django + validation)
 pip install -r requirements.txt
 
-# Développement (tests, linters)
+# Development (tests, linters)
 pip install -r requirements-dev.txt
 
-# Tous les providers
+# All providers
 pip install -r requirements-all.txt
 ```
 
-### 📦 Mode production (futur - après publication PyPI)
+### 📦 Production mode (future - after PyPI publication)
 
 ```bash
-# Installation de base
+# Base installation
 pip install django-missive
 
-# Avec providers spécifiques
+# With specific providers
 pip install django-missive[email]        # Email (SendGrid, Mailgun, SES)
-pip install django-missive[sms]          # SMS & Vocal (Twilio, Vonage)
+pip install django-missive[sms]          # SMS & Voice (Twilio, Vonage)
 pip install django-missive[messaging]    # Telegram, Signal, Messenger
-pip install django-missive[push]         # Notifications push (FCM, APN)
+pip install django-missive[push]         # Push notifications (FCM, APN)
 pip install django-missive[professional] # Slack, Teams
-pip install django-missive[postal]       # Courrier, LRE
-pip install django-missive[all]          # Tous les providers
+pip install django-missive[postal]       # Postal, LRE
+pip install django-missive[all]          # All providers
 ```
 
 ## Quick Start
@@ -89,14 +89,14 @@ urlpatterns = [
 ```
 
 This will create the following URLs:
-- `/missive/webhook/{provider}/` - Webhook unifié pour tous les providers
+- `/missive/webhook/{provider}/` - Unified webhook for all providers
 
 4. Configure providers in `settings.py`:
 
 ```python
-# Configuration Django Missive
+# Django Missive configuration
 MISSIVE_PROVIDERS = {
-    # Providers par type de missive (utilise python-missive)
+    # Providers by missive type (uses python-missive)
     'EMAIL': {
         'backend': 'pymissive.providers.sendgrid.SendGridProvider',
         'config': {
@@ -119,37 +119,37 @@ MISSIVE_PROVIDERS = {
     },
 }
 
-# Email par défaut
+# Default email
 DEFAULT_FROM_EMAIL = 'noreply@example.com'
 ```
 
-## 🚀 Usage rapide
+## 🚀 Quick usage
 
-### Envoyer un email
+### Send an email
 
 ```python
 from django_pymissive.models import Missive, MissiveType, MissiveEventType
 
-# Créer une missive email
+# Create an email missive
 missive = Missive.objects.create(
     sender=request.user,
     missive_type=MissiveType.EMAIL,
     recipient_email="client@example.com",
-    subject="Commande confirmée",
-    body="<p>Votre commande #123 est confirmée</p>",
-    body_text="Votre commande #123 est confirmée",
+    subject="Order confirmed",
+    body="<p>Your order #123 is confirmed</p>",
+    body_text="Your order #123 is confirmed",
     status=MissiveEventType.PENDING,
 )
 
-# L'envoi peut être géré via des tâches asynchrones ou manuellement
+# Sending can be handled via async tasks or manually
 ```
 
-### Utiliser le modèle pour créer des missives
+### Use the model to create missives
 
 ```python
 from django_pymissive.models import Missive, MissiveType, MissiveEventType
 
-# Créer un destinataire avec toutes ses coordonnées
+# Create a recipient with all contact details
 missive = Missive.objects.create(
     sender=request.user,
     missive_type=MissiveType.EMAIL,
@@ -161,36 +161,36 @@ missive = Missive.objects.create(
     recipient_postal_code="75001",
     recipient_city="Paris",
     recipient_country="FR",
-    subject="Bienvenue",
-    body="<p>Bonjour Jean, bienvenue!</p>",
+    subject="Welcome",
+    body="<p>Hello Jean, welcome!</p>",
     status=MissiveEventType.PENDING,
 )
 
-# Créer un SMS avec les mêmes coordonnées
+# Create an SMS with the same contact details
 sms = Missive.objects.create(
     sender=request.user,
     missive_type=MissiveType.SMS,
     recipient_phone="+33600000000",
-    body="Votre code de vérification: 123456",
+    body="Your verification code: 123456",
     status=MissiveEventType.PENDING,
 )
 ```
 
-### Monitoring des providers (via python-missive)
+### Provider monitoring (via python-missive)
 
 ```python
 from pymissive.providers.sendgrid import SendGridProvider
 
-# Configurer et vérifier le provider
+# Configure and verify the provider
 provider = SendGridProvider(config={
     'SENDGRID_API_KEY': 'your-api-key'
 })
 
-# Vérifier la configuration
+# Verify configuration
 is_configured = provider.is_configured()
-print(f"Provider configuré: {is_configured}")
+print(f"Provider configured: {is_configured}")
 
-# Envoyer un email de test
+# Send a test email
 result = provider.send_email(
     from_email='sender@example.com',
     to_email='recipient@example.com',
@@ -199,17 +199,17 @@ result = provider.send_email(
 )
 ```
 
-### Valider et envoyer
+### Validate and send
 
 ```python
 from django_pymissive.models import Missive, MissiveEventType
 
-# Récupérer une missive
+# Retrieve a missive
 missive = Missive.objects.get(id=123)
 
-# Vérifier qu'elle est prête à être envoyée
+# Check it is ready to be sent
 if missive.status == MissiveEventType.PENDING:
-    # Marquer comme envoyée (l'envoi réel se fait via le provider configuré)
+    # Mark as sent (actual sending is done via the configured provider)
     missive.status = MissiveEventType.SENT
     missive.save()
 ```

@@ -1,49 +1,49 @@
 # python-missive
 
-Bibliothèque Python légère et agnostique pour l'envoi de missives multi-canaux (emails, SMS, notifications push, courrier postal, etc.).
+Lightweight, framework-agnostic Python library for multi-channel message sending (email, SMS, push notifications, postal mail, etc.).
 
-## Présentation
+## Overview
 
-**python-missive** est une bibliothèque Python framework-agnostic qui fournit des providers unifiés pour l'envoi de messages multi-canaux. Elle sert de base à **django-missive** et peut être utilisée indépendamment dans n'importe quel projet Python.
+**python-missive** is a framework-agnostic Python library that provides unified providers for multi-channel message sending. It serves as the base for **django-missive** and can be used independently in any Python project.
 
-### Fonctionnalités principales
+### Main features
 
-- 🔌 **15+ providers intégrés** pour différents canaux de communication
-- 📧 **Email** : SendGrid, Mailgun, SES, Brevo, SMTP, Django Email
-- 📱 **SMS & Voix** : Twilio, Vonage, SMSPartner
-- 💬 **Messaging** : Telegram, Signal, Messenger, Slack, Teams
-- 📮 **Courrier postal & LRE** : La Poste, Maileva, AR24, Certeurope
-- 🔔 **Notifications push** : FCM (Firebase), APN (Apple), In-App
-- 🏗️ **Architecture modulaire** basée sur ProviderKit
-- ✅ **Framework-agnostic** : utilisable avec ou sans framework
-- 🎯 **Type hints complets** et documentation
+- 🔌 **15+ integrated providers** for different communication channels
+- 📧 **Email**: SendGrid, Mailgun, SES, Brevo, SMTP, Django Email
+- 📱 **SMS & Voice**: Twilio, Vonage, SMSPartner
+- 💬 **Messaging**: Telegram, Signal, Messenger, Slack, Teams
+- 📮 **Postal & LRE**: La Poste, Maileva, AR24, Certeurope
+- 🔔 **Push notifications**: FCM (Firebase), APN (Apple), In-App
+- 🏗️ **Modular architecture** based on ProviderKit
+- ✅ **Framework-agnostic**: usable with or without a framework
+- 🎯 **Complete type hints** and documentation
 
 ## Installation
 
 ```bash
-# Installation basique
+# Basic installation
 pip install python-missive
 
-# Avec dépendances pour providers spécifiques
-pip install python-missive[email]      # Providers email
-pip install python-missive[sms]        # SMS et vocal
+# With dependencies for specific providers
+pip install python-missive[email]      # Email providers
+pip install python-missive[sms]        # SMS and voice
 pip install python-missive[messaging]  # Telegram, Signal, etc.
 pip install python-missive[push]       # FCM, APN
-pip install python-missive[postal]     # Courrier postal
-pip install python-missive[all]        # Tous les providers
+pip install python-missive[postal]     # Postal mail
+pip install python-missive[all]        # All providers
 ```
 
-## Usage rapide
+## Quick usage
 
 ```python
 from pymissive.providers.sendgrid import SendGridProvider
 
-# Configurer le provider
+# Configure the provider
 provider = SendGridProvider(config={
     'SENDGRID_API_KEY': 'your-api-key'
 })
 
-# Envoyer un email
+# Send an email
 result = provider.send_email(
     from_email='sender@example.com',
     to_email='recipient@example.com',
@@ -52,19 +52,19 @@ result = provider.send_email(
 )
 ```
 
-## Providers disponibles
+## Available providers
 
 ### Email
-- `DjangoEmailProvider` - Utilise le backend email Django
-- `SMTPProvider` - SMTP générique
+- `DjangoEmailProvider` - Uses Django email backend
+- `SMTPProvider` - Generic SMTP
 - `SendGridProvider` - SendGrid API
 - `MailgunProvider` - Mailgun API
 - `SESProvider` - Amazon SES
 - `BrevoProvider` - Brevo (ex-Sendinblue)
 - `ScalewayProvider` - Scaleway Transactional Email
 
-### SMS & Voix
-- `TwilioProvider` - Twilio SMS et appels vocaux
+### SMS & Voice
+- `TwilioProvider` - Twilio SMS and voice calls
 - `VonageProvider` - Vonage (ex-Nexmo)
 - `SMSPartnerProvider` - SMSPartner
 
@@ -75,60 +75,59 @@ result = provider.send_email(
 - `SlackProvider` - Slack
 - `TeamsProvider` - Microsoft Teams
 
-### Courrier postal & LRE
-- `LaPosteProvider` - La Poste (courrier physique)
+### Postal mail & LRE
+- `LaPosteProvider` - La Poste (physical mail)
 - `MailevaProvider` - Maileva
 - `AR24Provider` - AR24 (LRE)
 - `CerteuropeProvider` - Certeurope
 
-### Notifications push
+### Push notifications
 - `FCMProvider` - Firebase Cloud Messaging
 - `APNProvider` - Apple Push Notification
-- `InAppNotificationProvider` - Notifications in-app
+- `InAppNotificationProvider` - In-app notifications
 
 ## Architecture
 
-La bibliothèque utilise **ProviderKit** pour la gestion des providers :
+The library uses **ProviderKit** for provider management:
 
 ```python
 from pymissive.providers import get_missive_providers
 
-# Découvrir tous les providers disponibles
+# Discover all available providers
 providers = get_missive_providers()
 
-# Filtrer par type de service
+# Filter by service type
 email_providers = [p for p in providers if 'email' in p.services]
 ```
 
 ## Documentation
 
-Pour plus de détails, consultez la documentation dans le dossier `docs/` :
+For more details, see the documentation in the `docs/` folder:
 
-- `docs/purpose.md` - Objectifs et architecture du projet
-- `docs/structure.md` - Structure des modules et organisation
-- `docs/development.md` - Guidelines de développement
-- `docs/AI.md` - Contrat pour assistants IA
+- `docs/purpose.md` - Project goals and architecture
+- `docs/structure.md` - Module structure and organization
+- `docs/development.md` - Development guidelines
+- `docs/AI.md` - Contract for AI assistants
 
-## Développement
+## Development
 
 ```bash
-# Créer un environnement virtuel
+# Create virtual environment
 python service.py dev venv
 
-# Installer en mode développement
+# Install in development mode
 python service.py dev install-dev
 
-# Exécuter les tests
+# Run tests
 python service.py dev test
 
-# Formater le code
+# Format code
 python service.py dev format
 
-# Lancer tous les checks qualité
+# Run all quality checks
 python service.py quality check
 ```
 
-## Licence
+## License
 
-Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
-
+This project is licensed under the MIT License. See the `LICENSE` file for details.
