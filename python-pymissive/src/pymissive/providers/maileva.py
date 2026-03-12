@@ -191,7 +191,7 @@ class MailevaProvider(MissiveProviderBase):
 
     def get_recipient_postal_data(self, recipient: dict[str, Any]) -> dict[str, Any]:
         address = recipient.get("address")
-        return {
+        data = {
             "custom_id": recipient.get("id"),
             "address_line_1": address.get("organization"),
             "address_line_2": recipient.get("name"),
@@ -261,31 +261,32 @@ class MailevaProvider(MissiveProviderBase):
         return self.ack_level == "acknowledgement_of_receipt"
 
     def get_postal_data(self, **kwargs: Any) -> dict[str, Any]:
-        sender_address = kwargs.get("sender_address")
         data = {
             "name": kwargs.get("subject"),
             "custom_id": str(kwargs.get("id")),
             "color_printing": kwargs.get("color_printing", self._get_config_or_env("COLOR_PRINTING", False)),
             "duplex_printing": kwargs.get("duplex_printing", self._get_config_or_env("DUPLEX_PRINTING", True)),
-            "optional_address_sheet": kwargs.get("optional_address_sheet", False),
-            "print_sender_address": kwargs.get("print_sender_address", False),
-            "returned_mail_scanning": kwargs.get("returned_mail_scanning", False),
+            "optional_address_sheet": kwargs.get("optional_address_sheet", self._get_config_or_env("OPTIONAL_ADDRESS_SHEET", False)),
+            "print_sender_address": kwargs.get("print_sender_address", self._get_config_or_env("PRINT_SENDER_ADDRESS", True)),
             "archiving_duration": kwargs.get("archiving_duration", self._get_config_or_env("ARCHIVING_DURATION", 0)),
-            "sender_address_line_1": sender_address.get("organization"),
-            "sender_address_line_2": kwargs.get("sender_name"),
-            "sender_address_line_3": sender_address.get("address_line2"),
-            "sender_address_line_4": sender_address.get("address_line1"),
-            "sender_address_line_5": sender_address.get("locality") or sender_address.get("po_box"),
-            "sender_address_line_6": f"{sender_address.get('postal_code')} {sender_address.get('city')}",
-            "sender_country_code": sender_address.get("country_code"),
-            'envelope_windows_type': 'DOUBLE',
+            'envelope_windows_type': kwargs.get("envelope_windows_type", self._get_config_or_env("ENVELOPE_WINDOWS_TYPE", "DOUBLE")),
         }
-        if sender_address.get("sorting_code"):
-            data["sender_address_line6"] += " " + sender_address.get("sorting_code")
+        sender_address = kwargs.get("sender_address", self._get_config_or_env("SENDER_ADDRESS", {}))
+        if sender_address:
+            data["sender_address_line_1"] = sender_address.get("organization")
+            data["sender_address_line_2"] = kwargs.get("sender_name")
+            data["sender_address_line_3"] = sender_address.get("address_line2")
+            data["sender_address_line_4"] = sender_address.get("address_line1")
+            data["sender_address_line_5"] = sender_address.get("locality") or sender_address.get("po_box")
+            data["sender_address_line_6"] = f"{sender_address.get('postal_code')} {sender_address.get('city')}"
+            data["sender_country_code"] = sender_address.get("country_code")
+            if sender_address.get("sorting_code"):
+                data["sender_address_line_6"] += " " + sender_address.get("sorting_code")
         if kwargs.get("notification_email"):
-            data["notification_email"] = kwargs.get("notification_email")
-            data["notification_types"] = ["ALL_MAILEVA", "ALL_LAPOSTE"]
+            data["notification_email"] = kwargs.get("notification_email", self._get_config_or_env("NOTIFICATION_EMAIL", ""))
+            data["notification_types"] = self._get_config_or_env("NOTIFICATION_TYPES", ["ALL_MAILEVA", "ALL_LAPOSTE"])
         if self.is_postal_registered():
+            data["returned_mail_scanning"] = kwargs.get("returned_mail_scanning", self._get_config_or_env("RETURNED_MAIL_SCANNING", False))
             data["acknowledgement_of_receipt"] = True
             priority = kwargs.get("priority")
             data["postage_type"] = "urgent" if (priority or "").lower() == "urgent" else self._get_config_or_env("POSTAGE_TYPE", "fast")
@@ -303,6 +304,7 @@ class MailevaProvider(MissiveProviderBase):
         url = self.get_endpoint('sendings')
         data = self.get_postal_data(**kwargs)
         response = requests.post(url, headers=self._get_headers(), json=data, timeout=30)
+        print(response.content)
         response.raise_for_status()
         return response.json()
 

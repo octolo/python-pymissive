@@ -52,6 +52,24 @@ class MissiveCampaignManager(models.Manager):
                     to_missive__to_missiverecipient__status=MissiveStatus.PROCESSING
                 ),
             ),
+            # Fallback when Recipient.status is not updated (provider only updates Missive.status)
+            count_missive_success=models.Count(
+                "to_missive",
+                filter=Q(to_missive__status=MissiveStatus.SUCCESS),
+                distinct=True,
+            ),
+            count_missive_processing=models.Count(
+                "to_missive",
+                filter=Q(to_missive__status=MissiveStatus.PROCESSING),
+                distinct=True,
+            ),
+            count_missive_failed=models.Count(
+                "to_missive",
+                filter=Q(
+                    to_missive__status__in=[MissiveStatus.FAILED, MissiveStatus.ERROR]
+                ),
+                distinct=True,
+            ),
             count_related_object=models.Count("to_campaignrelatedobject", distinct=True),
             count_attachment=models.Count("to_campaigndocument", distinct=True),
             **{

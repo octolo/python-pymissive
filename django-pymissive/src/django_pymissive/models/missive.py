@@ -437,13 +437,19 @@ class Missive(CommentTimestampedModel):
         return self.recipients.filter(recipient_type=MissiveRecipientType.RECIPIENT).exists()
 
     def check_email(self):
-        return self.check_recipients() and (self.body_html or self.body_text) and self.subject
+        body_html = self.get_locally_or_campaign_value("body_html")
+        body_text = self.get_locally_or_campaign_value("body_text")
+        subject = self.get_locally_or_campaign_value("subject")
+        body = body_html or body_text
+        return self.check_recipients() and bool(body and body.strip()) and bool(subject and subject.strip())
 
     def check_sms(self):
-        return self.check_recipients() and self.body_text
+        body = self.get_locally_or_campaign_value("body_sms", self.body_text)
+        return self.check_recipients() and bool(body and body.strip())
 
     def check_postal(self):
-        return self.check_recipients() and self.body_html
+        body = self.get_locally_or_campaign_value("body_postal", self.body_html)
+        return self.check_recipients() and bool(body and body.strip())
 
     @property
     def show_preview_browser(self):

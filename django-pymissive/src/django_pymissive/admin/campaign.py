@@ -8,6 +8,9 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django.utils.text import format_lazy
+from phonenumber_field.modelfields import PhoneNumberField
+from phonenumber_field.formfields import PhoneNumberField as PhoneNumberFormField
+from phonenumber_field.formfields import SplitPhoneNumberField
 from django_boosted import AdminBoostModel
 from django_boosted.decorators import admin_boost_view
 
@@ -98,6 +101,14 @@ class MissiveCampaignAdmin(AdminBoostModel):
     def _recalculate_attachment_priorities(self, formset, parent):
         """Recalculate attachment priorities after inline save (admin bypasses model save logic)."""
         recalculate_attachment_priorities(campaign_id=parent.pk if parent else None)
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        if isinstance(db_field, PhoneNumberField):
+            kwargs.setdefault("required", False)
+            if db_field.null:
+                return PhoneNumberFormField(**kwargs)
+            return SplitPhoneNumberField(**kwargs)
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     changeform_actions = {
         "send_campaign": _("Send Campaign"),

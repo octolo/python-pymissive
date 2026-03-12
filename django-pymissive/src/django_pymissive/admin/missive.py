@@ -11,6 +11,7 @@ from urllib.parse import unquote
 from django.contrib import messages
 from django.shortcuts import redirect
 from phonenumber_field.modelfields import PhoneNumberField
+from phonenumber_field.formfields import PhoneNumberField as PhoneNumberFormField
 from phonenumber_field.formfields import SplitPhoneNumberField
 from urllib.parse import urlencode
 from ..models.missive import Missive, MissiveMessage, MissiveHistory
@@ -199,6 +200,10 @@ class MissiveAdmin(AdminBoostModel):
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         if isinstance(db_field, PhoneNumberField):
             kwargs.setdefault("required", False)
+            # Use standard PhoneNumberField for nullable fields: SplitPhoneNumberField
+            # displays "None" when initial is None (django-phonenumber-field quirk)
+            if db_field.null:
+                return PhoneNumberFormField(**kwargs)
             return SplitPhoneNumberField(**kwargs)
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
