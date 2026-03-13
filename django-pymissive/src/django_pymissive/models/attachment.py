@@ -4,11 +4,15 @@ import os
 import uuid
 from datetime import date
 
+from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
+from django.core.files.storage import Storage, default_storage
 from django.db import models
 from django.urls import reverse
+from django.utils.deconstruct import deconstructible
+from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
 from .base import CommentTimestampedModel
@@ -27,6 +31,62 @@ def _attachment_upload_to(instance, filename):
     today = date.today()
     prefix = "campaignattachment" if instance.campaign else "missiveattachment"
     return f"missive/{prefix}/{today:%Y/%m/%d}/{filename}"
+
+
+def _get_attachment_file_storage():
+    """Return storage for attachment_file. Configure via PYMISSIVE_ATTACHMENT_FILE_STORAGE.
+    - None: use default_storage (MEDIA_ROOT)
+    - str: import path to storage class, instantiated with ()
+    - instance: use as-is (e.g. DataroomStorage())
+    """
+    storage = getattr(settings, 'PYMISSIVE_ATTACHMENT_FILE_STORAGE', None)
+    if storage is None:
+        return default_storage
+    if isinstance(storage, str):
+        storage_class = import_string(storage)
+        return storage_class()
+    return storage
+
+
+@deconstructible
+class ConfigurableAttachmentStorage(Storage):
+    """Storage that delegates to PYMISSIVE_ATTACHMENT_FILE_STORAGE at runtime.
+    Defined in django_pymissive to avoid migration dependency on project-specific storages.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._storage = None
+
+    @property
+    def _backend(self):
+        if self._storage is None:
+            self._storage = _get_attachment_file_storage()
+        return self._storage
+
+    def _open(self, name, mode='rb'):
+        return self._backend._open(name, mode)
+
+    def _save(self, name, content, max_length=None):
+        try:
+            return self._backend._save(name, content, max_length=max_length)
+        except TypeError:
+            return self._backend._save(name, content)
+
+    def exists(self, name):
+        return self._backend.exists(name)
+
+    def delete(self, name):
+        return self._backend.delete(name)
+
+    def url(self, name):
+        return self._backend.url(name)
+
+    def size(self, name):
+        return self._backend.size(name)
+
+    def __getattr__(self, name):
+        return getattr(self._backend, name)
 
 
 class MissiveBaseAttachment(CommentTimestampedModel):
@@ -92,6 +152,7 @@ class MissiveBaseAttachment(CommentTimestampedModel):
 
     attachment_file = models.FileField(
         upload_to=_attachment_upload_to,
+        storage=ConfigurableAttachmentStorage(),
         blank=True,
         null=True,
         verbose_name=_("Attachment File"),

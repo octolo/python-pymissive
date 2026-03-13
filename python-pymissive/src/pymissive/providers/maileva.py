@@ -271,10 +271,12 @@ class MailevaProvider(MissiveProviderBase):
             "archiving_duration": kwargs.get("archiving_duration", self._get_config_or_env("ARCHIVING_DURATION", 0)),
             'envelope_windows_type': kwargs.get("envelope_windows_type", self._get_config_or_env("ENVELOPE_WINDOWS_TYPE", "DOUBLE")),
         }
-        sender_address = kwargs.get("sender_address", self._get_config_or_env("SENDER_ADDRESS", {}))
+        sender = kwargs.get("sender", self._get_config_or_env("SENDER_ADDRESS", {}))
+        sender_name = sender.get("name")
+        sender_address = sender.get("address")
         if sender_address:
+            data["sender_address_line_2"] = sender_name
             data["sender_address_line_1"] = sender_address.get("organization")
-            data["sender_address_line_2"] = kwargs.get("sender_name")
             data["sender_address_line_3"] = sender_address.get("address_line2")
             data["sender_address_line_4"] = sender_address.get("address_line1")
             data["sender_address_line_5"] = sender_address.get("locality") or sender_address.get("po_box")
@@ -282,6 +284,7 @@ class MailevaProvider(MissiveProviderBase):
             data["sender_country_code"] = sender_address.get("country_code")
             if sender_address.get("sorting_code"):
                 data["sender_address_line_6"] += " " + sender_address.get("sorting_code")
+
         if kwargs.get("notification_email"):
             data["notification_email"] = kwargs.get("notification_email", self._get_config_or_env("NOTIFICATION_EMAIL", ""))
             data["notification_types"] = self._get_config_or_env("NOTIFICATION_TYPES", ["ALL_MAILEVA", "ALL_LAPOSTE"])
@@ -304,7 +307,6 @@ class MailevaProvider(MissiveProviderBase):
         url = self.get_endpoint('sendings')
         data = self.get_postal_data(**kwargs)
         response = requests.post(url, headers=self._get_headers(), json=data, timeout=30)
-        print(response.content)
         response.raise_for_status()
         return response.json()
 

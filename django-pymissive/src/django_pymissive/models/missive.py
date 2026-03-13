@@ -282,21 +282,15 @@ class Missive(CommentTimestampedModel):
             support = get_missive_support_from_type(self.missive_type)
             if support:
                 self.missive_support = support
-        if not self.acknowledgement:
-            self.acknowledgement = (
-                self.get_locally_or_campaign_value("acknowledgement")
-                or AcknowledgementLevel.BASIC_DELIVERY
-            )
-        if not self.delivery_mode:
-            self.delivery_mode = (
-                self.get_locally_or_campaign_value("delivery_mode")
-                or MissiveDeliveryMode.NORMAL
-            )
-        if not self.priority:
-            self.priority = (
-                self.get_locally_or_campaign_value("priority")
-                or MissivePriority.NORMAL
-            )
+        # Leave empty when campaign assigned; get_serialized_data resolves via locally_or_campaign
+        # Use campaign_id to avoid FK resolution issues when creating via API/viewset
+        has_campaign = bool(self.campaign_id)
+        if not self.acknowledgement and not has_campaign:
+            self.acknowledgement = AcknowledgementLevel.BASIC_DELIVERY
+        if not self.delivery_mode and not has_campaign:
+            self.delivery_mode = MissiveDeliveryMode.NORMAL
+        if not self.priority and not has_campaign:
+            self.priority = MissivePriority.NORMAL
 
     def save(self, *args, **kwargs):
         """Save the missive with auto-filled defaults (provider, support, acknowledgement, etc.)."""
@@ -322,8 +316,11 @@ class Missive(CommentTimestampedModel):
     def last_event_display(self):
         return dict(MissiveEventType.choices).get(self.last_event, self.last_event)
 
+    # Campaign uses _postal for address support, _email for email, _phone for phone
+    _SUPPORT_TO_CAMPAIGN_SUFFIX = {"address": "postal", "email": "email", "phone": "phone"}
+
     def get_locally_or_campaign_value(self, field, fallback=None):
-        """Return value from self, else from campaign (field or field_{support})."""
+        """Return value from self, else from campaign (field or field_{suffix})."""
         locally = getattr(self, field, fallback)
         if locally:
             return locally
@@ -334,7 +331,8 @@ class Missive(CommentTimestampedModel):
             return campaign_val
         support = (self.missive_support or "").lower()
         if support:
-            campaign_val = getattr(self.campaign, f"{field}_{support}", None)
+            suffix = self._SUPPORT_TO_CAMPAIGN_SUFFIX.get(support, support)
+            campaign_val = getattr(self.campaign, f"{field}_{suffix}", None)
             if campaign_val:
                 return campaign_val
         return fallback
@@ -351,9 +349,10 @@ class Missive(CommentTimestampedModel):
         support = self.missive_support.lower()
         name = self.get_locally_or_campaign_value(f"sender_{support}_name", self.sender_name)
         sender = self.get_locally_or_campaign_value(f"sender_{support}", getattr(self, f"sender_{support}", None))
+        sender = dict(sender) if support == "address" else str(sender) if sender else ""
         return {
             "name": name or "",
-            support: str(sender) if sender else "",
+            support: sender,
         }
 
     def get_reply_to(self):
@@ -369,13 +368,19 @@ class Missive(CommentTimestampedModel):
         return None
 
     def get_acknowledgement(self):
-        return self.get_locally_or_campaign_value("acknowledgement")
+        return self.get_locally_or_campaign_value(
+            "acknowledgement", fallback=AcknowledgementLevel.BASIC_DELIVERY
+        )
 
     def get_delivery_mode(self):
-        return self.get_locally_or_campaign_value("delivery_mode")
+        return self.get_locally_or_campaign_value(
+            "delivery_mode", fallback=MissiveDeliveryMode.NORMAL
+        )
 
     def get_priority(self):
-        return self.get_locally_or_campaign_value("priority")
+        return self.get_locally_or_campaign_value(
+            "priority", fallback=MissivePriority.NORMAL
+        )
 
     def is_serializable_field(self, field):
         return (not field.is_relation
