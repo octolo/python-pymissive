@@ -35,6 +35,20 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+if DEBUG:
+    try:
+        import debug_toolbar  # noqa: F401
+
+        INSTALLED_APPS += ["debug_toolbar"]
+        MIDDLEWARE += ["debug_toolbar.middleware.DebugToolbarMiddleware"]
+        INTERNAL_IPS = ["127.0.0.1", "::1"]
+        # Allow toolbar when using ngrok or other tunnels (client IP is not loopback).
+        DEBUG_TOOLBAR_CONFIG = {
+            "SHOW_TOOLBAR_CALLBACK": lambda request: DEBUG,
+        }
+    except ImportError:
+        pass
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",

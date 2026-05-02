@@ -306,8 +306,15 @@ class Missive(CommentTimestampedModel):
 
     def has_service(self, service):
         service_name = f"{service}_{self.missive_type}".lower()
-        if self.provider:
-            return hasattr(self.provider._provider, service_name)
+        if not self.provider:
+            return False
+        return hasattr(self.provider._provider, service_name)
+
+    def can_preview_missive(self):
+        """True if the provider implements ``preview_<missive_type>`` (e.g. ``preview_lre``)."""
+        if not self.missive_type:
+            return False
+        return self.has_service("preview")
 
     @property
     def token_missive(self):
@@ -322,58 +329,77 @@ class Missive(CommentTimestampedModel):
     def last_event_display(self):
         return dict(MissiveEventType.choices).get(self.last_event, self.last_event)
 
-    # Campaign suffix by support: address->lre, email->email, phone->phone
-    _SUPPORT_TO_CAMPAIGN_SUFFIX = {"address": "lre", "email": "email", "phone": "phone"}
+    # Missive field → campaign field, per support type.
+    # Only fields whose names differ need an entry; absent fields use the same name on campaign.
+    _CAMPAIGN_FIELD_MAP: dict[str, dict[str, str]] = {
+        "email": {
+            "sender_name":    "sender_email_name",
+            "reply_to_name":  "reply_to_email_name",
+            "acknowledgement": "acknowledgement_email",
+        },
+        "phone": {
+            "sender_name":    "sender_phone_name",
+            "body_text":      "body_sms",
+        },
+        "address": {
+            "sender_name":    "sender_address_name",
+            "reply_to_name":  "reply_to_address_name",
+            "acknowledgement": "acknowledgement_lre",
+            "delivery_mode":  "delivery_mode_lre",
+            "priority":       "priority_lre",
+            "body_html":      "first_document",
+        },
+    }
+
+    # Missive fields that may be inherited from the campaign, per support type.
+    _CAMPAIGN_SOURCED_FIELDS: dict[str, list[str]] = {
+        "email": [
+            "subject", "body_html", "body_text",
+            "acknowledgement",
+            "sender_name", "sender_email",
+            "reply_to_name", "reply_to_email",
+        ],
+        "phone": [
+            "subject", "body_text",
+            "sender_name", "sender_phone",
+        ],
+        "address": [
+            "subject", "body_html", "body_text",
+            "acknowledgement", "delivery_mode", "priority",
+            "sender_name", "sender_address",
+            "reply_to_name", "reply_to_address",
+        ],
+    }
 
     @classmethod
-    def get_campaign_sourced_fields(cls, support):
-        """Return (missive_attr, lookup_field) for fields that can come from campaign."""
-        support = (support or "").lower()
-        fields = [
-            ("subject", "subject"),
-            ("body_html", "body_html"),
-            ("body_text", "body_text"),
-            ("acknowledgement", "acknowledgement"),
-            ("delivery_mode", "delivery_mode"),
-            ("priority", "priority"),
-            ("sender_name", f"sender_{support}_name"),
-            (f"sender_{support}", f"sender_{support}"),
-            ("reply_to_name", f"reply_to_{support}_name"),
-            (f"reply_to_{support}", f"reply_to_{support}"),
-        ]
-        if support == "phone":
-            fields.append(("body_text", "body_sms"))
-        elif support == "address":
-            fields.append(("body_html", "first_document"))
-        return fields
+    def get_campaign_sourced_fields(cls, support) -> list[str]:
+        """Return the missive field names that can be sourced from campaign for the given support."""
+        return list(cls._CAMPAIGN_SOURCED_FIELDS.get((support or "").lower(), []))
 
     @property
     def campaign_sourced_field_names(self):
         """Field names that can be sourced from campaign (for set_locally_ifnull / clear)."""
-        fields = self.get_campaign_sourced_fields(self.missive_support)
         names = []
-        for missive_attr, _ in fields:
-            if missive_attr not in names and hasattr(self, missive_attr):
-                names.append(missive_attr)
+        for field in self.get_campaign_sourced_fields(self.missive_support):
+            if field not in names and hasattr(self, field):
+                names.append(field)
         return names + (["additional_context"] if self.campaign_id else [])
 
     def get_locally_or_campaign_value(self, field, fallback=None):
-        """Return value from self, else from campaign (field or field_{suffix})."""
-        locally = getattr(self, field, fallback)
+        """Return local field value if set, else look up the matching campaign field.
+
+        The campaign field name is resolved via _CAMPAIGN_FIELD_MAP[support][field].
+        If the field has no entry in the map for the current support, the same name is
+        used on the campaign (identity mapping).
+        """
+        locally = getattr(self, field, None)
         if locally:
             return locally
         if not self.campaign:
             return fallback
-        campaign_val = getattr(self.campaign, field, None)
-        if campaign_val:
-            return campaign_val
         support = (self.missive_support or "").lower()
-        if support:
-            suffix = self._SUPPORT_TO_CAMPAIGN_SUFFIX.get(support, support)
-            campaign_val = getattr(self.campaign, f"{field}_{suffix}", None)
-            if campaign_val:
-                return campaign_val
-        return fallback
+        campaign_field = self._CAMPAIGN_FIELD_MAP.get(support, {}).get(field, field)
+        return getattr(self.campaign, campaign_field, None) or fallback
 
     def set_locally_ifnull(self):
         """Copy campaign values to local fields when null. Preserves content at send time
@@ -384,14 +410,14 @@ class Missive(CommentTimestampedModel):
         fields = self.get_campaign_sourced_fields(support)
 
         updates = []
-        for missive_attr, lookup_field in fields:
-            if not hasattr(self, missive_attr):
+        for field in fields:
+            if not hasattr(self, field):
                 continue
-            local = getattr(self, missive_attr, None)
-            val = self.get_locally_or_campaign_value(lookup_field, local)
+            local = getattr(self, field, None)
+            val = self.get_locally_or_campaign_value(field, local)
             if not local and val:
-                setattr(self, missive_attr, val)
-                updates.append(missive_attr)
+                setattr(self, field, val)
+                updates.append(field)
 
         if self.campaign.additional_context and not (self.additional_context or {}):
             self.additional_context = dict(self.campaign.additional_context)
@@ -422,8 +448,8 @@ class Missive(CommentTimestampedModel):
 
     def get_sender(self):
         support = self.missive_support.lower()
-        name = self.get_locally_or_campaign_value(f"sender_{support}_name", self.sender_name)
-        sender = self.get_locally_or_campaign_value(f"sender_{support}", getattr(self, f"sender_{support}", None))
+        name = self.get_locally_or_campaign_value("sender_name")
+        sender = self.get_locally_or_campaign_value(f"sender_{support}")
         sender = dict(sender) if support == "address" else str(sender) if sender else ""
         return {
             "name": name or "",
@@ -433,8 +459,8 @@ class Missive(CommentTimestampedModel):
     def get_reply_to(self):
         """Return reply_to dict for provider (email only)."""
         support = self.missive_support.lower()
-        name = self.get_locally_or_campaign_value(f"reply_to_{support}_name", self.reply_to_name)
-        reply_to = self.get_locally_or_campaign_value(f"reply_to_{support}", getattr(self, f"reply_to_{support}", None))
+        name = self.get_locally_or_campaign_value("reply_to_name")
+        reply_to = self.get_locally_or_campaign_value(f"reply_to_{support}")
         if reply_to:
             return {
                 "name": name or "",
@@ -533,11 +559,11 @@ class Missive(CommentTimestampedModel):
         return self.check_recipients() and bool(body and body.strip()) and bool(subject and subject.strip())
 
     def check_sms(self):
-        body = self.get_locally_or_campaign_value("body_sms", self.body_text)
+        body = self.get_locally_or_campaign_value("body_text")
         return self.check_recipients() and bool(body and body.strip())
 
     def check_lre(self):
-        body = self.get_locally_or_campaign_value("first_document", self.body_html)
+        body = self.get_locally_or_campaign_value("body_html")
         return self.check_recipients() and bool(body and body.strip())
 
     @property
@@ -598,40 +624,42 @@ class Missive(CommentTimestampedModel):
         )
         return att
 
+    def _compiled_template_value(self, raw) -> str:
+        """Render ``raw`` with ``missive_context()``; empty or invalid template → empty string (preview-safe)."""
+        if raw is None:
+            return ""
+        text = str(raw)
+        if not text.strip():
+            return ""
+        try:
+            return Template(text).render(Context(self.missive_context()))
+        except Exception:
+            return ""
+
     @property
     def subject_compiled(self):
         """Compile the subject of the missive."""
-        context = self.missive_context()
-        tpl = self.get_locally_or_campaign_value("subject")
-        return Template(tpl).render(Context(context))
+        return self._compiled_template_value(self.get_locally_or_campaign_value("subject"))
 
     @property
     def body_html_compiled(self):
         """Compile the HTML body of the missive."""
-        context = self.missive_context()
-        tpl = self.get_locally_or_campaign_value("body_html")
-        return Template(tpl).render(Context(context))
+        return self._compiled_template_value(self.get_locally_or_campaign_value("body_html"))
 
     @property
     def body_text_compiled(self):
         """Compile the body text of the missive."""
-        context = self.missive_context()
-        tpl = self.get_locally_or_campaign_value("body_text")
-        return Template(tpl).render(Context(context))
+        return self._compiled_template_value(self.get_locally_or_campaign_value("body_text"))
 
     @property
     def body_sms_compiled(self):
         """Compile the body SMS of the missive."""
-        context = self.missive_context()
-        tpl = self.get_locally_or_campaign_value("body_sms", self.body_text)
-        return Template(tpl).render(Context(context))
+        return self._compiled_template_value(self.get_locally_or_campaign_value("body_text") or "")
 
     @property
     def first_document_compiled(self):
         """Compile first_document (campaign) or fallback to body_html when no campaign."""
-        context = self.missive_context()
-        tpl = self.get_locally_or_campaign_value("first_document", self.body_html) or ""
-        return Template(str(tpl)).render(Context(context))
+        return self._compiled_template_value(self.get_locally_or_campaign_value("body_html") or "")
 
     #########################################################
     # Attachments
@@ -847,8 +875,15 @@ class Missive(CommentTimestampedModel):
         handle_events(events, self.provider, self.missive_type)
 
     def cancel_missive(self):
-        """Cancel the missive."""
+        """Cancel the missive (provider ``cancel_*`` when available — not Maileva LRE)."""
         response = self.call_provider_service("cancel", **self.get_serialized_data(attachments=False))
+        if response.get("code") in [200, 204, 404]:
+            self.status = MissiveStatus.CANCELLED
+            self.save(update_fields=["status"])
+
+    def delete_missive(self):
+        """Remove the sending on the provider (``delete_*``), regardless of submission state."""
+        response = self.call_provider_service("delete", **self.get_serialized_data(attachments=False))
         if response.get("code") in [200, 204, 404]:
             self.status = MissiveStatus.CANCELLED
             self.save(update_fields=["status"])
@@ -945,12 +980,53 @@ class Missive(CommentTimestampedModel):
     # Clean methods
     #########################################################
 
+    # Fields that are required for sending per support type.
+    # Each entry is either a single field name (any non-empty value suffices)
+    # or a list of field names (at least one must be non-empty).
+    _REQUIRED_FIELDS_BY_SUPPORT: dict[str, list] = {
+        "email": [
+            "subject",
+            ["body_html", "body_text"],
+            "sender_email",
+        ],
+        "phone": [
+            "body_text",
+        ],
+        "address": [
+            "sender_address",
+        ],
+    }
+
     def clean(self):
-        """Clean the missive."""
-        clean_by_support = f"clean_support_{self.missive_support}".lower()
+        """Validate the missive.
+
+        Fields that can be inherited from campaign are nullable, but become required
+        when no campaign is attached. Dispatches to clean_support_{support} for
+        support-specific extra validation (e.g. attachments for LRE).
+        """
+        errors = {}
+        support = (self.missive_support or "").lower()
+        required = self._REQUIRED_FIELDS_BY_SUPPORT.get(support, [])
+
+        for entry in required:
+            if isinstance(entry, list):
+                # At least one field in the group must be non-empty.
+                if not any(self.get_locally_or_campaign_value(f) for f in entry):
+                    msg = _("At least one of these fields is required (set locally or via campaign)")
+                    for f in entry:
+                        errors[f] = msg
+            else:
+                if not self.get_locally_or_campaign_value(entry):
+                    errors[entry] = _("This field is required (set locally or via campaign)")
+
+        if errors:
+            raise ValidationError(errors)
+
+        clean_by_support = f"clean_support_{support}"
         if hasattr(self, clean_by_support):
             getattr(self, clean_by_support)()
 
+<<<<<<< HEAD
     def clean_subject(self):
         if not self.subject and not self.campaign:
             raise ValidationError({
@@ -978,13 +1054,16 @@ class Missive(CommentTimestampedModel):
                 "body_text": _("Body text is required (in missive or campaign)"),
             })
 
+=======
+>>>>>>> 4e28e9c (Release pymissive and django-pymissive 1.0.9)
     def clean_support_address(self):
-        """Clean the missive for address support."""
-        has_body_missive = (self.body_html or self.to_missiveattachment.all().exists())
-        has_body_campaign = (self.campaign and (self.campaign.first_document or self.campaign.to_campaigndocument.exists()))
-        if not has_body_missive and not has_body_campaign:
+        """Extra validation for address (LRE) missives: body_html or attachments."""
+        has_body = self.get_locally_or_campaign_value("body_html")
+        has_attachments = self.pk and self.to_missiveattachment.all().exists()
+        has_campaign_docs = self.campaign and self.campaign.to_campaigndocument.exists()
+        if not has_body and not has_attachments and not has_campaign_docs:
             raise ValidationError({
-                "body_html": _("Body or attachments are required (in missive or campaign)"),
+                "body_html": _("Body or attachments are required (set locally or via campaign)"),
             })
 
 

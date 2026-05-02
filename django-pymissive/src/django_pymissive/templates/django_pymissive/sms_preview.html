@@ -19,7 +19,7 @@
                         <div class="notification-icon">💬</div>
                     {% if sender.name or sender.phone %}
                         <div class="notification-info">
-                            <div class="notification-title">{{ sender.name|default:sender.phone|default:_('Unknown') }}</div>
+                            <div class="notification-title">{{ sender.name|default:sender.phone|default:_('Not filled in') }}</div>
                             <div class="notification-time">now</div>
                         </div>
                     {% endif %}
@@ -37,7 +37,7 @@
         <div class="phone-container">
             <div class="phone-screen phone-opened">
                 <div class="sms-header">
-                    <div class="sms-contact-name">{{ sender.name|default:_('Unknown') }}</div>
+                    <div class="sms-contact-name">{{ sender.name|default:_('Not filled in') }}</div>
                     {% if sender.phone %}
                     <div class="sms-contact-phone">{{ sender.phone }}</div>
                     {% endif %}

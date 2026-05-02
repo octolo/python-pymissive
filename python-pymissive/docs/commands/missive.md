@@ -2,6 +2,8 @@
 
 Create, send, update, delete, or cancel missives via provider.
 
+`cancel` requests a provider **cancel** API (stop an in-flight sending). `delete missive` calls **`delete_*`** (remove sending on the provider, often broader than cancel). Some providers only implement one of the two (e.g. Maileva LRE: **delete** only).
+
 ## Subcommands
 
 | Subcommand | Description |
@@ -10,8 +12,8 @@ Create, send, update, delete, or cancel missives via provider.
 | `retrieve` | Retrieve data (webhooks, email, postal, sms) |
 | `create` | Create webhook |
 | `update` | Update webhook |
-| `delete` | Delete webhook |
-| `cancel` | Cancel a missive (e.g. postal sending) |
+| `delete` | Delete webhook **or** delete a missive/sending (`delete missive`, provider `delete_*`) |
+| `cancel` | Cancel via provider `cancel_*` (not available on all providers) |
 
 ## Synopsis
 
@@ -28,7 +30,10 @@ pymissive missive update webhook --provider <name> --type <email|sms> --webhook-
 # Delete webhook
 pymissive missive delete webhook --provider <name> --type <email|sms> --webhook-id <id>
 
-# Cancel missive
+# Delete sending on provider (provider delete_* ; e.g. Maileva LRE)
+pymissive missive delete missive --provider <name> [--type lre] --external-id <id>
+
+# Cancel missive (provider cancel_* ; not Maileva LRE)
 pymissive missive cancel --provider <name> [--type postal] --external-id <id>
 ```
 
@@ -86,8 +91,11 @@ pymissive missive create webhook --provider brevo --type email --domain example.
 # Delete webhook
 pymissive missive delete webhook --provider brevo --type email --webhook-id 123
 
-# Cancel postal
-pymissive missive cancel --provider maileva --type postal --external-id SENDING_ID
+# Delete sending on provider (Maileva: delete_lre)
+pymissive missive delete missive --provider maileva --type lre --external-id SENDING_ID
+
+# Cancel (only if provider implements cancel_*)
+pymissive missive cancel --provider <provider> --type <type> --external-id SENDING_ID
 ```
 
 ## Recipients format

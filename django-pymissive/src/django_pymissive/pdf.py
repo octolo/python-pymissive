@@ -37,10 +37,8 @@ body {{
 def _compile_body(missive) -> str:
     """Compile first_document (campaign) or body_html when no campaign."""
     context = missive.missive_context()
-    tpl = missive.get_locally_or_campaign_value("first_document", missive.body_html)
-    if not tpl:
-        tpl = missive.get_locally_or_campaign_value("body_html", "")
-    return Template(str(tpl or "")).render(Context(context))
+    tpl = missive.get_locally_or_campaign_value("body_html") or ""
+    return Template(str(tpl)).render(Context(context))
 
 
 def body_to_pdf(missive, **kwargs: Any) -> bytes:

@@ -21,7 +21,7 @@
 
 ### Technical architecture
 
-- ✅ Compatible with Django 3.2+ and Python 3.9+
+- ✅ Compatible with Django 3.2+ and Python 3.10+
 - ✅ Modular structure with mixins (providers/base/)
 - ✅ Comprehensive unit tests (8/8 ✅)
 - ✅ Exhaustive documentation (16 .md files)

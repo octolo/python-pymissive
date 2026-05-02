@@ -1,0 +1,20 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; <a href="{{ original_url }}">{{ original|truncatewords:'18' }}</a>
+  &rsaquo; {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+<p class="paginator"><a href="{{ original_url }}" class="button">{% translate "Back to missive" %}</a></p>
+<pre class="provider-preview-result" style="white-space:pre-wrap;word-break:break-word;background:var(--body-bg, #f8f8f8);padding:1em;border:1px solid var(--hairline-color, #ddd);">{{ preview_result }}</pre>
+{% endblock %}

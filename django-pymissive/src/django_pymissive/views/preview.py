@@ -1,17 +1,27 @@
-"""Preview views for Missive and MissiveCampaign models."""
+"""Preview views for Missive and MissiveCampaign models.
 
-from types import SimpleNamespace
+Campaign previews use an unsaved Missive with ``campaign`` (and ``campaign_id``) set,
+so templates and compiled bodies use the same code paths as a real missive.
+"""
+
+from types import MethodType
 
 from django.contrib.admin.views.decorators import staff_member_required
 from django.forms import modelform_factory
 from django.http import Http404, HttpResponse
 from django.template.response import TemplateResponse
 from django.utils.decorators import method_decorator
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django.views.generic import DetailView, View
 
 from ..models.campaign import MissiveCampaign
-from ..models.choices import MissiveRecipientType
+from ..models.choices import (
+    MissiveRecipientType,
+    MissiveStatus,
+    MissiveThreadType,
+    MissiveType,
+)
 from ..models.missive import Missive
 
 
@@ -28,18 +38,77 @@ MISSIVE_TEMPLATE_MAP = {
     "lre_qualified": "django_pymissive/postal_preview.html",
 }
 
-CAMPAIGN_TEMPLATE_MAP = {
-    "email": "django_pymissive/email_preview.html",
-    "sms": "django_pymissive/sms_preview.html",
-    "postal": "django_pymissive/postal_preview.html",
-}
-
 DEFAULT_TEMPLATE = "django_pymissive/base_preview.html"
 
-_PREVIEW_CONFIG = {
-    "missive": {"model": Missive, "template_map": MISSIVE_TEMPLATE_MAP},
-    "campaign": {"model": MissiveCampaign, "template_map": CAMPAIGN_TEMPLATE_MAP},
+_PREVIEW_MODEL = {
+    "missive": Missive,
+    "campaign": MissiveCampaign,
 }
+
+
+def _campaign_preview_kind_to_missive_type(kind: str) -> str:
+    """Map campaign ?type= (email|sms|postal) to a concrete MissiveType value."""
+    k = (kind or "email").lower()
+    if k == "sms":
+        return str(MissiveType.SMS)
+    if k in ("postal", "postal_registered", "postal_signature", "lre", "lre_qualified"):
+        return str(MissiveType.LRE)
+    return str(MissiveType.EMAIL)
+
+
+def _safe_missive_context(missive):
+    """Template context without preview/attachment widgets (unsaved missive has no pk)."""
+    ctx = {}
+    if missive.campaign_id:
+        ctx = dict(getattr(missive.campaign, "additional_context", {}) or {})
+    ctx.update(missive.additional_context or {})
+    empty = mark_safe("")
+    ctx["show_preview_browser"] = empty
+    ctx["show_preview_browser_text"] = ""
+    ctx["show_attachments_linked"] = empty
+    ctx["show_attachments_linked_text"] = ""
+    return ctx
+
+
+def attach_unsaved_missive_preview_context(missive: Missive) -> None:
+    """Bind a safe ``missive_context`` when the row is not saved (campaign preview, draft POST)."""
+    if missive.pk is not None:
+        return
+    missive.missive_context = MethodType(_safe_missive_context, missive)
+
+
+def missive_for_campaign_preview(campaign: MissiveCampaign, preview_kind: str) -> Missive:
+    """Unsaved missive linked to ``campaign`` so getters and compilation match a real missive."""
+    missive = Missive(
+        campaign=campaign,
+        missive_type=_campaign_preview_kind_to_missive_type(preview_kind),
+        status=MissiveStatus.DRAFT,
+        thread_type=MissiveThreadType.MISSIVE,
+    )
+    missive._ensure_missive_defaults()
+    attach_unsaved_missive_preview_context(missive)
+    return missive
+
+
+def template_for_missive(missive: Missive) -> str:
+    """Resolve template path from ``missive.missive_type``."""
+    return MISSIVE_TEMPLATE_MAP.get((missive.missive_type or "").lower(), DEFAULT_TEMPLATE)
+
+
+def build_preview_context(missive: Missive, post_data=None) -> dict:
+    """Type-specific template context (email headers, SMS sender, postal meta)."""
+    try:
+        mt = (missive.missive_type or "").lower()
+        if mt in ("email", "email_marketing", "ere"):
+            return _build_email_context(missive)
+        if mt in ("sms", "rcs"):
+            return _build_sms_context(missive, post_data)
+        if mt in ("postal", "postal_registered", "postal_signature", "lre", "lre_qualified"):
+            return _build_lre_context(missive)
+    except Exception:
+        pass
+    return {}
+
 
 def _build_form(model, post_data, pk=None):
     """Bound modelform; uses pk from args, POST id/_save, or explicit pk."""
@@ -141,17 +210,6 @@ def _build_sms_context(instance, post_data=None):
     return ctx
 
 
-def _build_context_by_type(preview_type, instance, post_data=None):
-    pt = (preview_type or "").lower()
-    if pt in ("email", "email_marketing", "ere"):
-        return _build_email_context(instance)
-    if pt in ("sms", "rcs"):
-        return _build_sms_context(instance, post_data)
-    if pt in ("postal", "postal_registered", "postal_signature", "lre", "lre_qualified"):
-        return _build_lre_context(instance)
-    return {}
-
-
 def _geoaddress_lines(addr):
     """Extract displayable address lines from a GeoaddressField value."""
     if not addr:
@@ -236,7 +294,13 @@ def _build_lre_context(instance, post_data=None):
 def _build_email_context(instance):
     """Email header context; recipients from to_missiverecipient when saved."""
     sender = getattr(instance, "sender", None) or getattr(instance, "email_sender", None) or {}
+    if not isinstance(sender, dict):
+        sender = {}
     reply_to = getattr(instance, "reply_to", None) or getattr(instance, "email_reply_to", None)
+    if isinstance(reply_to, dict) and not (
+        (reply_to.get("email") or "").strip() or (reply_to.get("name") or "").strip()
+    ):
+        reply_to = None
     context = {
         "sender": sender,
         "reply_to": reply_to,
@@ -266,144 +330,82 @@ def _build_email_context(instance):
     return context
 
 
-def _campaign_attachments_physical(campaign):
-    if not getattr(campaign, "pk", None):
-        return []
-    try:
-        return list(campaign.attachments_physical)
-    except Exception:
-        return []
-
-
-def _campaign_to_missive_preview(campaign, preview_type):
-    attachments_physical = _campaign_attachments_physical(campaign)
-    if preview_type == "email":
-        return SimpleNamespace(
-            subject=campaign.subject,
-            body_html=campaign.body_html,
-            body_text=campaign.body_text,
-            body_html_compiled=campaign.body_html_compiled,
-            body_text_compiled=campaign.body_text_compiled,
-            sender=campaign.email_sender or {},
-            reply_to=campaign.email_reply_to,
-            attachments_physical=attachments_physical,
-        )
-    if preview_type == "sms":
-        body_sms = getattr(campaign, "body_sms", "") or ""
-        return SimpleNamespace(
-            body_text=body_sms,
-            body_sms_compiled=body_sms,
-            body_html="",
-            sender=campaign.phone_sender or {},
-            attachments_physical=attachments_physical,
-        )
-    # address / LRE
-    first_document = ""
-    if hasattr(campaign, "first_document_compiled"):
-        first_document = campaign.first_document_compiled()
-    if not first_document:
-        first_document = getattr(campaign, "first_document", "") or ""
-    sender = campaign.address_sender or {}
-    return SimpleNamespace(
-        body_html=first_document,
-        body_text="",
-        sender=sender,
-        sender_address=getattr(campaign, "sender_address", None),
-        reply_to_address=getattr(campaign, "reply_to_address", None),
-        reply_to_address_name=getattr(campaign, "reply_to_address_name", "") or "",
-        acknowledgement=getattr(campaign, "acknowledgement_lre", None),
-        delivery_mode=getattr(campaign, "delivery_mode_lre", None),
-        priority=getattr(campaign, "priority_lre", None),
-        attachments_physical=attachments_physical,
-    )
-
-
 class PreviewView(DetailView):
+    """GET preview: ``missive`` URL uses the saved row; ``campaign`` builds an unsaved missive."""
 
     context_object_name = "missive"
 
     def setup(self, request, *args, **kwargs):
         super().setup(request, *args, **kwargs)
         key = kwargs.get("campaign_or_missive", "")
-        config = _PREVIEW_CONFIG.get(key)
-        if config is None:
+        model = _PREVIEW_MODEL.get(key)
+        if model is None:
             raise Http404
         self._key = key
-        self.model = config["model"]
-        self._template_map = config["template_map"]
+        self.model = model
 
-    def get_preview_type(self):
-        if self._key == "missive":
-            return (self.object.missive_type or "").lower()
-        return self.request.GET.get("type", "email").lower()
-
-    def get_preview_object(self):
+    def get_missive_for_preview(self) -> Missive:
+        if hasattr(self, "_missive_for_preview"):
+            return self._missive_for_preview
         if self._key == "campaign":
-            return _campaign_to_missive_preview(self.object, self.get_preview_type())
-        return self.object
+            kind = (self.request.GET.get("type") or "email").lower()
+            self._missive_for_preview = missive_for_campaign_preview(self.object, kind)
+        else:
+            self._missive_for_preview = self.object
+        return self._missive_for_preview
 
     def get_template_names(self):
-        return [self._template_map.get(self.get_preview_type(), DEFAULT_TEMPLATE)]
+        if not getattr(self, "object", None):
+            return [DEFAULT_TEMPLATE]
+        return [template_for_missive(self.get_missive_for_preview())]
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        preview_type = self.get_preview_type()
-
-        context["missive"] = self.get_preview_object()
+        missive = self.get_missive_for_preview()
+        context["missive"] = missive
 
         if self._key == "campaign":
             context["campaign"] = self.object
-            context["title"] = _("Preview: {} ({})").format(self.object, preview_type)
+            channel = (self.request.GET.get("type") or "email").lower()
+            context["title"] = _("Preview: {} ({})").format(self.object, channel)
         else:
-            context["title"] = _("Preview: {}").format(self.object)
+            context["title"] = _("Preview: {}").format(missive)
 
-        type_ctx = _build_context_by_type(preview_type, self.object)
-        if type_ctx:
-            context.update(type_ctx)
+        extra = build_preview_context(missive)
+        if extra:
+            context.update(extra)
         return context
 
 
 @method_decorator(staff_member_required, name="dispatch")
 class PreviewFormView(View):
+    """POST preview from admin forms (optional); same missive-based rendering as ``PreviewView``."""
 
     http_method_names = ["post"]
 
     def _get_config(self):
         key = self.kwargs.get("campaign_or_missive", "")
-        config = _PREVIEW_CONFIG.get(key)
-        if config is None:
+        model = _PREVIEW_MODEL.get(key)
+        if model is None:
             raise Http404
-        return key, config
+        return key, model
 
-    def _get_preview_type(self, key, instance):
-        if key == "missive":
-            missive_type = getattr(instance, "missive_type", None) or self.request.POST.get("missive_type")
-            if missive_type:
-                instance.missive_type = missive_type
-            return (missive_type or "").lower()
+    def _preview_kind_for_campaign(self, post_data) -> str:
         return (
             self.request.GET.get("type")
-            or self.request.POST.get("_preview_type")
-            or self.request.POST.get("_preview")
+            or post_data.get("_preview_type")
+            or post_data.get("_preview")
             or "email"
         ).lower()
 
-    def _get_context(self, key, instance, preview_type):
-        if key == "campaign":
-            return {
-                "campaign": instance,
-                "missive": _campaign_to_missive_preview(instance, preview_type),
-                "title": _("Preview: {} ({})").format(getattr(instance, "name", None) or getattr(instance, "subject", None) or "Campaign", preview_type),
-            }
-        return {
-            "missive": instance,
-            "title": _("Preview: {}").format(preview_type or "Missive"),
-        }
+    def _preview_kind_for_missive(self, instance, post_data) -> str:
+        missive_type = getattr(instance, "missive_type", None) or post_data.get("missive_type")
+        if missive_type:
+            instance.missive_type = missive_type
+        return (missive_type or "").lower()
 
     def post(self, request, *args, **kwargs):
-        key, config = self._get_config()
-        model = config["model"]
-        template_map = config["template_map"]
+        key, model = self._get_config()
 
         form = _build_form(model, request.POST, pk=request.GET.get("pk"))
         instance = (
@@ -412,12 +414,33 @@ class PreviewFormView(View):
             else _populate_from_invalid_form(model, form, request.POST)
         )
 
-        preview_type = self._get_preview_type(key, instance)
-        template_name = template_map.get(preview_type, DEFAULT_TEMPLATE)
-        context = self._get_context(key, instance, preview_type)
-        type_ctx = _build_context_by_type(preview_type, instance, post_data=request.POST)
-        if type_ctx:
-            context.update(type_ctx)
+        if key == "campaign":
+            preview_kind = self._preview_kind_for_campaign(request.POST)
+            missive = missive_for_campaign_preview(instance, preview_kind)
+            title = _("Preview: {} ({})").format(
+                getattr(instance, "name", None) or getattr(instance, "subject", None) or "Campaign",
+                preview_kind,
+            )
+            context = {
+                "missive": missive,
+                "campaign": instance,
+                "title": title,
+            }
+        else:
+            if isinstance(instance, Missive):
+                instance._ensure_missive_defaults()
+            missive = instance
+            attach_unsaved_missive_preview_context(missive)
+            mt = self._preview_kind_for_missive(missive, request.POST)
+            context = {
+                "missive": missive,
+                "title": _("Preview: {}").format(mt or "Missive"),
+            }
+
+        template_name = template_for_missive(missive)
+        extra = build_preview_context(missive, post_data=request.POST)
+        if extra:
+            context.update(extra)
         return TemplateResponse(request, template_name, context)
 
 
@@ -428,11 +451,11 @@ class DownloadPDFView(DetailView):
     def setup(self, request, *args, **kwargs):
         super().setup(request, *args, **kwargs)
         key = kwargs.get("campaign_or_missive", "")
-        config = _PREVIEW_CONFIG.get(key)
-        if config is None:
+        model = _PREVIEW_MODEL.get(key)
+        if model is None:
             raise Http404
         self._key = key
-        self.model = config["model"]
+        self.model = model
 
     def get(self, request, *args, **kwargs):
         self.object = self.get_object()
@@ -441,24 +464,8 @@ class DownloadPDFView(DetailView):
             pdf_bytes = self.object.body_to_pdf()
             filename = f"missive-{self.object.pk}.pdf"
         else:
-            from django.conf import settings
-            from django.utils.module_loading import import_string
-
-            pdf_generator = getattr(
-                settings,
-                "PYMISSIVE_PDF_GENERATOR",
-                "django_pymissive.pdf.body_to_pdf",
-            )
-            fake_missive = _campaign_to_missive_preview(
-                self.object, "postal"
-            )
-            fake_missive.get_locally_or_campaign_value = (
-                lambda field, fallback="": getattr(fake_missive, field, fallback) or fallback
-            )
-            fake_missive.missive_context = lambda: getattr(
-                self.object, "campaign_context", lambda: {}
-            )()
-            pdf_bytes = import_string(pdf_generator)(fake_missive)
+            missive = missive_for_campaign_preview(self.object, "postal")
+            pdf_bytes = missive.body_to_pdf()
             filename = f"campaign-{self.object.pk}.pdf"
 
         response = HttpResponse(pdf_bytes, content_type="application/pdf")

@@ -257,6 +257,12 @@ class MissiveBaseAttachment(CommentTimestampedModel):
     def attachment_url(self):
         return self.get_serialized_attachment(linked=True, ignore_content=True)
 
+    @property
+    def attachment_download_url(self):
+        """Relative download URL (no base_url) — safe for same-origin fetch in browser."""
+        scope = "campaign" if self.campaign_id else "missive"
+        return reverse("django_pymissive:missive_attachment_download", args=[scope, self.id])
+
     def get_serialized_attachment(self, linked=False, ignore_content=False):
         """Returns a serialized dict for this attachment."""
         attachment = self.get_attachment()

@@ -43,7 +43,7 @@ class MailevaProvider(MissiveProviderBase):
         'documents': '{base_url}/{postal_mode}/{version}/sendings/%s/documents',
         'recipients': '{base_url}/{postal_mode}/{version}/sendings/%s/recipients',
         'submit': '{base_url}/{postal_mode}/{version}/sendings/%s/submit',
-        'cancel': '{base_url}/{postal_mode}/{version}/sendings/%s',
+        'delete': '{base_url}/{postal_mode}/{version}/sendings/%s',
         'prooflist': '{base_url}/{postal_mode}/{version}/global_deposit_proofs?sending_id=%s',
         'proof': '{base_url}/{postal_mode}/{version}/global_deposit_proofs/%s',
         'proofdownload': '{base_url}/{postal_mode}/{version}%s',
@@ -104,7 +104,7 @@ class MailevaProvider(MissiveProviderBase):
         return "v4" if self.is_acknowledgement_of_receipt() else "v2"
 
     def is_mode_sandbox(self) -> bool:
-        return self._get_config_or_env("SANDBOX", False)
+        return False #self._get_config_or_env("SANDBOX", False)
 
     def get_endpoint(self, endpoint: str, prefix: str = "api") -> str:
         return self.endpoints[endpoint].format(
@@ -271,7 +271,8 @@ class MailevaProvider(MissiveProviderBase):
         return response.json()
 
     #########################################################
-    # LRE - Sendings (create, update, cancel, send)
+    # LRE - Sendings (create, update, delete, send)
+    # Maileva: no separate "cancel sending" API; removing a sending uses HTTP DELETE (delete_lre).
     #########################################################
 
     def is_acknowledgement_of_receipt(self, **kwargs: Any) -> bool:
@@ -312,6 +313,8 @@ class MailevaProvider(MissiveProviderBase):
             data["acknowledgement_of_receipt"] = True
             priority = kwargs.get("priority")
             data["postage_type"] = "urgent" if (priority or "").lower() == "urgent" else self._get_config_or_env("POSTAGE_TYPE", "fast")
+        if kwargs.get("custom_data") is not None:
+            data["custom_data"] = kwargs["custom_data"]
         return data
 
     def _detail_lre(self, external_id: str) -> bool:
@@ -348,18 +351,42 @@ class MailevaProvider(MissiveProviderBase):
         response["recipients"] = self._add_recipients_lre(kwargs.get("recipients"), external_id)
         return response
 
-    def cancel_lre(self, **kwargs: Any) -> bool:
+    def delete_lre(self, **kwargs: Any) -> bool:
+        """DELETE sending on Maileva (draft or submitted); not the same as cancel semantics elsewhere."""
         self.is_acknowledgement_of_receipt(**kwargs)
         url = self.get_endpoint('sendings') + "/" + kwargs.get("external_id")
         response = requests.delete(url, headers=self._get_headers(), timeout=30)
         return {"code": response.status_code, "message": response.text}
 
-    def send_lre(self, **kwargs: Any) -> bool:
+    def _stage_lre_before_submit(self, **kwargs: Any) -> tuple[str, list[Any], list[Any]]:
+        """Create/update sending, recipients, and documents; does not call submit."""
         self.is_acknowledgement_of_receipt(**kwargs)
         response = self._create_lre(**kwargs)
         external_id = response.get("id")
         recipients = self._add_recipients_lre(kwargs.get("recipients"), external_id)
         attachments = self._add_attachments_lre(kwargs.get("attachments", []), external_id)
+        return external_id, recipients, attachments
+
+    def preview_lre(self, **kwargs: Any) -> dict[str, Any]:
+        """Same pipeline as send_lre (sending, recipients, documents) without submit."""
+        kwargs = {
+            **kwargs,
+            "custom_data": kwargs.get("custom_data", "pymissive_temporary_preview"),
+        }
+        external_id, recipients, attachments = self._stage_lre_before_submit(**kwargs)
+        print("external_id", external_id)
+        return {
+            "id": external_id,
+            "event": "draft",
+            "code": 200,
+            "message": "",
+            "event_date": timezone.now().isoformat(),
+            "attachments": attachments,
+            "recipients": recipients,
+        }
+
+    def send_lre(self, **kwargs: Any) -> bool:
+        external_id, recipients, attachments = self._stage_lre_before_submit(**kwargs)
         url = self.get_endpoint('submit') % external_id
         response = requests.post(url, headers=self._get_headers(), timeout=30)
         response.raise_for_status()

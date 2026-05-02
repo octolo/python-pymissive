@@ -1,4 +1,4 @@
-"""Missive command - create, send, update, delete, cancel via provider."""
+"""Missive command - create, send, update, delete (webhook or missive), cancel via provider."""
 
 from __future__ import annotations
 
@@ -185,7 +185,30 @@ def _missive_command(args: list[str]) -> bool:
             return False
 
     elif subcommand == "delete":
-        if resource == "webhook" or not resource:
+        if resource in ("missive", "sending"):
+            external_id = parsed.get("external_id", "")
+            if not external_id:
+                print(
+                    "Error: --external-id required for delete missive",
+                    file=sys.stderr,
+                )
+                return False
+            if not missive_type:
+                missive_type = "lre"
+            service = f"delete_{missive_type}"
+            if not hasattr(provider, service):
+                print(f"Error: Provider does not support {service}", file=sys.stderr)
+                return False
+            try:
+                result = provider.call_service(service, external_id=external_id)
+                print_separator()
+                print_header(f"{provider_name} - deleted {missive_type} sending")
+                print_separator()
+                print(json.dumps(result, indent=2, default=str))
+            except Exception as e:
+                print(f"Error: {e}", file=sys.stderr)
+                return False
+        elif resource == "webhook" or not resource:
             webhook_id = parsed.get("webhook_id", "")
             if not webhook_id or not missive_type:
                 print("Error: --webhook-id and --type required for webhook delete", file=sys.stderr)
@@ -198,7 +221,10 @@ def _missive_command(args: list[str]) -> bool:
             provider.call_service(service, webhook_data=webhook_data)
             print("Webhook deleted.")
         else:
-            print(f"Error: Unknown resource '{resource}'. Use: webhook", file=sys.stderr)
+            print(
+                f"Error: Unknown resource '{resource}'. Use: webhook, missive",
+                file=sys.stderr,
+            )
             return False
 
     elif subcommand == "retrieve":
@@ -261,5 +287,5 @@ def _missive_command(args: list[str]) -> bool:
 
 missive_command = Command(
     _missive_command,
-    "Missive: create, retrieve, send, update, delete, cancel (missive send --provider X --missive-type email --recipients '[...]')",
+    "Missive: create, retrieve, send, update, delete (webhook/missive), cancel (missive send --provider X --missive-type email --recipients '[...]')",
 )

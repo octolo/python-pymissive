@@ -5,6 +5,7 @@ SERVICES = {
     "delete": "Delete",
     "cancel": "Cancel",
     "send": "Send",
+    "preview": "Preview",
 }
 
 FIELDS = {

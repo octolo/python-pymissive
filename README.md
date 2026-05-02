@@ -1,45 +1,45 @@
 # Missive
 
-Monorepo contenant **python-missive** (bibliothèque Python pour l'envoi multi-canaux) et **django-missive** (intégration Django).
+Monorepo containing **python-pymissive** (framework-agnostic Python library for multi-channel messaging) and **django-pymissive** (Django integration).
 
 ## Packages
 
-### python-missive — `python-missive/`
+### python-pymissive — `python-pymissive/`
 
-Bibliothèque Python légère et indépendante du framework pour l'envoi de missives multi-canaux : emails, SMS, notifications push, courrier postal, etc. Basée sur ProviderKit.
+Lightweight, framework-agnostic Python library for sending multi-channel missives: emails, SMS, push notifications, postal mail, and more. Built on ProviderKit.
 
-- **15+ fournisseurs** : SendGrid, Mailgun, Twilio, La Poste, Telegram, FCM, APN, Slack, Teams, etc.
-- **Architecture modulaire** : utilisable avec ou sans framework
-- **Multi-canaux** : email, SMS, postal, messagerie, push
+- **15+ providers**: SendGrid, Mailgun, Twilio, La Poste, Telegram, FCM, APN, Slack, Teams, etc.
+- **Modular architecture**: works with or without a framework
+- **Multi-channel**: email, SMS, postal, messaging, push
 
-📁 Détails : [python-missive/README.md](python-missive/README.md) | Documentation : [python-missive/docs/](python-missive/docs/)
+📁 Details: [python-pymissive/README.md](python-pymissive/README.md) | Docs: [python-pymissive/docs/](python-pymissive/docs/)
 
-### django-missive — `django-missive/`
+### django-pymissive — `django-pymissive/`
 
-Intégration Django complète pour gérer l'envoi de missives multi-canaux. Interface d'administration, modèles, webhooks unifiés et suivi.
+Full Django integration for managing multi-channel missive delivery. Admin interface, models, unified webhooks, and delivery tracking.
 
-- **Interface d'administration Django** : gestion des missives avec validation et prévisualisation
-- **Webhooks unifiés** : `/missive/webhook/{provider}/`
-- **Modèle Recipient** : centralisation des coordonnées
-- **Dépendance** : requiert python-missive
+- **Django admin interface**: manage missives with validation and preview
+- **Unified webhooks**: `/missive/webhook/{provider}/`
+- **Recipient model**: centralised contact management
+- **Dependency**: requires python-pymissive
 
-📁 Détails : [django-missive/README.md](django-missive/README.md)
+📁 Details: [django-pymissive/README.md](django-pymissive/README.md)
 
-## Structure du dépôt
+## Repository structure
 
 ```
 missive/
-├── python-missive/     # Bibliothèque core
-├── django-missive/     # Intégration Django
+├── python-pymissive/   # Core library
+├── django-pymissive/   # Django integration
 └── README.md
 ```
 
-## Développement
+## Development
 
-Chaque package dispose de son propre `service.py` :
+Each package has its own `service.py`:
 
 ```bash
-# Dans python-missive/ ou django-missive/
+# Inside python-pymissive/ or django-pymissive/
 ./service.py dev install-dev
 ./service.py dev test
 ./service.py quality lint

@@ -4,7 +4,7 @@
     padding: 20px 0;
 }
 
-/* Delivery info badges */
+/* Delivery info badges (mode, priority, acknowledgement) */
 .postal-meta {
     display: flex;
     gap: 8px;
@@ -49,7 +49,7 @@
     border: 1px solid #ce93d8;
 }
 
-/* Envelope / sender block */
+/* Envelope — sender block */
 .envelope {
     background: #fafaf5;
     border: 2px solid #c5b99a;
@@ -105,7 +105,70 @@
     font-size: 13px;
 }
 
-/* A4 page */
+/* "View page alone" link bar — sits above the A4 page */
+.a4-solo-bar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0;
+}
+
+.a4-solo-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #555;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    text-decoration: none;
+    transition: background 0.15s, color 0.15s;
+}
+
+.a4-solo-link:hover {
+    background: #e8eaf6;
+    color: #3730a3;
+    border-color: #c7d2fe;
+}
+
+/* Solo mode — centre the A4 page, no extra padding */
+.postal-preview--solo {
+    max-width: 210mm;
+    margin: 0 auto;
+    padding: 0;
+}
+
+/* Print toolbar (solo mode) */
+.solo-toolbar {
+    max-width: 210mm;
+    margin: 0 auto 8px auto;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.solo-print-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    background: #417690;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.solo-print-btn:hover {
+    background: #205067;
+}
+
+/* A4 page — simulates a physical sheet on screen */
 .a4-page {
     width: 210mm;
     min-height: 297mm;
@@ -115,9 +178,10 @@
     padding: 20mm 25mm 25mm 25mm;
     box-sizing: border-box;
     position: relative;
+    margin-bottom: 0;
 }
 
-/* Recipient address top-right */
+/* Recipient address block — top right of the letter */
 .a4-header {
     display: flex;
     justify-content: flex-end;
@@ -143,7 +207,7 @@
     line-height: 1.6;
 }
 
-/* Letter body */
+/* Letter body content */
 .a4-body {
     font-size: 14px;
     line-height: 1.8;
@@ -157,59 +221,107 @@
     margin: 0;
 }
 
-/* Attachments */
-.postal-attachments {
-    margin-top: 20px;
-    padding: 16px;
-    background: #fafafa;
-    border: 1px solid #eee;
-    border-radius: 4px;
+/* PDF attachments rendered inline via PDF.js */
+.pdf-attachment {
+    margin-top: 0;
 }
 
-.attachments-label {
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #666;
-    margin-bottom: 10px;
-}
-
-.attachments-list {
+.pdf-attachment-label {
     display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #f0f4ff;
+    border: 1px solid #c7d2fe;
+    border-bottom: none;
+    font-size: 13px;
+    font-weight: 600;
+    color: #3730a3;
 }
 
-.attachment-item {
+.pdf-attachment-name {
+    overflow-wrap: anywhere;
+}
+
+.pdf-pages {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    width: 90px;
-    height: 90px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    background: #f0f4ff;
-    text-decoration: none;
-    transition: background 0.2s;
+    gap: 0;
 }
 
-.attachment-item:hover {
-    background: #dbe4ff;
+.pdf-page {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid #ccc;
+    border-top: none;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    background: #fff;
 }
 
-.attachment-icon {
-    font-size: 24px;
-    margin-bottom: 4px;
-}
-
-.attachment-item small {
-    font-size: 10px;
-    color: #333;
+.pdf-loading {
+    padding: 40px;
     text-align: center;
-    line-height: 1.2;
-    overflow-wrap: break-word;
-    word-wrap: break-word;
-    padding: 0 4px;
+    font-size: 13px;
+    color: #999;
+    border: 1px solid #ccc;
+    background: #fafafa;
+}
+
+.pdf-error {
+    padding: 16px;
+    color: #b91c1c;
+    background: #fef2f2;
+    border: 1px solid #fca5a5;
+    font-size: 13px;
+    margin: 0;
+}
+
+/* ── Print styles (solo mode) ── */
+@media print {
+    /*
+     * Page margins mirror the on-screen .a4-page padding exactly,
+     * so the printed content fills the sheet without any visible wrapper.
+     */
+    @page {
+        size: A4 portrait;
+        margin: 20mm 25mm 25mm 25mm;
+    }
+
+    /* Force a uniform white background — the physical sheet IS the paper */
+    *,
+    body {
+        background: white !important;
+        color: black !important;
+    }
+
+    body {
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    /* Wrapper containers become invisible — reset all decorative styles */
+    .missive-preview,
+    .preview-content,
+    .postal-preview--solo {
+        all: unset !important;
+        display: block !important;
+    }
+
+    /* .a4-page is no longer a "sheet inside a page": it becomes
+       transparent and fills the full printable width */
+    .a4-page {
+        width: 100% !important;
+        min-height: auto !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        background: transparent !important;
+    }
+
+    /* Hide anything that is not letter content */
+    .no-print {
+        display: none !important;
+    }
 }

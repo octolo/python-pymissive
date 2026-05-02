@@ -1,15 +1,18 @@
 """Admin for Missive model."""
 
+import json
 import mimetypes
 
 from django.contrib import admin
 from django.http import HttpResponse
+from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django.utils.text import format_lazy
 from django_boosted import AdminBoostModel
+from django.contrib.admin.utils import unquote as admin_unquote
 from urllib.parse import unquote
 from django.contrib import messages
 from django.shortcuts import redirect
@@ -151,7 +154,6 @@ class MissiveAdmin(AdminBoostModel):
         "created_at",
         "updated_at",
         "external_id",
-        "buttons_show_and_preview",
         "external_id_display",
         "total_billed_amount_display",
         "total_billing_amount_display",
@@ -243,8 +245,12 @@ class MissiveAdmin(AdminBoostModel):
             target = obj.sender_address or ""
         else:
             target = sender[obj.missive_support.lower()] or ""
-        text = name or target or _("No sender")
-        return self.format_with_help_text(text, target) if target else text
+        if not name and not target:
+            return self.format_label(_("No sender"), label_type="warning")
+        text = name or target
+        if target:
+            return self.format_with_help_text(text, target)
+        return text
 
     sender_display.short_description = _("Sender")
 
@@ -295,31 +301,75 @@ class MissiveAdmin(AdminBoostModel):
 
     thread_display.short_description = _("Message(s)/History(s)/Thread")
 
-    def button_show(self, obj):
-        return format_html(
-            '<a class="button" href="{}" target="_blank">{}</a>',
-            reverse("django_pymissive:preview", args=["missive", obj.pk]),
-            _("Show"),
+    @admin_boost_view("redirect", _("Preview"))
+    def preview(self, request, obj):
+        return reverse("django_pymissive:preview", args=["missive", obj.pk])
+
+    def has_preview_provider_confirm_permission(self, request, obj=None):
+        """Object-tool link: draft missives only (API eligibility is checked in the view)."""
+        return bool(obj and obj.pk and obj.status == MissiveStatus.DRAFT)
+
+    @admin_boost_view(
+        "confirm",
+        _("Preview (provider)")
+    )
+    def preview_provider_confirm(self, request, obj, confirmed=False):
+        if obj.status != MissiveStatus.DRAFT:
+            messages.warning(
+                request,
+                _(
+                    "Provider preview is only available when the missive is in draft status."
+                ),
+            )
+            return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
+        if not obj.can_preview_missive():
+            messages.warning(
+                request,
+                _("This provider does not implement preview for this missive type."),
+            )
+            return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
+        if not confirmed:
+            return {
+                "confirm": _(
+                    "Run provider preview? This calls the provider API "
+                    "(e.g. preview_lre on Maileva)."
+                )
+            }
+        try:
+            response = obj.call_provider_service(
+                "preview", **obj.get_serialized_data()
+            )
+            preview_result = json.dumps(
+                response
+                if isinstance(response, (dict, list))
+                else {"result": response},
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            )
+        except Exception as exc:
+            messages.error(request, str(exc))
+            return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
+        context = self.admin_site.each_context(request)
+        opts = self.model._meta
+        context.update(
+            {
+                "title": _("Provider preview result"),
+                "opts": opts,
+                "preview_result": preview_result,
+                "object": obj,
+                "original": obj,
+                "original_url": reverse(
+                    "admin:django_pymissive_missive_change", args=[obj.pk]
+                ),
+            }
         )
-
-    def button_preview(self, obj):
-        preview_url = reverse("django_pymissive:preview_form", args=["missive"])
-        if obj.pk:
-            preview_url = f"{preview_url}?pk={obj.pk}"
-        return format_html(
-            '<button type="submit" form="missive_form" formaction="{}" formmethod="post" formtarget="_blank" class="button" name="_preview" style="margin-left: 10px;">{}</button>',
-            preview_url,
-            _("Preview"),
+        request.current_app = self.admin_site.name
+        return TemplateResponse(
+            request,
+            "django_pymissive/admin/missive_provider_preview_result.html",
+            context,
         )
-
-    def buttons_show_and_preview(self, obj):
-        buttons_html = []
-        if obj.pk:
-            buttons_html.append(self.button_show(obj))
-        buttons_html.append(self.button_preview(obj))
-        return mark_safe(" ".join(str(btn) for btn in buttons_html))  # nosec B703 B308
-
-    buttons_show_and_preview.short_description = _("Show and Preview")
 
     def event_display(self, obj):
         event_related_html = format_html(
@@ -368,7 +418,7 @@ class MissiveAdmin(AdminBoostModel):
         )
         self.add_to_fieldset(
             _("Content"),
-            ["subject", "body_html", "body_text", "buttons_show_and_preview"],
+            ["subject", "body_html", "body_text"],
         )
         self.add_to_fieldset(
             _("Tracking"),
@@ -435,6 +485,30 @@ class MissiveAdmin(AdminBoostModel):
         if obj.provider:
             return hasattr(obj.provider._provider, service_name)
 
+    def get_boost_object_tools(self, request, object_id):
+        """List object-tool links; omit entries when ``has_<view_name>_permission`` exists and denies."""
+        items = []
+        obj = self.get_object(request, admin_unquote(object_id)) if object_id else None
+        opts = self.model._meta
+        for view_name in self.get_boost_view_names():
+            config = self.get_boost_view_config(view_name)
+            if not config:
+                continue
+            if not config.get("requires_object", False):
+                continue
+            if not config.get("show_in_object_tools", True):
+                continue
+            perm_fn = getattr(self, f"has_{view_name}_permission", None)
+            if callable(perm_fn) and not perm_fn(request, obj):
+                continue
+            url = reverse(
+                f"admin:{opts.app_label}_{opts.model_name}_{view_name}",
+                args=[object_id],
+                current_app=self.admin_site.name,
+            )
+            items.append({"label": config["label"], "url": url})
+        return items
+
     def is_draft(self, obj):
         return (obj and obj.pk and obj.status == MissiveStatus.DRAFT)
 
@@ -497,6 +571,23 @@ class MissiveAdmin(AdminBoostModel):
         obj = self.get_object(request, object_id)
         obj.cancel_missive()
         messages.success(request, _("Missive cancelled successfully."))
+
+    def has_delete_missive_permission(self, request, obj=None):
+        return bool(obj and obj.pk and obj.external_id and self.provider_has_service(obj, "delete"))
+
+    @admin_boost_action("delete_missive", _("Delete sending"))
+    def handle_delete_missive(self, request, object_id):
+        object_id = unquote(object_id)
+        obj = self.get_object(request, object_id)
+        return redirect(reverse("admin:django_pymissive_missive_delete_missive", args=[obj.pk]))
+
+    @admin_boost_view("confirm", _("Delete sending"), hidden=True)
+    def delete_missive(self, request, obj, confirmed=False):
+        if not confirmed:
+            return {"confirm": _("Delete this sending on the provider? This cannot be undone.")}
+        obj.delete_missive()
+        messages.success(request, _("Sending deleted on provider."))
+        return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
 
     def has_retrieve_missive_permission(self, request, obj=None):
         return self.is_not_cancelled(obj) and self.provider_has_service(obj, "retrieve") and obj.external_id

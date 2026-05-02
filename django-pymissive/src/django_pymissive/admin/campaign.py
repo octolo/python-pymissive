@@ -82,9 +82,6 @@ class MissiveCampaignAdmin(AdminBoostModel):
     search_fields = ["subject"]
     ordering = ["-id"]
     readonly_fields = [
-        "buttons_show_and_preview_email",
-        "buttons_show_and_preview_sms",
-        "buttons_show_and_preview_lre",
         "created_at",
         "updated_at",
     ]
@@ -139,7 +136,6 @@ class MissiveCampaignAdmin(AdminBoostModel):
                 "reply_to_email",
                 "body_text",
                 "body_html",
-                "buttons_show_and_preview_email",
             ],
         )
         self.add_to_fieldset(
@@ -148,7 +144,6 @@ class MissiveCampaignAdmin(AdminBoostModel):
                 "sender_phone_name",
                 "sender_phone",
                 "body_sms",
-                "buttons_show_and_preview_sms",
             ],
         )
         self.add_to_fieldset(
@@ -162,7 +157,6 @@ class MissiveCampaignAdmin(AdminBoostModel):
                 "delivery_mode_lre",
                 "priority_lre",
                 "first_document",
-                "buttons_show_and_preview_lre",
             ],
         )
         self.add_to_fieldset(
@@ -176,47 +170,20 @@ class MissiveCampaignAdmin(AdminBoostModel):
             classes=("wide", "collapse"),
         )
 
-    def _preview_buttons(self, obj, preview_type):
-        """Show and Preview buttons for a given type (email, sms, postal)."""
-        preview_url = reverse("django_pymissive:preview_form", args=["campaign"])
-        buttons_html = []
-        if obj.pk:
-            base_url = reverse("django_pymissive:preview", args=["campaign", obj.pk])
-            buttons_html.append(
-                format_html(
-                    '<a class="button" href="{}?type={}" target="_blank">{}</a>',
-                    base_url,
-                    preview_type,
-                    _("Show"),
-                )
-            )
-        pk_param = f"&pk={obj.pk}" if obj.pk else ""
-        buttons_html.append(
-            format_html(
-                '<button type="submit" form="missivecampaign_form" formaction="{}?type={}{}" formmethod="post" formtarget="_blank" class="button" name="_preview" value="{}" style="margin-left: 10px;">{}</button>',
-                preview_url,
-                preview_type,
-                pk_param,
-                preview_type,
-                _("Preview"),
-            )
-        )
-        return mark_safe(" ".join(str(btn) for btn in buttons_html))  # nosec B703 B308
+    @admin_boost_view("redirect", _("Preview (email)"))
+    def handle_preview_email(self, request, obj):
+        base = reverse("django_pymissive:preview", args=["campaign", obj.pk])
+        return f"{base}?type=email"
 
-    def buttons_show_and_preview_email(self, obj):
-        return self._preview_buttons(obj, "email")
+    @admin_boost_view("redirect", _("Preview (SMS)"))
+    def handle_preview_sms(self, request, obj):
+        base = reverse("django_pymissive:preview", args=["campaign", obj.pk])
+        return f"{base}?type=sms"
 
-    buttons_show_and_preview_email.short_description = _("Email: Show and Preview")
-
-    def buttons_show_and_preview_sms(self, obj):
-        return self._preview_buttons(obj, "sms")
-
-    buttons_show_and_preview_sms.short_description = _("SMS: Show and Preview")
-
-    def buttons_show_and_preview_lre(self, obj):
-        return self._preview_buttons(obj, "postal")
-
-    buttons_show_and_preview_lre.short_description = _("LRE: Show and Preview")
+    @admin_boost_view("redirect", _("Preview (postal)"))
+    def handle_preview_postal(self, request, obj):
+        base = reverse("django_pymissive:preview", args=["campaign", obj.pk])
+        return f"{base}?type=postal"
 
     def subject_display(self, obj):
         missive_recipients = [

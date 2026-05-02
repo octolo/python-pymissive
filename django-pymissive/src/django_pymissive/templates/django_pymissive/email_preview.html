@@ -9,33 +9,39 @@
 <div class="email-preview">
     <div class="email-header">
         <p><strong>{% trans 'From' %}:</strong>
-            {% if sender.name %}{{ sender.name }} {% endif %}&lt;{{ sender.email }}&gt;
+            {% if sender.name or sender.email %}
+            {% if sender.name %}{{ sender.name }} {% endif %}{% if sender.email %}&lt;{{ sender.email }}&gt;{% else %}<span class="empty">&lt;{% trans "Not filled in" %}&gt;</span>{% endif %}
+            {% else %}
+            <span class="empty">{% trans "Not filled in" %}</span>
+            {% endif %}
         </p>
         {% if reply_to %}
         <p><strong>{% trans 'Reply-To' %}:</strong>
-            {% if reply_to.name %}{{ reply_to.name }} {% endif %}&lt;{{ reply_to.email }}&gt;
+            {% if reply_to.name or reply_to.email %}
+            {% if reply_to.name %}{{ reply_to.name }} {% endif %}{% if reply_to.email %}&lt;{{ reply_to.email }}&gt;{% else %}<span class="empty">&lt;{% trans "Not filled in" %}&gt;</span>{% endif %}
+            {% else %}
+            <span class="empty">{% trans "Not filled in" %}</span>
+            {% endif %}
         </p>
         {% endif %}
         <p><strong>{% trans 'To' %}:</strong>
             {% if to_recipients %}
-            {% for r in to_recipients %}{% if not forloop.first %}, {% endif %}{% if r.name %}{{ r.name }} {% endif %}&lt;{{ r.email }}&gt;{% endfor %}
+            {% for r in to_recipients %}{% if not forloop.first %}, {% endif %}{% if r.name %}{{ r.name }} {% endif %}{% if r.email %}&lt;{{ r.email }}&gt;{% else %}<span class="empty">&lt;{% trans "Not filled in" %}&gt;</span>{% endif %}{% endfor %}
             {% else %}
-            {% trans 'None' %}
+            <span class="empty">{% trans "Not filled in" %}</span>
             {% endif %}
         </p>
         {% if cc_recipients %}
         <p><strong>{% trans 'Cc' %}:</strong>
-            {% for r in cc_recipients %}{% if not forloop.first %}, {% endif %}{% if r.name %}{{ r.name }} {% endif %}&lt;{{ r.email }}&gt;{% endfor %}
+            {% for r in cc_recipients %}{% if not forloop.first %}, {% endif %}{% if r.name %}{{ r.name }} {% endif %}{% if r.email %}&lt;{{ r.email }}&gt;{% else %}<span class="empty">&lt;{% trans "Not filled in" %}&gt;</span>{% endif %}{% endfor %}
         </p>
         {% endif %}
         {% if bcc_recipients %}
         <p><strong>{% trans 'Bcc' %}:</strong>
-            {% for r in bcc_recipients %}{% if not forloop.first %}, {% endif %}{% if r.name %}{{ r.name }} {% endif %}&lt;{{ r.email }}&gt;{% endfor %}
+            {% for r in bcc_recipients %}{% if not forloop.first %}, {% endif %}{% if r.name %}{{ r.name }} {% endif %}{% if r.email %}&lt;{{ r.email }}&gt;{% else %}<span class="empty">&lt;{% trans "Not filled in" %}&gt;</span>{% endif %}{% endfor %}
         </p>
         {% endif %}
-        {% if missive.subject_compiled %}
-        <p><strong>{% trans 'Subject' %}:</strong> {{ missive.subject_compiled }}</p>
-        {% endif %}
+        <p><strong>{% trans 'Subject' %}:</strong> {% if missive.subject_compiled %}{{ missive.subject_compiled }}{% else %}<span class="empty">{% trans "Not filled in" %}</span>{% endif %}</p>
     </div>
     <div class="email-body">
         {% if missive.body_html_compiled %}
@@ -59,10 +65,14 @@
     {% if missive.attachments_physical %}
     <div class="attachments">
         {% for doc in missive.attachments_physical %}
+        {% if doc.attachment_url %}
         <a href="{{ doc.attachment_url.url }}" target="_blank" rel="noopener">
             <span>&#128196;</span>
             <small>{{ doc.attachment_url.name|default:"unnamed" }}</small>
         </a>
+        {% else %}
+        <span class="empty"><span>&#128196;</span> <small>{% trans "Not filled in" %}</small></span>
+        {% endif %}
         {% endfor %}
     </div>
     {% endif %}
