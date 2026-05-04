@@ -89,3 +89,8 @@ ignore = ["migrations"]
 [tool.django-stubs]
 django_settings_module = "tests.settings"
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+    "python-dotenv",
+]

@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-django-geoaddress:
+  test-django-pymissive:
     runs-on: ubuntu-latest
 
     strategy:
@@ -44,10 +44,10 @@ jobs:
           python -m pip install build
           python -m pip install "Django==${{ matrix.django-version }}"
           python -m pip install djangorestframework python-dotenv
-          python -m pip install "pymissive @ git+https://github.com/SunnyBara/python-pymissive.git@<FixMe Commit Id>#subdirectory=python-pymissive"
+          python -m pip install "pymissive @ git+https://github.com/SunnyBara/python-pymissive.git@12e1cb4cb641e5c7df17e2378040090f73cedc89#subdirectory=python-pymissive"
           python -m pip install "providerkit @ git+https://github.com/SunnyBara/python-providerkit.git@601f27aaab01c8d9608551b38218861d917c19ee#subdirectory=python-providerkit"
           python -m pip install "django-providerkit @ git+https://github.com/SunnyBara/python-providerkit.git@601f27aaab01c8d9608551b38218861d917c19ee#subdirectory=django-providerkit"
-          python -m pip install -e ../python-geoaddress
+          python -m pip install -e ../python-pymissive
           python -m pip install -e ".[test]"
 
       - name: Django system check
