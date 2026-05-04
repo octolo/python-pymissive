@@ -911,11 +911,17 @@ msgstr "Ouvrir la pièce jointe"
 msgid "unnamed"
 msgstr "sans nom"
 
-msgid "View page alone"
-msgstr "Voir seule"
+msgid "Address zone"
+msgstr "Zone d'adresse"
 
-msgid "Print"
-msgstr "Imprimer"
+msgid "Postal recipients"
+msgstr "Destinataires postaux"
+
+msgid "Other recipients"
+msgstr "Autres destinataires"
+
+msgid "Download PDF"
+msgstr "Télécharger le PDF"
 
 msgid "Loading…"
 msgstr "Chargement…"

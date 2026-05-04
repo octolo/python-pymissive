@@ -6,6 +6,18 @@ from functools import cached_property
 from typing import Any
 
 
+_ADDRESS_OFFSET_LRE_ACK = {
+    "top": "20mm",
+    "width": "70mm",
+    "height": "30mm",
+}
+
+_ADDRESS_OFFSET_LRE_NO_ACK = {
+    "top": "20mm",
+    "width": "70mm",
+    "height": "30mm",
+}
+
 class MailevaProvider(MissiveProviderBase):
     """Maileva LRE provider (electronic registered letter, registered mail)."""
 
@@ -96,6 +108,10 @@ class MailevaProvider(MissiveProviderBase):
     #########################################################
     # Helpers
     #########################################################
+
+    @property
+    def address_offset_lre(self) -> str:
+        return _ADDRESS_OFFSET_LRE_ACK if self.is_acknowledgement_of_receipt() else _ADDRESS_OFFSET_LRE_NO_ACK
 
     def get_lre_mode(self) -> str:
         return "registered_mail" if self.is_acknowledgement_of_receipt() else "mail"

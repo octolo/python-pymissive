@@ -72,6 +72,53 @@ class MissiveAttachmentAdmin(AdminBoostModel):
         self.add_to_fieldset(_("Configs"), ["metadata"])
 
 
+_STANDALONE_ATTACHMENT_INLINE_FIELDSETS = (
+    ("Priority", {
+        "fields": ("priority",),
+    }),
+    (
+        _("Type"),
+        {
+            "fields": (
+                ("attachment_type", "linked"),
+            ),
+        },
+    ),
+    (
+        _("Physical attachment"),
+        {
+            "classes": ("collapse",),
+            "fields": ("attachment_file",),
+        },
+    ),
+    (
+        _("Virtual attachment"),
+        {
+            "classes": ("collapse",),
+            "fields": (
+                ("attachment_content_type", "attachment_object_id"),
+                "attachment_object_arguments",
+            ),
+        },
+    ),
+    (
+        _("Metadata"),
+        {
+            "classes": ("collapse",),
+            "fields": ("metadata", "page_count", "external_id",),
+        },
+    ),
+)
+
+
+class MissiveAttachmentBaseInline(admin.StackedInline):
+    """Base inline for missive attachments."""
+
+    model = MissiveBaseAttachment
+    extra = 0
+    fieldsets = _STANDALONE_ATTACHMENT_INLINE_FIELDSETS
+
+
 class MissiveAttachmentInline(admin.TabularInline):
     """Inline for missive attachments."""
 
@@ -79,10 +126,10 @@ class MissiveAttachmentInline(admin.TabularInline):
     extra = 0
     fields = [
         "priority",
-        "attachment_file",
-        "external_id",
         "page_count",
+        "external_id",
         "linked",
+        "attachment_file",
     ]
 
 
@@ -102,16 +149,23 @@ class MissiveVirtualAttachmentInline(admin.TabularInline):
     ]
 
 
-class CampaignAttachmentInline(admin.TabularInline):
-    """Inline for campaign attachments."""
+class CampaignAttachmentInline(admin.StackedInline):
+    """Inline for campaign attachments (stacked + fieldsets: même lisibilité que missive)."""
+
+    model = CampaignAttachment
+    extra = 0
+    fieldsets = _STANDALONE_ATTACHMENT_INLINE_FIELDSETS
+
+
+class CampaignAttachmentBaseInline(admin.TabularInline):
+    """Base inline for campaign attachments."""
 
     model = CampaignAttachment
     extra = 0
     fields = [
         "priority",
-        "attachment_file",
-        "external_id",
         "page_count",
+        "external_id",
         "linked",
     ]
 

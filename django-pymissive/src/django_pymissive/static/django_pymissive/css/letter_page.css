@@ -1,0 +1,110 @@
+/*
+ * First page of a postal / LRE letter (document layout, not preview chrome).
+ * - Browser: link before postal_preview.css (see postal_preview.html).
+ * - PDF: embedded by django_pymissive.pdf (static file django_pymissive/css/letter_page.css).
+ */
+
+/* A4 sheet — on-screen simulation */
+.a4-page {
+    width: 210mm;
+    min-height: 297mm;
+    background: #fff;
+    border: 1px solid #ccc;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    padding: 10mm 10mm 10mm 10mm;
+    box-sizing: border-box;
+    position: relative;
+    margin-bottom: 0;
+}
+
+/* Recipient area — top right */
+.a4-header {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 10mm;
+}
+
+/* Provider hook: get_provider_address_css_lre (offset dict → CSS); neutral default */
+.a4-address-provider {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.a4-recipient-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.a4-recipient-stack > .address-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #888;
+    font-weight: 600;
+    margin-bottom: 0;
+}
+
+.a4-recipient {
+    min-width: 70mm;
+    max-width: 90mm;
+    padding: 12px 16px;
+    border: 1px solid #ddd;
+    background: #fafafa;
+    border-radius: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.a4-recipient .address-name {
+    font-weight: 700;
+    font-size: 14px;
+    color: #222;
+    margin-bottom: 4px;
+}
+
+.a4-recipient .address-line {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #444;
+}
+
+.a4-recipient .address-empty {
+    font-style: italic;
+    color: #aaa;
+    font-size: 13px;
+}
+
+/* Letter body */
+.a4-body {
+    font-size: 14px;
+    line-height: 1.8;
+    color: #222;
+}
+
+.a4-body pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: inherit;
+    margin: 0;
+}
+
+.a4-body .empty {
+    font-style: italic;
+    color: #999;
+}
+
+/* When the letter page is printed, the wrapper padding is dropped — see postal_preview @page */
+@media print {
+    .a4-page {
+        width: 100% !important;
+        min-height: auto !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        background: transparent !important;
+    }
+}

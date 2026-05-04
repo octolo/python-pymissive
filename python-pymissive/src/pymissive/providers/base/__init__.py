@@ -74,6 +74,6 @@ class MissiveProviderBase(
 
     def normalize_filename(self, name):
         name = unicodedata.normalize("NFKD", name)
-        name = re.sub(r"\s+", "_", name)      # espaces -> _
-        name = re.sub(r"[^\w\.-]", "", name)  # enlève caractères spéciaux
+        name = re.sub(r"\s+", "_", name)      # spaces -> _
+        name = re.sub(r"[^\w\.-]", "", name)  # strip special characters
         return name

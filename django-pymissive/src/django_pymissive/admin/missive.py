@@ -29,8 +29,7 @@ from .recipient import (
     MissiveRecipientApplicationInline,
 )
 from .attachment import (
-    MissiveAttachmentInline,
-    MissiveVirtualAttachmentInline,
+    MissiveAttachmentBaseInline,
     MissiveProofInline,
 )
 from ..models.attachment import MissiveBaseAttachment
@@ -173,8 +172,7 @@ class MissiveAdmin(AdminBoostModel):
         MissiveRecipientPhoneInline,
         MissiveRecipientAddressInline,
         MissiveRecipientApplicationInline,
-        MissiveAttachmentInline,
-        MissiveVirtualAttachmentInline,
+        MissiveAttachmentBaseInline,
         MissiveBillingInline,
         MissiveEventInline,
         MissiveRelatedObjectInline,
@@ -240,17 +238,14 @@ class MissiveAdmin(AdminBoostModel):
 
     def sender_display(self, obj):
         sender = obj.get_sender()
-        name = sender["name"] or ""
+        name = sender["name"] or _("No sender name")
         if obj.missive_support == MissiveSupport.ADDRESS:
             target = obj.sender_address or ""
         else:
             target = sender[obj.missive_support.lower()] or ""
         if not name and not target:
             return self.format_label(_("No sender"), label_type="warning")
-        text = name or target
-        if target:
-            return self.format_with_help_text(text, target)
-        return text
+        return self.format_with_help_text(name, target)
 
     sender_display.short_description = _("Sender")
 
@@ -258,7 +253,7 @@ class MissiveAdmin(AdminBoostModel):
         if not obj.external_id:
             return "-"
         return self.format_label(obj.external_id, size="large", label_type="success")
-    
+
     external_id_display.short_description = _("External ID")
 
     def provider_display(self, obj):
@@ -303,7 +298,7 @@ class MissiveAdmin(AdminBoostModel):
 
     @admin_boost_view("redirect", _("Preview"))
     def preview(self, request, obj):
-        return reverse("django_pymissive:preview", args=["missive", obj.pk])
+        return obj.get_browser_preview_path()
 
     def has_preview_provider_confirm_permission(self, request, obj=None):
         """Object-tool link: draft missives only (API eligibility is checked in the view)."""
@@ -423,7 +418,7 @@ class MissiveAdmin(AdminBoostModel):
         self.add_to_fieldset(
             _("Tracking"),
             [
-                "campaign", 
+                "campaign",
                 "status",
                 "webhook_url",
                 "external_id_display",

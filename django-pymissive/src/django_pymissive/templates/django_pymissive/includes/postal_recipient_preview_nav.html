@@ -1,0 +1,15 @@
+{% load i18n %}
+{% if not campaign and postal_recipients|length > 1 and postal_letter_recipient_pk %}
+<nav class="postal-recipient-picker no-print" aria-label="{% trans 'Postal recipients' %}">
+    <p class="postal-recipient-picker__intro">{% trans "Other recipients" %}</p>
+    <ul class="postal-recipient-picker__list">
+        {% for r in postal_recipients %}
+        {% if r.pk != postal_letter_recipient_pk %}
+        <li>
+            <a href="{% url 'django_pymissive:preview_recipient' 'missive' missive.pk r.pk %}">{{ r.name|default:r.pk }}</a>
+        </li>
+        {% endif %}
+        {% endfor %}
+    </ul>
+</nav>
+{% endif %}

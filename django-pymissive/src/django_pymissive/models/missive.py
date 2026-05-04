@@ -61,6 +61,26 @@ PREVIEW_TPL_HTML = """<a href='{url}' target='_blank' rel='noopener' style='{sty
     {icon}&nbsp;{text}
 </a>"""
 
+OFFSET_CSS = {
+    "top": "margin-top: {top};",
+    "left": "margin-left: {left};",
+    "right": "margin-right: {right};",
+    "bottom": "margin-bottom: {bottom};",
+    "width": "min-width: {width}; max-width: {width};",
+    "height": "min-height: {height}; max-height: {height};",
+}
+
+
+def _address_offset_lre_dict_to_css(offset: dict) -> str:
+    parts = []
+    for key, value in offset.items():
+        tpl = OFFSET_CSS.get(key)
+        if tpl and value not in (None, ""):
+            parts.append(tpl.format(**{key: value}))
+    if not parts:
+        return ""
+    return ".a4-address-provider .a4-recipient { " + " ".join(parts) + " }"
+
 
 class Missive(CommentTimestampedModel):
     """Multi-channel missive model (email, SMS, address/LRE, application, etc.)."""
@@ -566,11 +586,35 @@ class Missive(CommentTimestampedModel):
         body = self.get_locally_or_campaign_value("body_html")
         return self.check_recipients() and bool(body and body.strip())
 
+    def get_browser_preview_path(self) -> str:
+        """Relative URL path for staff browser preview (postal includes first recipient segment)."""
+        from django.urls import reverse
+        from ..views.preview import POSTAL_PREVIEW_MISSIVE_TYPES
+
+        if not self.pk:
+            return ""
+        mt = (self.missive_type or "").lower()
+        if mt in POSTAL_PREVIEW_MISSIVE_TYPES:
+            first = (
+                self.to_missiverecipient.filter(recipient_type=MissiveRecipientType.RECIPIENT)
+                .order_by("name", "pk")
+                .first()
+            )
+            if first is not None:
+                return reverse(
+                    "django_pymissive:preview_recipient",
+                    kwargs={
+                        "campaign_or_missive": "missive",
+                        "pk": self.pk,
+                        "recipient_pk": first.pk,
+                    },
+                )
+        return reverse("django_pymissive:preview", args=["missive", self.pk])
+
     @property
     def show_preview_browser(self):
         """Show the preview browser."""
-        url = reverse("django_pymissive:preview", args=["missive", self.pk])
-        url = self.base_url + url
+        url = self.base_url + self.get_browser_preview_path()
         data = {
             "url": url,
             "icon": PREVIEW_ICON,
@@ -582,8 +626,7 @@ class Missive(CommentTimestampedModel):
     @property
     def show_preview_browser_text(self):
         """Show the preview browser text."""
-        url = reverse("django_pymissive:preview", args=["missive", self.pk])
-        url = self.base_url + url
+        url = self.base_url + self.get_browser_preview_path()
         return f"- {_('Preview in browser')}:{SEPARATOR}{url}\n"
 
     def missive_context(self):
@@ -598,17 +641,49 @@ class Missive(CommentTimestampedModel):
         })
         return context
 
-    def body_to_pdf(self):
+    def get_provider_address_css_lre(self) -> str:
+        """Return extra CSS for the postal address zone when the provider defines it.
+
+        Prefer :meth:`address_offset_lre` on the underlying provider (``dict`` of lengths:
+        ``top``, ``right``, ``bottom``, ``left``, ``width``, ``height``), converted to rules
+        for ``.a4-address-provider``. Otherwise use a legacy string property
+        ``address_css_lre``. ``ack_level`` is synced from this missive when the provider
+        exposes it so acknowledgement-dependent offsets work.
+        """
+        provider = getattr(self, "provider", None)
+        if provider and hasattr(provider._provider, "address_offset_lre"):
+            print("offset", provider._provider.address_offset_lre)
+            css =  _address_offset_lre_dict_to_css(provider._provider.address_offset_lre)
+            print(css)
+            return css
+        return ""
+
+    def get_postal_letter_render_context(self, post_data=None, postal_recipient_pk=None):
+        """Context for the postal first page (browser + PDF): recipient block + letter body."""
+        from ..views.preview import build_preview_context
+
+        ctx = {"missive": self}
+        ctx.update(
+            build_preview_context(
+                self,
+                post_data=post_data,
+                postal_recipient_pk=postal_recipient_pk,
+            )
+        )
+        ctx["provider_address_css_lre"] = self.get_provider_address_css_lre()
+        return ctx
+
+    def body_to_pdf(self, **kwargs):
         """Convert the body to PDF."""
         pdg_generator = getattr(settings, "MISSIVEPDF_GENERATOR", "django_pymissive.pdf.body_to_pdf")
-        pdf = import_string(pdg_generator)(self)
+        pdf = import_string(pdg_generator)(self, **kwargs)
         return pdf
 
     def generate_first_document(self):
         """Generate first document PDF from first_document/body_html and save as attachment."""
         from ..models.attachment import MissiveBaseAttachment
 
-        pdf_bytes = self.body_to_pdf()
+        pdf_bytes = self.body_to_pdf(postal_recipient_pk=None)
         filename = f"first-document-{self.thread_id}.pdf"
         existing = self.to_missiveattachment.filter(attachment_file__icontains=f"first-document-{self.thread_id}").first()
         if existing:
@@ -1026,7 +1101,6 @@ class Missive(CommentTimestampedModel):
         if hasattr(self, clean_by_support):
             getattr(self, clean_by_support)()
 
-<<<<<<< HEAD
     def clean_subject(self):
         if not self.subject and not self.campaign:
             raise ValidationError({
@@ -1054,8 +1128,6 @@ class Missive(CommentTimestampedModel):
                 "body_text": _("Body text is required (in missive or campaign)"),
             })
 
-=======
->>>>>>> 4e28e9c (Release pymissive and django-pymissive 1.0.9)
     def clean_support_address(self):
         """Extra validation for address (LRE) missives: body_html or attachments."""
         has_body = self.get_locally_or_campaign_value("body_html")

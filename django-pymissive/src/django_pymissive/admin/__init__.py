@@ -2,7 +2,15 @@
 
 from .config import MissiveConfigAdmin
 from .billing import MissiveBillingAdmin, MissiveBillingInline
-from .attachment import MissiveAttachmentAdmin
+from .attachment import (
+    MissiveAttachmentBaseInline,
+    MissiveAttachmentAdmin,
+    MissiveAttachmentInline,
+    MissiveVirtualAttachmentInline,
+    CampaignAttachmentBaseInline,
+    CampaignAttachmentInline,
+    CampaignVirtualAttachmentInline,
+)
 from .campaign import MissiveCampaignAdmin
 from .event import MissiveEventAdmin
 from .recipient import (
@@ -26,8 +34,12 @@ __all__ = [
     "MissiveCampaignAdmin",
     "MissiveAdmin",
     "MissiveAttachmentAdmin",
-    "MessageAdmin",
-    "MessageInline",
+    "MissiveAttachmentBaseInline",
+    "MissiveAttachmentInline",
+    "MissiveVirtualAttachmentInline",
+    "CampaignAttachmentBaseInline",
+    "CampaignAttachmentInline",
+    "CampaignVirtualAttachmentInline",
     "MissiveEventAdmin",
     "MissiveRelatedObjectAdmin",
     "MissiveRecipientAdmin",

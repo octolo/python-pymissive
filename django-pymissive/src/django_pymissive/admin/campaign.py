@@ -21,8 +21,8 @@ from pymissive.config import MISSIVE_TYPES
 from ..models.campaign import MissiveCampaign, MissiveScheduledCampaign
 from ..models.attachment import MissiveBaseAttachment
 from ..utils import recalculate_attachment_priorities
-from .attachment import CampaignAttachmentInline, CampaignVirtualAttachmentInline
-from .related_object import CampaignRelatedObjectInline 
+from .attachment import CampaignAttachmentBaseInline
+from .related_object import CampaignRelatedObjectInline
 
 
 @admin.register(MissiveScheduledCampaign)
@@ -87,8 +87,7 @@ class MissiveCampaignAdmin(AdminBoostModel):
     ]
     inlines = [
         MissiveScheduledCampaignInline,
-        CampaignAttachmentInline,
-        CampaignVirtualAttachmentInline,
+        CampaignAttachmentBaseInline,
         CampaignRelatedObjectInline,
     ]
 

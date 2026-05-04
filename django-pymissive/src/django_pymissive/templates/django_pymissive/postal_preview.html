@@ -2,63 +2,23 @@
 {% load static i18n %}
 
 {% block preview_stylesheet %}
+<link rel="stylesheet" href="{% static 'django_pymissive/css/letter_page.css' %}">
 <link rel="stylesheet" href="{% static 'django_pymissive/css/postal_preview.css' %}">
 {% endblock %}
 
 {% block preview_content %}
-{% if request.GET.solo %}
-
-{# ──────────────────────────────────────────────────────── #}
-{# MODE SOLO : uniquement la page A4 avec le corps          #}
-{# ──────────────────────────────────────────────────────── #}
-<div class="solo-toolbar no-print">
-    <button onclick="window.print()" class="solo-print-btn">&#128438; {% trans "Print" %}</button>
-</div>
-<div class="postal-preview postal-preview--solo">
-    <div class="a4-page">
-        <div class="a4-header">
-            <div class="a4-recipient">
-                {% if postal_recipients %}
-                    {% with postal_recipients.0 as r %}
-                    {% if r.name %}<div class="address-name">{{ r.name }}</div>{% endif %}
-                    {% for line in r.address_lines %}
-                    <div class="address-line">{{ line }}</div>
-                    {% empty %}
-                    <div class="address-empty">-</div>
-                    {% endfor %}
-                    {% endwith %}
-                {% else %}
-                    <div class="address-empty">{% trans "No recipient" %}</div>
-                {% endif %}
-            </div>
-        </div>
-        <div class="a4-body">
-            {% if missive.first_document_compiled %}
-                {{ missive.first_document_compiled|safe }}
-            {% elif missive.body_html %}
-                {{ missive.body_html|safe }}
-            {% elif missive.body_text %}
-                <pre>{{ missive.body_text }}</pre>
-            {% else %}
-                <p class="empty">{% trans "No content" %}</p>
-            {% endif %}
-        </div>
-    </div>
-</div>
-
-{% else %}
-
-{# ──────────────────────────────────────────────────────── #}
-{# MODE NORMAL : enveloppe + page + pièces jointes          #}
-{# ──────────────────────────────────────────────────────── #}
 <div class="postal-preview">
+
+    <div class="postal-recipient-picker-bar no-print">
+        {% include "django_pymissive/includes/postal_recipient_preview_nav.html" %}
+    </div>
 
     <div class="envelope">
         <div class="address-block sender-block">
             <div class="address-label">{% trans "Sender" %}</div>
             {% if sender.name %}<div class="address-name">{{ sender.name }}</div>{% endif %}
-            {% for line in sender_address_lines %}
-            <div class="address-line">{{ line }}</div>
+            {% for line in sender_address.text_3lines %}
+            <div class="address-line">{{ line|join:" " }}</div>
             {% empty %}
             <div class="address-empty">{% trans "Not filled in" %}</div>
             {% endfor %}
@@ -78,46 +38,27 @@
         {% endif %}
     </div>
 
-    {# ── lien « voir seule » juste au-dessus de la page A4 ── #}
-    <div class="a4-solo-bar">
-        <a href="?solo=1" target="_blank" rel="noopener" class="a4-solo-link">
-            {% trans "View page alone" %} &#8599;
+    <div class="postal-preview-actions no-print">
+        {% if campaign %}
+        <a href="{% url 'django_pymissive:download_pdf' 'campaign' campaign.pk %}?type={{ campaign_preview_kind|urlencode }}"
+           class="postal-preview-actions__link">
+            {% trans "Download PDF" %}
         </a>
+        {% elif postal_letter_recipient_pk %}
+        <a href="{% url 'django_pymissive:download_pdf_recipient' 'missive' missive.pk postal_letter_recipient_pk %}"
+           class="postal-preview-actions__link">
+            {% trans "Download PDF" %}
+        </a>
+        {% else %}
+        <a href="{% url 'django_pymissive:download_pdf' 'missive' missive.pk %}"
+           class="postal-preview-actions__link">
+            {% trans "Download PDF" %}
+        </a>
+        {% endif %}
     </div>
 
-    {# ── Page 1 : corps de la lettre ── #}
-    <div class="a4-page">
-        <div class="a4-header">
-            <div class="a4-recipient">
-                {% if postal_recipients %}
-                    {% with postal_recipients.0 as r %}
-                    {% if r.name %}<div class="address-name">{{ r.name }}</div>{% endif %}
-                    {% for line in r.address_lines %}
-                    <div class="address-line">{{ line }}</div>
-                    {% empty %}
-                    <div class="address-empty">-</div>
-                    {% endfor %}
-                    {% endwith %}
-                {% else %}
-                    <div class="address-empty">{% trans "No recipient" %}</div>
-                {% endif %}
-            </div>
-        </div>
+    {% include "django_pymissive/includes/postal_a4_letter_page.html" %}
 
-        <div class="a4-body">
-            {% if missive.first_document_compiled %}
-                {{ missive.first_document_compiled|safe }}
-            {% elif missive.body_html %}
-                {{ missive.body_html|safe }}
-            {% elif missive.body_text %}
-                <pre>{{ missive.body_text }}</pre>
-            {% else %}
-                <p class="empty">{% trans "No content" %}</p>
-            {% endif %}
-        </div>
-    </div>
-
-    {# ── Pièces jointes : rendu PDF.js ── #}
     {% for doc in missive.attachments_physical %}
     {% if not doc.is_first_document %}
     <div class="pdf-attachment" data-pdf-url="{{ doc.attachment_download_url }}">
@@ -133,11 +74,9 @@
     {% endfor %}
 
 </div>
-{% endif %}
 {% endblock %}
 
 {% block preview_scripts %}
-{% if not request.GET.solo %}
 {% trans "PDF.js unavailable." as pdfjs_msg_unavailable %}
 {% trans "Open attachment" as pdfjs_msg_open %}
 {% trans "Could not render document" as pdfjs_msg_error %}
@@ -199,5 +138,4 @@
     document.querySelectorAll('.pdf-attachment[data-pdf-url]').forEach(renderAttachment);
 })();
 </script>
-{% endif %}
 {% endblock %}

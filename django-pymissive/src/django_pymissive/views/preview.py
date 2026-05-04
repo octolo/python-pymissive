@@ -9,6 +9,7 @@ from types import MethodType
 from django.contrib.admin.views.decorators import staff_member_required
 from django.forms import modelform_factory
 from django.http import Http404, HttpResponse
+from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.utils.decorators import method_decorator
 from django.utils.safestring import mark_safe
@@ -23,6 +24,7 @@ from ..models.choices import (
     MissiveType,
 )
 from ..models.missive import Missive
+from ..models.recipient import MissiveRecipient
 
 
 MISSIVE_TEMPLATE_MAP = {
@@ -39,6 +41,16 @@ MISSIVE_TEMPLATE_MAP = {
 }
 
 DEFAULT_TEMPLATE = "django_pymissive/base_preview.html"
+
+POSTAL_PREVIEW_MISSIVE_TYPES = frozenset(
+    k for k, v in MISSIVE_TEMPLATE_MAP.items()
+    if v == "django_pymissive/postal_preview.html"
+)
+
+
+def missive_is_postal_like(m: Missive) -> bool:
+    return (getattr(m, "missive_type", None) or "").lower() in POSTAL_PREVIEW_MISSIVE_TYPES
+
 
 _PREVIEW_MODEL = {
     "missive": Missive,
@@ -95,7 +107,7 @@ def template_for_missive(missive: Missive) -> str:
     return MISSIVE_TEMPLATE_MAP.get((missive.missive_type or "").lower(), DEFAULT_TEMPLATE)
 
 
-def build_preview_context(missive: Missive, post_data=None) -> dict:
+def build_preview_context(missive: Missive, post_data=None, postal_recipient_pk=None) -> dict:
     """Type-specific template context (email headers, SMS sender, postal meta)."""
     try:
         mt = (missive.missive_type or "").lower()
@@ -103,8 +115,8 @@ def build_preview_context(missive: Missive, post_data=None) -> dict:
             return _build_email_context(missive)
         if mt in ("sms", "rcs"):
             return _build_sms_context(missive, post_data)
-        if mt in ("postal", "postal_registered", "postal_signature", "lre", "lre_qualified"):
-            return _build_lre_context(missive)
+        if mt in POSTAL_PREVIEW_MISSIVE_TYPES:
+            return _build_lre_context(missive, post_data, postal_recipient_pk)
     except Exception:
         pass
     return {}
@@ -234,7 +246,7 @@ def _geoaddress_lines(addr):
     return [str(addr)]
 
 
-def _build_lre_context(instance, post_data=None):
+def _build_lre_context(instance, post_data=None, postal_recipient_pk=None):
     """LRE sender/recipient/delivery context."""
     sender = getattr(instance, "sender", None) or {}
     sender_address = sender.get("address") if isinstance(sender, dict) else None
@@ -254,13 +266,31 @@ def _build_lre_context(instance, post_data=None):
         try:
             for r in recipient_manager.filter(
                 recipient_type=MissiveRecipientType.RECIPIENT
-            ):
+            ).order_by("name", "pk"):
                 recipients.append({
+                    "pk": r.pk,
                     "name": r.name or "",
-                    "address_lines": _geoaddress_lines(r.address),
+                    "address":  r.address,
                 })
         except Exception:
             pass
+
+    letter_rec = None
+    letter_pk = None
+    if postal_recipient_pk is not None and recipients:
+        try:
+            target = int(postal_recipient_pk)
+        except (TypeError, ValueError):
+            target = None
+        if target is not None:
+            for d in recipients:
+                if d["pk"] == target:
+                    letter_rec = d
+                    letter_pk = d["pk"]
+                    break
+    if letter_rec is None and recipients:
+        letter_rec = recipients[0]
+        letter_pk = recipients[0]["pk"]
 
     acknowledgement_display = ""
     delivery_mode_display = ""
@@ -283,8 +313,10 @@ def _build_lre_context(instance, post_data=None):
 
     return {
         "sender": sender,
-        "sender_address_lines": _geoaddress_lines(sender_address),
+        "sender_address": sender_address,
         "postal_recipients": recipients,
+        "postal_letter_recipient": letter_rec,
+        "postal_letter_recipient_pk": letter_pk,
         "acknowledgement_display": acknowledgement_display,
         "delivery_mode_display": delivery_mode_display,
         "priority_display": priority_display,
@@ -343,6 +375,48 @@ class PreviewView(DetailView):
             raise Http404
         self._key = key
         self.model = model
+        rp = kwargs.get("recipient_pk")
+        if rp is not None:
+            try:
+                self.recipient_pk = int(rp)
+            except (TypeError, ValueError):
+                raise Http404
+        else:
+            self.recipient_pk = None
+
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if self.recipient_pk is not None and self._key != "missive":
+            raise Http404
+        if (
+            self._key == "missive"
+            and self.recipient_pk is None
+            and missive_is_postal_like(self.object)
+        ):
+            first = (
+                MissiveRecipient.objects.filter(
+                    missive_id=self.object.pk,
+                    recipient_type=MissiveRecipientType.RECIPIENT,
+                )
+                .order_by("name", "pk")
+                .first()
+            )
+            if first is not None:
+                return redirect(
+                    "django_pymissive:preview_recipient",
+                    campaign_or_missive="missive",
+                    pk=self.object.pk,
+                    recipient_pk=first.pk,
+                )
+        if self.recipient_pk is not None:
+            ok = MissiveRecipient.objects.filter(
+                pk=self.recipient_pk,
+                missive_id=self.object.pk,
+                recipient_type=MissiveRecipientType.RECIPIENT,
+            ).exists()
+            if not ok:
+                raise Http404
+        return super().get(request, *args, **kwargs)
 
     def get_missive_for_preview(self) -> Missive:
         if hasattr(self, "_missive_for_preview"):
@@ -367,13 +441,16 @@ class PreviewView(DetailView):
         if self._key == "campaign":
             context["campaign"] = self.object
             channel = (self.request.GET.get("type") or "email").lower()
+            context["campaign_preview_kind"] = channel
             context["title"] = _("Preview: {} ({})").format(self.object, channel)
         else:
             context["title"] = _("Preview: {}").format(missive)
 
-        extra = build_preview_context(missive)
+        rp = self.recipient_pk if self._key == "missive" else None
+        extra = build_preview_context(missive, postal_recipient_pk=rp)
         if extra:
             context.update(extra)
+        context["provider_address_css_lre"] = missive.get_provider_address_css_lre()
         return context
 
 
@@ -424,6 +501,7 @@ class PreviewFormView(View):
             context = {
                 "missive": missive,
                 "campaign": instance,
+                "campaign_preview_kind": preview_kind,
                 "title": title,
             }
         else:
@@ -438,9 +516,10 @@ class PreviewFormView(View):
             }
 
         template_name = template_for_missive(missive)
-        extra = build_preview_context(missive, post_data=request.POST)
+        extra = build_preview_context(missive, post_data=request.POST, postal_recipient_pk=None)
         if extra:
             context.update(extra)
+        context["provider_address_css_lre"] = missive.get_provider_address_css_lre()
         return TemplateResponse(request, template_name, context)
 
 
@@ -456,16 +535,50 @@ class DownloadPDFView(DetailView):
             raise Http404
         self._key = key
         self.model = model
+        rp = kwargs.get("recipient_pk")
+        if rp is not None:
+            try:
+                self.recipient_pk = int(rp)
+            except (TypeError, ValueError):
+                raise Http404
+            if self._key != "missive":
+                raise Http404
+        else:
+            self.recipient_pk = None
 
     def get(self, request, *args, **kwargs):
         self.object = self.get_object()
 
         if self._key == "missive":
-            pdf_bytes = self.object.body_to_pdf()
+            rp = self.recipient_pk
+            if rp is not None:
+                ok = MissiveRecipient.objects.filter(
+                    pk=rp,
+                    missive_id=self.object.pk,
+                    recipient_type=MissiveRecipientType.RECIPIENT,
+                ).exists()
+                if not ok:
+                    raise Http404
+            elif missive_is_postal_like(self.object):
+                first = (
+                    MissiveRecipient.objects.filter(
+                        missive_id=self.object.pk,
+                        recipient_type=MissiveRecipientType.RECIPIENT,
+                    )
+                    .order_by("name", "pk")
+                    .first()
+                )
+                rp = first.pk if first else None
+            else:
+                rp = None
+            pdf_bytes = self.object.body_to_pdf(postal_recipient_pk=rp)
             filename = f"missive-{self.object.pk}.pdf"
         else:
-            missive = missive_for_campaign_preview(self.object, "postal")
-            pdf_bytes = missive.body_to_pdf()
+            if self.recipient_pk is not None:
+                raise Http404
+            preview_kind = (request.GET.get("type") or "postal").lower()
+            missive = missive_for_campaign_preview(self.object, preview_kind)
+            pdf_bytes = missive.body_to_pdf(postal_recipient_pk=None)
             filename = f"campaign-{self.object.pk}.pdf"
 
         response = HttpResponse(pdf_bytes, content_type="application/pdf")

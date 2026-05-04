@@ -1,3 +1,5 @@
+/* Preview UI only; first-page letter layout: letter_page.css (linked before this file). */
+
 .postal-preview {
     max-width: 210mm;
     margin: 0 auto;
@@ -78,11 +80,11 @@
 }
 
 .address-label {
-    font-size: 10px;
+    font-size: 8px;
     text-transform: uppercase;
     letter-spacing: 1px;
     color: #888;
-    margin-bottom: 4px;
+    margin-bottom: 0px;
     font-weight: 600;
 }
 
@@ -105,14 +107,57 @@
     font-size: 13px;
 }
 
-/* "View page alone" link bar — sits above the A4 page */
-.a4-solo-bar {
+/* Top bar: switch between postal recipients */
+.postal-recipient-picker-bar {
+    max-width: 210mm;
+    margin: 0 auto 12px auto;
+    padding: 0;
+}
+
+.postal-preview .postal-recipient-picker-bar:first-child {
+    margin-top: 0;
+}
+
+.postal-recipient-picker-bar .postal-recipient-picker {
+    margin-right: 0;
+}
+
+/* PDF (and future actions) above the A4 sheet */
+.postal-preview-actions {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
     margin-bottom: 0;
 }
 
-.a4-solo-link {
+.postal-recipient-picker {
+    font-size: 12px;
+    color: #444;
+}
+
+.postal-recipient-picker__intro {
+    margin: 0 0 6px 0;
+    font-weight: 600;
+}
+
+.postal-recipient-picker__list {
+    margin: 0;
+    padding-left: 1.2em;
+    line-height: 1.6;
+}
+
+.postal-recipient-picker__list a {
+    color: #3730a3;
+    text-decoration: none;
+}
+
+.postal-recipient-picker__list a:hover {
+    text-decoration: underline;
+}
+
+.postal-preview-actions__link {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -128,97 +173,10 @@
     transition: background 0.15s, color 0.15s;
 }
 
-.a4-solo-link:hover {
+.postal-preview-actions__link:hover {
     background: #e8eaf6;
     color: #3730a3;
     border-color: #c7d2fe;
-}
-
-/* Solo mode — centre the A4 page, no extra padding */
-.postal-preview--solo {
-    max-width: 210mm;
-    margin: 0 auto;
-    padding: 0;
-}
-
-/* Print toolbar (solo mode) */
-.solo-toolbar {
-    max-width: 210mm;
-    margin: 0 auto 8px auto;
-    display: flex;
-    justify-content: flex-end;
-}
-
-.solo-print-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #fff;
-    background: #417690;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background 0.15s;
-}
-
-.solo-print-btn:hover {
-    background: #205067;
-}
-
-/* A4 page — simulates a physical sheet on screen */
-.a4-page {
-    width: 210mm;
-    min-height: 297mm;
-    background: #fff;
-    border: 1px solid #ccc;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-    padding: 20mm 25mm 25mm 25mm;
-    box-sizing: border-box;
-    position: relative;
-    margin-bottom: 0;
-}
-
-/* Recipient address block — top right of the letter */
-.a4-header {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: 30mm;
-}
-
-.a4-recipient {
-    min-width: 70mm;
-    max-width: 90mm;
-    padding: 12px 16px;
-    border: 1px solid #ddd;
-    background: #fafafa;
-    border-radius: 2px;
-}
-
-.a4-recipient .address-name {
-    font-size: 14px;
-    margin-bottom: 4px;
-}
-
-.a4-recipient .address-line {
-    font-size: 13px;
-    line-height: 1.6;
-}
-
-/* Letter body content */
-.a4-body {
-    font-size: 14px;
-    line-height: 1.8;
-    color: #222;
-}
-
-.a4-body pre {
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    font-family: inherit;
-    margin: 0;
 }
 
 /* PDF attachments rendered inline via PDF.js */
@@ -277,18 +235,13 @@
     margin: 0;
 }
 
-/* ── Print styles (solo mode) ── */
+/* ── Print (browser) ── */
 @media print {
-    /*
-     * Page margins mirror the on-screen .a4-page padding exactly,
-     * so the printed content fills the sheet without any visible wrapper.
-     */
     @page {
         size: A4 portrait;
-        margin: 20mm 25mm 25mm 25mm;
+        margin: 10mm 10mm 10mm 10mm;
     }
 
-    /* Force a uniform white background — the physical sheet IS the paper */
     *,
     body {
         background: white !important;
@@ -300,27 +253,13 @@
         margin: 0 !important;
     }
 
-    /* Wrapper containers become invisible — reset all decorative styles */
     .missive-preview,
     .preview-content,
-    .postal-preview--solo {
+    .postal-preview {
         all: unset !important;
         display: block !important;
     }
 
-    /* .a4-page is no longer a "sheet inside a page": it becomes
-       transparent and fills the full printable width */
-    .a4-page {
-        width: 100% !important;
-        min-height: auto !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        border: none !important;
-        box-shadow: none !important;
-        background: transparent !important;
-    }
-
-    /* Hide anything that is not letter content */
     .no-print {
         display: none !important;
     }

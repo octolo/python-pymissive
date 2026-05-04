@@ -1,0 +1,35 @@
+{% load i18n %}
+{# Single source for postal first page: browser preview + PDF (via body_to_pdf). #}
+{% if provider_address_css_lre %}
+<style>{{ provider_address_css_lre|safe }}</style>
+{% endif %}
+<div class="a4-page">
+    <div class="a4-header">
+        <div class="a4-recipient-stack a4-address-provider">
+            <div class="a4-recipient">
+            {% if postal_letter_recipient %}
+                {% if postal_letter_recipient.name %}<div class="address-name">{{ postal_letter_recipient.name }}</div>{% endif %}
+                {% for line in postal_letter_recipient.address.text_3lines %}
+                <div class="address-line">{{ line|join:" " }}</div>
+                {% empty %}
+                <div class="address-empty">-</div>
+                {% endfor %}
+            {% else %}
+                <div class="address-empty">{% trans "No recipient" %}</div>
+            {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="a4-body">
+        {% if missive.first_document_compiled %}
+            {{ missive.first_document_compiled|safe }}
+        {% elif missive.body_html %}
+            {{ missive.body_html|safe }}
+        {% elif missive.body_text %}
+            <pre>{{ missive.body_text }}</pre>
+        {% else %}
+            <p class="empty">{% trans "No content" %}</p>
+        {% endif %}
+    </div>
+</div>
