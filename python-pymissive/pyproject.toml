@@ -13,7 +13,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 keywords = ["messaging", "email", "sms", "missive", "multi-channel", "notification"]
 dependencies = [
-  "clicommands>=0.1.0",
+  "clicommands>=0.1.1",
   "providerkit>=1.1.1",
 ]
 
