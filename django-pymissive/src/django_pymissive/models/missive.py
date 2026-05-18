@@ -6,14 +6,12 @@ from django.utils import timezone
 from django.core.exceptions import ValidationError, ObjectDoesNotExist
 from django.db import models
 from django.utils.translation import gettext_lazy as _
-from django.template import Context, Template
 from django_providerkit import ProviderField
 from django.utils.safestring import mark_safe
 from django.urls import reverse
 from django_geoaddress.fields import GeoaddressField
 from phonenumber_field.modelfields import PhoneNumberField
 from django.conf import settings
-from django.utils.module_loading import import_string
 from .choices import (
     AcknowledgementLevel,
     MissiveSupport,
@@ -41,7 +39,7 @@ from ..dispatch_signals import (
     missive_pre_duplicate,
     missive_pre_send,
 )
-from ..utils import get_base_url, build_webhook_url, get_default_domain, get_default_scheme
+from ..utils import get_base_url, build_webhook_url, get_default_domain, get_default_scheme, is_dry_run
 from django.core import signing
 from django.core.files.base import ContentFile
 
@@ -190,7 +188,6 @@ class Missive(CommentTimestampedModel):
         verbose_name=_("Body Text"),
         help_text=_("Plain text version of the message"),
     )
-
     # Sender
     sender_name = models.CharField(
         max_length=255,
@@ -264,6 +261,54 @@ class Missive(CommentTimestampedModel):
         blank=True,
         verbose_name=_("Additional configuration"),
         help_text=_("Additional configuration as JSON"),
+    )
+    body_processors = JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("Body processors"),
+        help_text=_(
+            "Ordered list of processors applied to compiled subject/body/"
+            "first_document content. When non-empty, REPLACES the campaign "
+            "and global defaults (PYMISSIVE_DEFAULT_BODY_PROCESSORS) — make "
+            "sure to include django_template_processor here if you still "
+            "want {{ var }} / {% tag %} rendering. Each entry may be a "
+            "dotted path string, a [path, kwargs] pair, or a "
+            "{\"processor\": path, \"kwargs\": {...}} dict."
+        ),
+    )
+    first_document_processors = JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("First document PDF processors"),
+        help_text=_(
+            "Ordered list of processors used to build the first_document PDF "
+            "(postal/LRE letter). The first processor receives no input and "
+            "must produce PDF bytes (default: WeasyPrint render of the "
+            "compiled HTML); subsequent processors receive the previous "
+            "output and may transform it (watermark, append pages, sign...). "
+            "When non-empty, REPLACES the campaign and global defaults "
+            "(PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS) — include "
+            "django_pymissive.pdf_processors.weasyprint_renderer if you "
+            "still want the default HTML→PDF rendering. Each entry may be a "
+            "dotted path string, a [path, kwargs] pair, or a "
+            "{\"processor\": path, \"kwargs\": {...}} dict."
+        ),
+    )
+    attachment_processors = JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("Attachment processors"),
+        help_text=_(
+            "Ordered list of processors applied to every attachment's bytes "
+            "right before the missive is handed to the provider. Each "
+            "processor receives (missive, attachment, content_bytes) and "
+            "must return new bytes. PDF-only processors (e.g. "
+            "watermark_pdf_attachments) skip non-PDF attachments. When "
+            "non-empty, REPLACES the campaign and global defaults "
+            "(PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS). Each entry may be a "
+            "dotted path string, a [path, kwargs] pair, or a "
+            "{\"processor\": path, \"kwargs\": {...}} dict."
+        ),
     )
     webhook_url = models.URLField(
         max_length=255,
@@ -674,18 +719,70 @@ class Missive(CommentTimestampedModel):
         return ctx
 
     def body_to_pdf(self, **kwargs):
-        """Convert the body to PDF."""
-        pdg_generator = getattr(settings, "MISSIVEPDF_GENERATOR", "django_pymissive.pdf.body_to_pdf")
-        pdf = import_string(pdg_generator)(self, **kwargs)
-        return pdf
+        """Build the first_document PDF by running the PDF processors chain.
+
+        The chain is resolved via :meth:`get_first_document_processors`
+        ("most specific wins": missive → campaign → global defaults). The
+        default chain contains a single WeasyPrint renderer that converts
+        ``first_document_compiled`` to PDF; replace or extend it to add
+        watermarks, append disclaimer pages, sign, etc.
+        """
+        from ..pdf_processors import apply_pdf_processors
+
+        return apply_pdf_processors(
+            self,
+            self.get_first_document_processors(),
+            campaign=self.campaign if self.campaign_id else None,
+            context=kwargs or None,
+        )
+
+    def is_postal_like(self) -> bool:
+        """True if missive uses the postal/LRE A4 letter layout (HTML + PDF first page)."""
+        from ..views.preview import POSTAL_PREVIEW_MISSIVE_TYPES
+
+        return (self.missive_type or "").lower() in POSTAL_PREVIEW_MISSIVE_TYPES
+
+    def ensure_first_document(self):
+        """Generate or refresh the first_document PDF when the missive is postal-like.
+
+        Skipped when the missive is not saved yet (no PK) or is not postal —
+        callers can rely on this being a no-op in those cases. Used by the
+        browser preview to render the same PDF the recipient receives.
+
+        Errors raised by the PDF processor chain (e.g. ``ImportError``
+        when the watermark/postprocessing libs are not installed) are
+        logged with a full stack trace and swallowed so the preview still
+        renders instead of crashing the page. Look for
+        ``ensure_first_document failed`` in the Django logs to diagnose.
+        """
+        if not self.pk or not self.is_postal_like():
+            return None
+        try:
+            return self.generate_first_document()
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "ensure_first_document failed for missive %s", self.pk
+            )
+            return None
 
     def generate_first_document(self):
-        """Generate first document PDF from first_document/body_html and save as attachment."""
-        from ..models.attachment import MissiveBaseAttachment
+        """Generate first document PDF from first_document/body_html and save as attachment.
+
+        Looks up the existing first_document strictly by ``attachment_type``
+        and ``priority`` (0 is reserved for first_document), NOT by
+        filename — virtual attachments may end up with a path that happens
+        to contain ``first-document-`` and we don't want to overwrite them.
+        """
+        from ..models.attachment import MissiveBaseAttachment, FIRST_DOCUMENT_PRIORITY
 
         pdf_bytes = self.body_to_pdf(postal_recipient_pk=None)
         filename = f"first-document-{self.thread_id}.pdf"
-        existing = self.to_missiveattachment.filter(attachment_file__icontains=f"first-document-{self.thread_id}").first()
+        existing = self.to_missiveattachment.filter(
+            attachment_type=MissiveAttachmentType.ATTACHMENT,
+            priority=FIRST_DOCUMENT_PRIORITY,
+        ).first()
         if existing:
             existing.attachment_file.delete(save=False)
             existing.attachment_file.save(filename, ContentFile(pdf_bytes), save=True)
@@ -694,47 +791,175 @@ class Missive(CommentTimestampedModel):
             missive=self,
             attachment_type=MissiveAttachmentType.ATTACHMENT,
             attachment_file=ContentFile(pdf_bytes, name=filename),
-            priority=0,
+            priority=FIRST_DOCUMENT_PRIORITY,
             linked=False,
         )
         return att
 
-    def _compiled_template_value(self, raw) -> str:
-        """Render ``raw`` with ``missive_context()``; empty or invalid template → empty string (preview-safe)."""
+    def get_default_body_processors(self):
+        """Return default body processors (Django template rendering by default).
+
+        Override on a subclass or set ``PYMISSIVE_DEFAULT_BODY_PROCESSORS = []``
+        in Django settings to disable the default Django template rendering.
+        """
+        from ..body_processors import get_default_body_processors
+
+        return get_default_body_processors()
+
+    def get_body_processors(self):
+        """Resolve which processors apply, with "most specific wins" semantics.
+
+        Resolution order (first non-empty wins; no concatenation):
+
+        1. ``self.body_processors`` if non-empty → those processors only.
+        2. ``self.campaign.body_processors`` if non-empty → those only.
+        3. Otherwise → :meth:`get_default_body_processors` (i.e.
+           ``PYMISSIVE_DEFAULT_BODY_PROCESSORS`` from settings, which by
+           default contains the Django template renderer).
+
+        Note: when overriding, you are responsible for including
+        ``django_pymissive.body_processors.django_template_processor`` in
+        your list if you still want ``{{ var }}`` / ``{% tag %}`` rendering.
+        """
+        if self.body_processors:
+            return list(self.body_processors)
+        if self.campaign_id and self.campaign is not None and self.campaign.body_processors:
+            return list(self.campaign.body_processors)
+        return self.get_default_body_processors()
+
+    def get_default_pdf_processors(self):
+        """Return the default PDF processor chain for ``first_document``.
+
+        Honors ``PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS`` from
+        settings, otherwise falls back to a single
+        :func:`~django_pymissive.pdf_processors.weasyprint_renderer`.
+        """
+        from ..pdf_processors import get_default_pdf_processors
+
+        return get_default_pdf_processors()
+
+    def get_first_document_processors(self):
+        """Resolve which PDF processors apply (same "most specific wins" rule).
+
+        Resolution order (first non-empty wins; no concatenation):
+
+        1. ``self.first_document_processors`` if non-empty → those only.
+        2. ``self.campaign.first_document_processors`` if non-empty → those only.
+        3. Otherwise → :meth:`get_default_pdf_processors`.
+
+        When overriding, include
+        ``django_pymissive.pdf_processors.weasyprint_renderer`` (or your
+        own renderer) as the first entry — postprocessors that come next
+        receive its output.
+        """
+        if self.first_document_processors:
+            return list(self.first_document_processors)
+        if (
+            self.campaign_id
+            and self.campaign is not None
+            and self.campaign.first_document_processors
+        ):
+            return list(self.campaign.first_document_processors)
+        return self.get_default_pdf_processors()
+
+    def get_default_attachment_processors(self):
+        """Return default attachment processors.
+
+        Honors ``settings.PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS`` (empty
+        list by default — attachments pass through unchanged unless the
+        user opts in).
+        """
+        from ..attachment_processors import get_default_attachment_processors
+
+        return get_default_attachment_processors()
+
+    def get_attachment_processors(self):
+        """Resolve which attachment processors apply ("most specific wins").
+
+        1. ``self.attachment_processors`` if non-empty → those only.
+        2. ``self.campaign.attachment_processors`` if non-empty → those only.
+        3. Otherwise → :meth:`get_default_attachment_processors`.
+        """
+        if self.attachment_processors:
+            return list(self.attachment_processors)
+        if (
+            self.campaign_id
+            and self.campaign is not None
+            and self.campaign.attachment_processors
+        ):
+            return list(self.campaign.attachment_processors)
+        return self.get_default_attachment_processors()
+
+    def apply_body_processors(self, content: str, *, field_name: str | None = None) -> str:
+        """Apply external body processors (defaults + campaign + missive) to ``content``."""
+        from ..body_processors import apply_body_processors
+
+        return apply_body_processors(
+            content,
+            self.get_body_processors(),
+            missive=self,
+            campaign=self.campaign if self.campaign_id else None,
+            field_name=field_name,
+            context=self.missive_context(),
+        )
+
+    def _compiled_template_value(self, raw, *, field_name: str | None = None) -> str:
+        """Run the body processor pipeline on ``raw`` and return the result.
+
+        The default pipeline starts with the Django template processor (which
+        renders ``raw`` against ``missive_context()``), then applies campaign
+        and missive processors. Empty or invalid input → empty string
+        (preview-safe).
+        """
         if raw is None:
             return ""
         text = str(raw)
         if not text.strip():
             return ""
         try:
-            return Template(text).render(Context(self.missive_context()))
+            return self.apply_body_processors(text, field_name=field_name)
         except Exception:
             return ""
 
     @property
     def subject_compiled(self):
         """Compile the subject of the missive."""
-        return self._compiled_template_value(self.get_locally_or_campaign_value("subject"))
+        return self._compiled_template_value(
+            self.get_locally_or_campaign_value("subject"),
+            field_name="subject",
+        )
 
     @property
     def body_html_compiled(self):
         """Compile the HTML body of the missive."""
-        return self._compiled_template_value(self.get_locally_or_campaign_value("body_html"))
+        return self._compiled_template_value(
+            self.get_locally_or_campaign_value("body_html"),
+            field_name="body_html",
+        )
 
     @property
     def body_text_compiled(self):
         """Compile the body text of the missive."""
-        return self._compiled_template_value(self.get_locally_or_campaign_value("body_text"))
+        return self._compiled_template_value(
+            self.get_locally_or_campaign_value("body_text"),
+            field_name="body_text",
+        )
 
     @property
     def body_sms_compiled(self):
         """Compile the body SMS of the missive."""
-        return self._compiled_template_value(self.get_locally_or_campaign_value("body_text") or "")
+        return self._compiled_template_value(
+            self.get_locally_or_campaign_value("body_text") or "",
+            field_name="body_sms",
+        )
 
     @property
     def first_document_compiled(self):
         """Compile first_document (campaign) or fallback to body_html when no campaign."""
-        return self._compiled_template_value(self.get_locally_or_campaign_value("body_html") or "")
+        return self._compiled_template_value(
+            self.get_locally_or_campaign_value("body_html") or "",
+            field_name="first_document",
+        )
 
     #########################################################
     # Attachments
@@ -812,12 +1037,22 @@ class Missive(CommentTimestampedModel):
         return new_missive
 
     def duplicate_attachments(self, new_missive, source_missive):
-        """Copy attachments from source_missive to new_missive (excl. first-page)."""
-        first_doc_prefix = f"first-document-{source_missive.thread_id}"
-        attachments = source_missive.attachments.filter(
-            attachment_type=MissiveAttachmentType.ATTACHMENT,
-            missive=source_missive
-        ).exclude(priority=0)
+        """Copy attachments (regular + virtual) from source to new missive.
+
+        Excludes the first_document (priority 0) — it will be regenerated
+        from the new missive's data the next time
+        :meth:`ensure_first_document` runs (typically during preview or
+        send). Virtual attachments are copied by reference: the new row
+        points at the same ``attachment_object`` as the source, so the
+        duplicate sees the same external content (signature image, billing
+        PDF, fakeapp fixture...) without copying any file bytes.
+        """
+        from ..models.attachment import FIRST_DOCUMENT_PRIORITY
+
+        attachments = (
+            source_missive.attachments.filter(missive=source_missive)
+            .exclude(priority=FIRST_DOCUMENT_PRIORITY)
+        )
         for index, attachment in enumerate(attachments):
             attachment.pk = None
             attachment.id = None
@@ -890,8 +1125,18 @@ class Missive(CommentTimestampedModel):
             att.save(update_fields=["external_id"])
 
     def prepare_missive(self):
-        """Prepare the missive for sending (calls provider create)."""
-        response = self.call_provider_service("create", **self.get_serialized_data())
+        """Prepare the missive for sending (calls provider create).
+
+        In dry-run mode (``PYMISSIVE_DRY_RUN``) the local pipeline still
+        runs (body processors, attachments, etc.) but the provider call
+        is skipped and a synthetic ``external_id`` is set.
+        """
+        serialized = self.get_serialized_data()
+        if is_dry_run():
+            self.external_id = f"dry-run:prepare:{self.thread_id}"
+            self.save(update_fields=["external_id"])
+            return
+        response = self.call_provider_service("create", **serialized)
         response["client_initiated"] = True
         self.external_id = response.get("external_id")
         self.save(update_fields=["external_id"])
@@ -908,6 +1153,14 @@ class Missive(CommentTimestampedModel):
 
         :param old_missive: When sending a duplicate after a resend, pass the previous missive
             row (typically HISTORY). None for a normal first send.
+
+        When ``settings.PYMISSIVE_DRY_RUN`` is True the full local pipeline
+        runs (body processors, attachments, ``first_document`` PDF, signal
+        ``missive_pre_send``) but the provider call is skipped: ``external_id``
+        is set to ``dry-run:<thread_id>``, a ``REQUEST`` event with
+        ``trace={"dry_run": True, ...}`` is recorded, and ``missive_post_send``
+        is dispatched. Useful for Django tests asserting that campaigns and
+        missives are generated correctly without hitting the provider.
         """
         if not self.can_send():
             raise ValidationError(_("Missive cannot be sent"))
@@ -915,6 +1168,9 @@ class Missive(CommentTimestampedModel):
         self.set_locally_ifnull()
         self.status = MissiveStatus.PROCESSING
         occurred_at = timezone.now()
+        if is_dry_run():
+            self._dry_run_send(occurred_at=occurred_at, old_missive=old_missive)
+            return
         response = self.call_provider_service("send", **self.get_serialized_data())
         response["client_initiated"] = True
         if response.get("recipients"):
@@ -942,6 +1198,44 @@ class Missive(CommentTimestampedModel):
                 client_initiated=True,
                 occurred_at=occurred_at,
             )
+        self.refresh_from_db()
+        missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
+
+    def _dry_run_send(self, *, occurred_at, old_missive=None):
+        """Run the local send pipeline without calling the provider.
+
+        Triggered when ``settings.PYMISSIVE_DRY_RUN`` is True. Generates a
+        synthetic ``external_id``, records a ``REQUEST`` event flagged as a
+        dry-run, and dispatches ``missive_post_send`` like a real send would.
+        """
+        try:
+            self.get_serialized_data()
+        except Exception as exc:  # surface generation errors in trace
+            self.to_missiveevent.create(
+                event=MissiveEventType.ERROR,
+                trace={"dry_run": True, "error": str(exc)},
+                client_initiated=True,
+                occurred_at=occurred_at,
+            )
+            self.save(update_fields=["status"])
+            self.refresh_from_db()
+            missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
+            raise
+        self.external_id = f"dry-run:{self.thread_id}"
+        self.save(update_fields=["external_id", "status"])
+        self.to_missiveevent.create(
+            event=MissiveEventType.REQUEST,
+            trace={
+                "dry_run": True,
+                "missive_id": str(self.pk),
+                "thread_id": str(self.thread_id),
+                "missive_type": self.missive_type,
+                "subject": self.subject_compiled,
+                "recipients": [str(r) for r in self.recipients],
+            },
+            client_initiated=True,
+            occurred_at=occurred_at,
+        )
         self.refresh_from_db()
         missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
 
@@ -1038,6 +1332,17 @@ class Missive(CommentTimestampedModel):
 
     @property
     def first_recipient(self):
+        """Return the first RECIPIENT (excludes CC/BCC).
+
+        Uses the ``_first_recipients_cache`` populated by
+        :meth:`BaseMissiveManager.first_recipients_prefetch` when iterating a
+        prefetched queryset (e.g. admin changelist) to avoid an N+1 query.
+        """
+        from ..managers.missive import FIRST_RECIPIENTS_CACHE_ATTR
+
+        cached = getattr(self, FIRST_RECIPIENTS_CACHE_ATTR, None)
+        if cached is not None:
+            return cached[0] if cached else None
         try:
             return self.recipients.first()
         except ObjectDoesNotExist:

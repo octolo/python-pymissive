@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django-pymissive"
-version = "1.0.10"
+version = "1.0.11"
 description = "Django library for multi-channel missive management (email, SMS, push, postal, etc.)"
 readme = "README.md"
 authors = [
@@ -38,7 +38,7 @@ dependencies = [
     "django-providerkit>=1.1.1",
     "django-phonenumber-field[phonenumbers]>=7.0",
     "babel>=2.0",
-    "pymissive>=1.0.10",
+    "pymissive>=1.0.11",
     "boto3>=1.28",
     "requests>=2.31",
     "requests>=2.31",  # La Poste, LRE (AR24)
@@ -49,6 +49,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "django-debug-toolbar>=6.3.0",
+    "pytest>=8.0",
+    "pytest-django>=4.8",
 ]
 messaging = [
     "python-telegram-bot>=20.7",
@@ -59,6 +61,8 @@ brevo = [
 ]
 pdf = [
     "weasyprint>=60.0",
+    "pypdf>=4.0",
+    "reportlab>=4.0",
 ]
 
 [project.urls]

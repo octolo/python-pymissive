@@ -1,16 +1,39 @@
 from django.db import models
 from django.db.models.expressions import Subquery, OuterRef
-from django.db.models import F, Max, Q, Sum
+from django.db.models import F, Max, Q, Sum, Prefetch
 from django.db.models.functions import Coalesce
 
 from ..models.choices import (
     MissiveThreadType,
     MissiveStatus,
+    MissiveRecipientType,
 )
+
+
+# Attribute name used by Missive.first_recipient to read prefetched data.
+FIRST_RECIPIENTS_CACHE_ATTR = "_first_recipients_cache"
 
 
 class BaseMissiveManager(models.Manager):
     """Manager for the Missive model."""
+
+    def first_recipients_prefetch(self) -> Prefetch:
+        """Prefetch main recipients (RECIPIENT type only) into ``_first_recipients_cache``.
+
+        Used by :pyattr:`Missive.first_recipient` to avoid N+1 in admin
+        changelists or anywhere a queryset of missives is iterated.
+        """
+        from ..models.recipient import MissiveRecipient
+
+        return Prefetch(
+            "to_missiverecipient",
+            queryset=(
+                MissiveRecipient.objects
+                .filter(recipient_type=MissiveRecipientType.RECIPIENT)
+                .order_by("name", "id")
+            ),
+            to_attr=FIRST_RECIPIENTS_CACHE_ATTR,
+        )
 
     def last_event_subquery(self, field: str = "event"):
         from ..models.event import MissiveEvent
@@ -68,19 +91,24 @@ class BaseMissiveManager(models.Manager):
         )
 
     def get_queryset_annotated(self):
+        """Default queryset: lean — annotations + campaign join + main recipient prefetch.
+
+        Heavy reverse-FK prefetches (attachments, events, billings, related
+        objects) are NOT loaded by default since the consuming code paths
+        all call ``.filter(...)`` which re-queries anyway. Use
+        :meth:`with_related` when you genuinely need them prefetched.
+        """
         qs = super().get_queryset()
         qs = qs.select_related("campaign")
-        qs = qs.prefetch_related(
-            "to_missiverecipient",
-            "to_missiveattachment",
-            "to_missiveevent",
-            "to_missivebilling",
-            "to_missiverelatedobject",
-        )
+        qs = qs.prefetch_related(self.first_recipients_prefetch())
         qs = qs.annotate(
             last_campaign_send_date=self.last_scheduled_subquery("send_date"),
             last_campaign_ended_at=self.last_scheduled_subquery("ended_at"),
-            count_recipient=models.Count("to_missiverecipient", distinct=True),
+            count_recipient=models.Count(
+                "to_missiverecipient",
+                distinct=True,
+                filter=Q(to_missiverecipient__recipient_type=MissiveRecipientType.RECIPIENT),
+            ),
             count_event=models.Count("to_missiveevent", distinct=True),
             last_event=self.last_event_subquery(field="event"),
             last_event_reason=self.last_event_subquery(field="reason"),
@@ -104,6 +132,27 @@ class BaseMissiveManager(models.Manager):
             is_billed=self.is_billed_expr(),
         )
         return qs
+
+    def with_related(self):
+        """Chainable: prefetch all reverse FKs (recipients, attachments, events, billings, related).
+
+        Opt-in for code paths that iterate missives and access their full
+        related sets (e.g. ``sync_events``/``sync_billings`` management
+        commands, batch sending). The default manager queryset stays lean
+        to keep admin changelists fast.
+
+        Note: :pyattr:`Missive.recipients` / ``cc`` / ``bcc`` properties call
+        ``.filter(...)`` and therefore re-query even when prefetched; iterate
+        ``self.to_missiverecipient.all()`` and filter in Python to benefit
+        from this cache.
+        """
+        return self.get_queryset().prefetch_related(
+            "to_missiverecipient",
+            "to_missiveattachment",
+            "to_missiveevent",
+            "to_missivebilling",
+            "to_missiverelatedobject",
+        )
 
 
 class MissiveManager(BaseMissiveManager):

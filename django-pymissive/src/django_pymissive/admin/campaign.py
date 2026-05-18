@@ -165,7 +165,14 @@ class MissiveCampaignAdmin(AdminBoostModel):
         )
         self.add_to_fieldset(
             _("Configs"),
-            ["metadata", "additional_context", "additional_config"],
+            [
+                "metadata",
+                "additional_context",
+                "additional_config",
+                "body_processors",
+                "first_document_processors",
+                "attachment_processors",
+            ],
             classes=("wide", "collapse"),
         )
 

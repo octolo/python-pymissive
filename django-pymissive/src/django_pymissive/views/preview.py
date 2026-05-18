@@ -451,6 +451,11 @@ class PreviewView(DetailView):
         if extra:
             context.update(extra)
         context["provider_address_css_lre"] = missive.get_provider_address_css_lre()
+        # For postal-like missives the preview shows the same PDF as the one
+        # sent to the provider — regenerate it so processors / body changes
+        # are reflected. No-op for unsaved missives (campaign preview).
+        if missive_is_postal_like(missive):
+            missive.ensure_first_document()
         return context
 
 

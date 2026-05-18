@@ -260,7 +260,7 @@ class MissiveAdmin(AdminBoostModel):
         if not obj.provider:
             return "-"
         return self.format_with_help_text(
-            f"{obj.provider} ({obj.get_missive_type_display()})",
+            f"{obj.get_missive_type_display()}",
             obj.provider._provider.display_name,
         )
 
@@ -430,7 +430,14 @@ class MissiveAdmin(AdminBoostModel):
         self.add_to_fieldset(_("Comment/Timestamps"), ["comment", "created_at", "updated_at"], classes=("wide", "collapse"))
         self.add_to_fieldset(
             _("Configs"),
-            ["additional_context", "metadata", "additional_config"],
+            [
+                "additional_context",
+                "metadata",
+                "additional_config",
+                "body_processors",
+                "first_document_processors",
+                "attachment_processors",
+            ],
             classes=("wide", "collapse"),
         )
         self.add_to_fieldset(

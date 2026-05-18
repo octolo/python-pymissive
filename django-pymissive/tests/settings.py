@@ -91,6 +91,7 @@ INSTALLED_APPS += [
     "django_geoaddress",
     "phonenumber_field",
     "django_pymissive",
+    "tests.fakeapp.apps.FakeappConfig",
 ]
 
 # Address autocomplete view configuration
@@ -102,7 +103,7 @@ GEOADDRESS_ADDRESSVIEW_AUTH = True
 NGROK_PUBLIC_URL = os.getenv("NGROK_PUBLIC_URL")
 if NGROK_PUBLIC_URL:
     from urllib.parse import urlparse
-    url_data = urlparse(NGROK_PUBLIC_URL)   
+    url_data = urlparse(NGROK_PUBLIC_URL)
     MISSIVE_DOMAIN = url_data.netloc
     MISSIVE_SCHEME = url_data.scheme
 
@@ -144,6 +145,52 @@ MISSIVE_QUALIFIED_ACKNOWLEDGEMENT = False
 
 # PYMISSIVE_SAVE_UNTREATED_EVENTS = True  # Save events that could not be processed (default: False)
 PYMISSIVE_ATTACHMENT_PATH_MAX_LENGTH = 4000
+#PYMISSIVE_DRY_RUN = True
+#PYMISSIVE_DISABLE_SEND = True
+PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
+    "django_pymissive.body_processors.django_template_processor",
+    "tests.processors.add_signature",
+]
+
+# Default chain for the postal first_document PDF. The first entry renders
+# the compiled HTML to PDF (WeasyPrint); subsequent entries receive the
+# previous PDF bytes and may transform them. Here we stamp every page with
+# a "DRAFT" filigrane to make it obvious the missive was generated against
+# this test project.
+PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS = [
+    "django_pymissive.pdf_processors.weasyprint_renderer",
+    [
+        "django_pymissive.pdf_processors.watermark_processor",
+        {"text": "DRAFT", "alpha": 0.18},
+    ],
+]
+
+# Default chain applied to every attachment's bytes right before they are
+# handed to the provider. Stamps a "DRAFT" filigrane on PDF attachments and
+# leaves all other types untouched (DOCX, JPG, etc. pass through).
+PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS = [
+    [
+        "django_pymissive.attachment_processors.watermark_pdf_attachments",
+        {"text": "DRAFT", "alpha": 0.18},
+    ],
+]
+
+# Allowed file extensions per missive type. Set to None / unset to disable
+# validation entirely. Use the special "default" key as fallback for missive
+# types not listed explicitly. Empty list = attachments forbidden for that type.
+PYMISSIVE_ALLOWED_ATTACHMENT_EXTENSIONS = {
+    "default": [".pdf"],
+    "email": [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png", ".tar"],
+    "email_marketing": [".pdf", ".jpg", ".jpeg", ".png"],
+    "ere": [".pdf"],
+    "lre": [".pdf"],
+    "lre_qualified": [".pdf"],
+    "postal": [".pdf"],
+    "postal_registered": [".pdf"],
+    "postal_signature": [".pdf"],
+    "sms": [],
+    "rcs": [],
+}
 PROVIDERKIT_PROVIDERS_CONFIG = {
     "brevo": {
         "EMAIL_API_KEY": os.getenv("BREVO_EMAIL_API_KEY"),

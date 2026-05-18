@@ -57,21 +57,31 @@
         {% endif %}
     </div>
 
-    {% include "django_pymissive/includes/postal_a4_letter_page.html" %}
-
-    {% for doc in missive.attachments_physical %}
-    {% if not doc.is_first_document %}
-    <div class="pdf-attachment" data-pdf-url="{{ doc.attachment_download_url }}">
-        <div class="pdf-attachment-label">
-            <span aria-hidden="true">&#128196;</span>
-            <span class="pdf-attachment-name">{{ doc.attachment_url.name|default:"unnamed" }}</span>
-        </div>
-        <div class="pdf-pages">
-            <div class="pdf-loading">{% trans "Loading…" %}</div>
-        </div>
-    </div>
+    {% if missive.pk %}
+        {% comment %}
+        Saved missive: render every PDF physical attachment in priority order
+        (first_document at priority 0 comes first, then the user's attachments).
+        Non-PDF attachments are intentionally skipped — no preview, no link.
+        {% endcomment %}
+        {% for doc in missive.attachments_physical %}
+            {% if doc.is_pdf %}
+                <div class="pdf-attachment" data-pdf-url="{{ doc.attachment_download_url }}?v={{ doc.updated_at|date:'U' }}">
+                    <div class="pdf-attachment-label">
+                        <span aria-hidden="true">&#128196;</span>
+                        <span class="pdf-attachment-name">
+                            {% if doc.is_first_document %}{% trans "Letter (first page)" %}{% else %}{{ doc.filename|default:"unnamed" }}{% endif %}
+                        </span>
+                    </div>
+                    <div class="pdf-pages">
+                        <div class="pdf-loading">{% trans "Loading…" %}</div>
+                    </div>
+                </div>
+            {% endif %}
+        {% endfor %}
+    {% else %}
+        {# Unsaved missive (campaign preview): fall back to inline HTML letter page. #}
+        {% include "django_pymissive/includes/postal_a4_letter_page.html" %}
     {% endif %}
-    {% endfor %}
 
 </div>
 {% endblock %}
@@ -114,19 +124,30 @@
             var pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
             pagesEl.innerHTML = '';
 
+            // High-DPI rendering: canvas backing store is rendered at devicePixelRatio
+            // resolution; CSS keeps it displayed at its visual size. Without this on
+            // Retina/4K screens the canvas would be visibly blurry compared to the
+            // downloaded PDF (which renders at native screen resolution).
+            var dpr = Math.max(window.devicePixelRatio || 1, 1);
+
             for (var n = 1; n <= pdf.numPages; n++) {
                 var page = await pdf.getPage(n);
                 var unscaled = page.getViewport({ scale: 1 });
-                var scale = (pagesEl.clientWidth || 794) / unscaled.width;
-                var vp = page.getViewport({ scale: scale });
+                var cssScale = (pagesEl.clientWidth || 794) / unscaled.width;
+                var renderVp = page.getViewport({ scale: cssScale * dpr });
 
                 var canvas = document.createElement('canvas');
                 canvas.className = 'pdf-page';
-                canvas.width = vp.width;
-                canvas.height = vp.height;
+                canvas.width = renderVp.width;
+                canvas.height = renderVp.height;
+                canvas.style.width = (renderVp.width / dpr) + 'px';
+                canvas.style.height = (renderVp.height / dpr) + 'px';
                 pagesEl.appendChild(canvas);
 
-                await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+                await page.render({
+                    canvasContext: canvas.getContext('2d'),
+                    viewport: renderVp,
+                }).promise;
             }
         } catch (err) {
             pagesEl.innerHTML =

@@ -1,9 +1,12 @@
 """Utility functions for django_pymissive."""
 
+import os
 from urllib.parse import urlparse
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.urls import reverse
+from django.utils.translation import gettext_lazy as _
 
 from .models.recipient import MissiveRecipient
 
@@ -102,3 +105,122 @@ def get_recipient(missive, recipient_data):
         return MissiveRecipient.objects.get(missive=missive, **recipient_data)
     except MissiveRecipient.DoesNotExist:
         return None
+
+
+def _normalize_extension(ext: str) -> str:
+    """Lowercase ``ext`` and ensure it starts with a dot. Empty string for falsy input."""
+    if not ext:
+        return ""
+    e = str(ext).strip().lower()
+    if not e:
+        return ""
+    return e if e.startswith(".") else f".{e}"
+
+
+def _normalize_extensions(exts) -> list[str]:
+    """Lowercase + leading-dot normalisation for a list of extensions."""
+    if exts is None:
+        return []
+    return [_normalize_extension(e) for e in exts if _normalize_extension(e)]
+
+
+def get_allowed_attachment_extensions(missive_type: str | None) -> list[str] | None:
+    """Allowed attachment file extensions for ``missive_type``.
+
+    Reads ``settings.PYMISSIVE_ALLOWED_ATTACHMENT_EXTENSIONS`` which can be:
+
+    - **None / unset** → no restriction (any extension allowed).
+    - **list/tuple** → applies the same list to every missive type.
+    - **dict** → per-type override; supported keys are concrete missive types
+      (``"email"``, ``"lre"``, ``"sms"`` …) and the special ``"default"``
+      entry used as a fallback when the missive type is not explicitly
+      listed. A dict without a matching key and without ``"default"``
+      means no restriction for that type.
+
+    Each extension may be given with or without leading dot, in any case
+    (``"pdf"``, ``".PDF"``, ``".pdf"`` are equivalent).
+
+    Returns:
+        - ``list[str]``: normalised allowed extensions (``[".pdf"]`` …).
+        - ``[]``: attachments forbidden for this type.
+        - ``None``: no restriction.
+    """
+    config = getattr(settings, "PYMISSIVE_ALLOWED_ATTACHMENT_EXTENSIONS", None)
+    if config is None:
+        return None
+    if isinstance(config, (list, tuple, set, frozenset)):
+        return _normalize_extensions(config)
+    if isinstance(config, dict):
+        mt = (missive_type or "").lower()
+        if mt in config:
+            return _normalize_extensions(config[mt])
+        if "default" in config:
+            return _normalize_extensions(config["default"])
+        return None
+    return None
+
+
+def is_attachment_allowed(filename: str, missive_type: str | None) -> bool:
+    """Return True if the given filename's extension is allowed for ``missive_type``."""
+    allowed = get_allowed_attachment_extensions(missive_type)
+    if allowed is None:
+        return True
+    if not allowed:
+        return False
+    if not filename:
+        return False
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in allowed
+
+
+def validate_attachment_for_missive_type(filename: str, missive_type: str | None) -> None:
+    """Raise :class:`~django.core.exceptions.ValidationError` if the file is not allowed.
+
+    No-op when no restriction is configured. Suitable for use inside
+    ``Model.clean`` or wherever attachment validation is needed.
+    """
+    allowed = get_allowed_attachment_extensions(missive_type)
+    if allowed is None:
+        return
+    if not allowed:
+        raise ValidationError(
+            _("Attachments are not allowed for missive type '%(type)s'.")
+            % {"type": missive_type or "?"}
+        )
+    if not filename:
+        raise ValidationError(
+            _("Attachment filename is required to validate against allowed extensions.")
+        )
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in allowed:
+        raise ValidationError(
+            _(
+                "File extension '%(ext)s' is not allowed for missive type "
+                "'%(type)s'. Allowed extensions: %(allowed)s."
+            )
+            % {
+                "ext": ext or "(none)",
+                "type": missive_type or "?",
+                "allowed": ", ".join(allowed),
+            }
+        )
+
+
+def is_dry_run() -> bool:
+    """Return True when provider calls must be skipped (test/staging dry-run mode).
+
+    Controlled by ``settings.PYMISSIVE_DRY_RUN`` (preferred), or the alias
+    ``settings.PYMISSIVE_DISABLE_SEND``. Defaults to False (real sends).
+
+    When enabled, ``Missive.send_missive`` and ``Missive.prepare_missive``:
+
+    - run the full local pipeline (campaign inheritance, body processors,
+      first_document PDF generation, ``get_serialized_data``);
+    - skip the provider call entirely;
+    - persist a synthetic ``external_id`` prefixed with ``dry-run:``;
+    - record a ``REQUEST`` event with ``trace={"dry_run": True, ...}`` so
+      tests can assert the missive went through the pipeline.
+    """
+    if getattr(settings, "PYMISSIVE_DRY_RUN", False):
+        return True
+    return bool(getattr(settings, "PYMISSIVE_DISABLE_SEND", False))

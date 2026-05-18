@@ -222,6 +222,75 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         name = getattr(self.attachment_file, "name", None) or ""
         return "first-document-" in name
 
+    def _resolved_name(self) -> str:
+        """Best-effort full path/name of the underlying file.
+
+        For regular attachments this is the ``FieldFile`` name. For
+        virtual attachments we have to peek at the helper's return value
+        (typically an open binary handle) and immediately close it so we
+        don't leak file descriptors. Returns ``""`` on any error so
+        callers can degrade gracefully (no template crash on misconfigured
+        virtual attachments).
+
+        Cached on the instance so the preview loop can call ``filename``
+        / ``is_pdf`` / ``mime_type`` without re-opening the file each time.
+        """
+        cached = self.__dict__.get("_resolved_name_cache")
+        if cached is not None:
+            return cached
+        name = ""
+        if self.attachment_type == MissiveAttachmentType.VIRTUAL_ATTACHMENT:
+            if self.can_access_document():
+                try:
+                    handle = self.get_virtual_attachment()
+                except Exception:
+                    handle = None
+                if handle is not None:
+                    try:
+                        name = getattr(handle, "name", "") or ""
+                    finally:
+                        try:
+                            handle.close()
+                        except Exception:
+                            pass
+        else:
+            name = getattr(self.attachment_file, "name", None) or ""
+        self.__dict__["_resolved_name_cache"] = name
+        return name
+
+    @property
+    def filename(self) -> str:
+        """Basename of the underlying file (or empty string).
+
+        Resolves through :meth:`_resolved_name` so virtual attachments
+        report the file name from the linked object instead of the empty
+        ``attachment_file``.
+        """
+        return os.path.basename(self._resolved_name())
+
+    @property
+    def mime_type(self) -> str:
+        """Best-effort mime type guessed from the filename, ``""`` if unknown."""
+        import mimetypes
+
+        name = self._resolved_name()
+        if not name:
+            return ""
+        ctype, _ = mimetypes.guess_type(name)
+        return (ctype or "").lower()
+
+    @property
+    def is_pdf(self) -> bool:
+        """True if this attachment is a PDF (by extension or mimetype).
+
+        Works for virtual attachments too: peeks the underlying file's
+        name via :meth:`_resolved_name`.
+        """
+        name = self._resolved_name()
+        if name.lower().endswith(".pdf"):
+            return True
+        return self.mime_type == "application/pdf"
+
     @property
     def can_be_modified(self):
         if hasattr(self, "missive"):
@@ -264,7 +333,14 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         return reverse("django_pymissive:missive_attachment_download", args=[scope, self.id])
 
     def get_serialized_attachment(self, linked=False, ignore_content=False):
-        """Returns a serialized dict for this attachment."""
+        """Returns a serialized dict for this attachment.
+
+        When ``linked`` is False and ``ignore_content`` is False the file
+        bytes are read AND piped through the attachment processors chain
+        configured on the parent missive/campaign (see
+        :mod:`django_pymissive.attachment_processors`). PDF-only processors
+        (e.g. watermarking) skip non-PDF attachments transparently.
+        """
         attachment = self.get_attachment()
         name = getattr(attachment, "name", None) or "unnamed_attachment"
         scope = "campaign" if self.campaign_id else "missive"
@@ -281,8 +357,48 @@ class MissiveBaseAttachment(CommentTimestampedModel):
             return data
         if hasattr(attachment, "seek"):
             attachment.seek(0)
-        data["content"] = attachment.read()
+        content_bytes = attachment.read()
+        data["content"] = self._apply_attachment_processors(content_bytes)
         return data
+
+    def _apply_attachment_processors(self, content_bytes: bytes) -> bytes:
+        """Run the attachment processors chain configured on missive/campaign.
+
+        Resolves the chain via "most specific wins" (missive →
+        missive.campaign → defaults, falling back to the campaign chain
+        when this attachment is owned by a campaign rather than a missive)
+        and returns the (possibly transformed) bytes. Empty chain ⇒
+        passthrough.
+
+        The first_document attachment is **skipped**: it has its own
+        dedicated chain (``first_document_processors``) and we don't want
+        a watermark configured in both chains to be applied twice.
+        """
+        if not content_bytes:
+            return content_bytes
+        if self.is_first_document:
+            return content_bytes
+        from ..attachment_processors import (
+            apply_attachment_processors,
+            resolve_attachment_processors_for,
+        )
+
+        processors = resolve_attachment_processors_for(self)
+        if not processors:
+            return content_bytes
+
+        missive = self.missive if self.missive_id else None
+        campaign = self.campaign if self.campaign_id else None
+        if missive is not None and campaign is None and getattr(missive, "campaign_id", None):
+            campaign = missive.campaign
+
+        return apply_attachment_processors(
+            missive,
+            self,
+            content_bytes,
+            processors,
+            campaign=campaign,
+        )
 
     def calculate_priority(self):
         """Return next priority. First-document uses 0; others use 1, 2, 3... (0 is reserved)."""
@@ -313,6 +429,37 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         if self.attachment_type == MissiveAttachmentType.VIRTUAL_ATTACHMENT:
             return (self.attachment_object and self.attachment_object_arguments)
         return self.attachment_file and self.attachment_file.url
+
+    def clean(self):
+        """Validate attachment file extension against the missive_type policy.
+
+        Skips validation in three cases:
+        - virtual attachments (no file at this point — the file is fetched
+          on demand from the related object);
+        - first_document attachments (always PDF, generated by the library);
+        - campaign-level attachments (no single missive_type; validated
+          per-missive at send time by callers when needed).
+
+        Honors ``settings.PYMISSIVE_ALLOWED_ATTACHMENT_EXTENSIONS`` — see
+        :func:`django_pymissive.utils.get_allowed_attachment_extensions`.
+        """
+        super().clean()
+        if self.attachment_type == MissiveAttachmentType.VIRTUAL_ATTACHMENT:
+            return
+        if self.is_first_document:
+            return
+        if not self.missive_id:
+            return
+        from django.core.exceptions import ValidationError
+
+        from ..utils import validate_attachment_for_missive_type
+
+        filename = getattr(self.attachment_file, "name", "") or ""
+        missive_type = getattr(self.missive, "missive_type", None)
+        try:
+            validate_attachment_for_missive_type(filename, missive_type)
+        except ValidationError as exc:
+            raise ValidationError({"attachment_file": exc.messages}) from exc
 
     def save(self, *args, **kwargs):
         """Auto-set priority for new attachments. First-document=0, others 1+. Recalc in admin save_formset."""
