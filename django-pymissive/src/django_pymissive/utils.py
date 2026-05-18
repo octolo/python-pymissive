@@ -11,6 +11,29 @@ from django.utils.translation import gettext_lazy as _
 from .models.recipient import MissiveRecipient
 
 
+def serialize_model_for_context(obj) -> dict:
+    """Serialize a Django model instance to a plain dict safe for template context.
+
+    Using a live model instance in a template context is a security risk because
+    Django templates call attribute access — including zero-argument methods like
+    ``delete()`` or ``save()``.  This function returns a plain ``dict`` with only
+    serializable field values so no model methods are reachable from templates.
+
+    - All concrete DB columns are included (including non-editable fields such as
+      ``id`` / ``created_at``).
+    - ForeignKey fields are serialised as ``<field_name>_id`` (raw integer/uuid),
+      **not** as a nested model instance, to avoid re-introducing the same risk.
+    - Many-to-many and reverse relations are intentionally excluded.
+    """
+    data = {
+        field.attname: field.value_from_object(obj)
+        for field in obj._meta.concrete_fields
+    }
+    if callable(getattr(obj, "to_context_dict", None)):
+        data.update(obj.to_context_dict())
+    return data
+
+
 def recalculate_attachment_priorities(missive_id=None, campaign_id=None):
     """
     Reassign priorities: first-document stays at 0, others get 1, 2, 3...

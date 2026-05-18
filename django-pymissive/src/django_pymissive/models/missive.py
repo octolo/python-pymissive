@@ -39,7 +39,7 @@ from ..dispatch_signals import (
     missive_pre_duplicate,
     missive_pre_send,
 )
-from ..utils import get_base_url, build_webhook_url, get_default_domain, get_default_scheme, is_dry_run
+from ..utils import get_base_url, build_webhook_url, get_default_domain, get_default_scheme, is_dry_run, serialize_model_for_context
 from django.core import signing
 from django.core.files.base import ContentFile
 
@@ -675,15 +675,43 @@ class Missive(CommentTimestampedModel):
         return f"- {_('Preview in browser')}:{SEPARATOR}{url}\n"
 
     def missive_context(self):
-        """Get the context of the missive."""
-        context = getattr(self.campaign, "additional_context", {})
+        """Get the context of the missive.
+
+        Build order (each layer overrides the previous):
+        1. campaign.additional_context (JSON field)
+        2. missive.additional_context (JSON field)
+        3. campaign related objects: {content_type_name: content_object}, 1 per content type
+        4. missive related objects:  {content_type_name: content_object}, 1 per content type
+           (missive wins over campaign for the same content type)
+        5. preview/attachment helpers
+        """
+        context = dict(getattr(self.campaign, "additional_context", {}) or {})
         context.update(self.additional_context or {})
+
+        # Campaign related objects
+        if self.campaign_id:
+            seen_ct: set = set()
+            for ro in self.campaign.to_campaignrelatedobject.select_related("content_type").all():
+                ct_name = ro.content_type.model
+                if ct_name not in seen_ct and ro.content_object is not None:
+                    context[ct_name] = serialize_model_for_context(ro.content_object)
+                    seen_ct.add(ct_name)
+
+        # Missive related objects — override campaign's for the same content type
+        missive_seen_ct: set = set()
+        for ro in self.to_missiverelatedobject.select_related("content_type").all():
+            ct_name = ro.content_type.model
+            if ct_name not in missive_seen_ct and ro.content_object is not None:
+                context[ct_name] = serialize_model_for_context(ro.content_object)
+                missive_seen_ct.add(ct_name)
+
         context.update({
             "show_preview_browser": self.show_preview_browser,
             "show_preview_browser_text": self.show_preview_browser_text,
             "show_attachments_linked": self.show_attachments_linked,
             "show_attachments_linked_text": self.show_attachments_linked_text,
         })
+        print("context", context)
         return context
 
     def get_provider_address_css_lre(self) -> str:

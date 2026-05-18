@@ -46,6 +46,11 @@ class PdfDocument(models.Model):
     """
 
     name = models.CharField(max_length=200, default="sample.pdf")
+    published_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Optional publication date (used to test datetime serialization in context).",
+    )
     fixture_path = models.CharField(
         max_length=500,
         blank=True,
@@ -78,3 +83,9 @@ class PdfDocument(models.Model):
         if not target.exists():
             raise FileNotFoundError(f"PDF fixture not found at {target}")
         return target.open("rb")
+
+    def to_context_dict(self) -> dict:
+        return {
+            "display_name": self.name.upper(),
+            "is_published": self.published_at is not None,
+        }

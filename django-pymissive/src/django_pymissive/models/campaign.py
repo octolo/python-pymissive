@@ -12,7 +12,7 @@ from ..models.choices import MissiveStatus, MissivePriority, AcknowledgementLeve
 from django_geoaddress.fields import GeoaddressField
 from phonenumber_field.modelfields import PhoneNumberField
 from ..fields import RichTextField, JSONField
-from ..utils import get_base_url
+from ..utils import get_base_url, serialize_model_for_context
 
 
 class MissiveCampaign(CommentTimestampedModel):
@@ -231,8 +231,19 @@ class MissiveCampaign(CommentTimestampedModel):
         return self.subject
 
     def campaign_context(self):
-        """Context for template rendering."""
-        return {}
+        """Context for template rendering.
+
+        Includes related objects as ``{content_type_name: content_object}``,
+        one per content type (most recent wins).
+        """
+        context = {}
+        seen_ct: set = set()
+        for ro in self.to_campaignrelatedobject.select_related("content_type").all():
+            ct_name = ro.content_type.model
+            if ct_name not in seen_ct and ro.content_object is not None:
+                context[ct_name] = serialize_model_for_context(ro.content_object)
+                seen_ct.add(ct_name)
+        return context
 
     @property
     def base_url(self):
