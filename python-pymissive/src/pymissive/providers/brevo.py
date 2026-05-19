@@ -253,6 +253,10 @@ class BrevoAPIProvider(MissiveProviderBase):
                     for r in recipients
                 ],
             }
+            if sender:
+                send_kwargs['sender'] = SendTransacEmailRequestSender(
+                    email=sender['email'], name=sender.get('name', '')
+                )
             if kwargs.get('params'):
                 send_kwargs['params'] = kwargs['params']
         else:
