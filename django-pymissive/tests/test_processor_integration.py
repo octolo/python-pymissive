@@ -12,7 +12,7 @@ import pytest
 
 from django_pymissive.models.campaign import MissiveCampaign
 from django_pymissive.models.missive import Missive
-from django_pymissive.pdf_processors import MissivePdfProcessor
+from django_pymissive.processors.pdf import MissivePdfProcessor
 
 pytestmark = pytest.mark.django_db
 
@@ -230,7 +230,7 @@ def test_body_html_compiled_runs_default_chain(settings):
     """``body_html_compiled`` runs the template processor first (renders
     ``{{ var }}``) and any subsequent processors in order."""
     settings.PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
-        "django_pymissive.body_processors.django_template_processor",
+        "django_pymissive.processors.body.django_template.django_template_processor",
         "tests.test_processor_integration._tag_appender",
     ]
     missive = _make_missive(
@@ -245,13 +245,13 @@ def test_body_html_compiled_runs_default_chain(settings):
 def test_body_html_compiled_uses_missive_processors_when_set(settings):
     """Missive-level chain wins over campaign and defaults."""
     settings.PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
-        "django_pymissive.body_processors.django_template_processor",
+        "django_pymissive.processors.body.django_template.django_template_processor",
     ]
     missive = _make_missive(
         body_html="<p>Hello {{ name }}</p>",
         additional_context={"name": "Bob"},
         body_processors=[
-            "django_pymissive.body_processors.django_template_processor",
+            "django_pymissive.processors.body.django_template.django_template_processor",
             ["tests.test_processor_integration._tag_appender", {"tag": "MIS_ONLY"}],
         ],
     )
@@ -262,7 +262,7 @@ def test_body_html_compiled_uses_missive_processors_when_set(settings):
 
 def test_subject_compiled_runs_chain(settings):
     settings.PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
-        "django_pymissive.body_processors.django_template_processor",
+        "django_pymissive.processors.body.django_template.django_template_processor",
     ]
     missive = _make_missive(
         subject="Hi {{ user }}!",

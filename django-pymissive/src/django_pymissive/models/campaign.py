@@ -3,28 +3,35 @@
 import uuid
 
 from django.db import models, transaction
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from ..managers.campaign import MissiveCampaignManager
-from ..models.base import CommentTimestampedModel
+from ..models.mixins import CommentTimestampedModel, ConfigMixin, ProcessorsMixin
 from ..models.choices import MissiveStatus, MissivePriority, AcknowledgementLevel, MissiveDeliveryMode
 from django_geoaddress.fields import GeoaddressField
 from phonenumber_field.modelfields import PhoneNumberField
 from ..fields import RichTextField, JSONField
-from ..utils import get_base_url, serialize_model_for_context
 
 
-class MissiveCampaign(CommentTimestampedModel):
-    """Campaign grouping missives for batch sending."""
+class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
+    """Campaign grouping missives for batch sending.
+
+    Inherits :class:`~django_pymissive.models.mixins.ConfigMixin` (JSON
+    ``additional_context`` / ``additional_config`` / ``metadata`` bags) and
+    :class:`~django_pymissive.models.mixins.ProcessorsMixin` (body /
+    first_document / attachment processor chains + their resolvers). The
+    campaign acts as the "parent" tier in the missive cascade — see
+    :meth:`Missive._parent_processors`.
+    """
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
         editable=False,
         verbose_name=_("ID"),
     )
-    subject = models.CharField(
-        max_length=255,
+    subject = models.TextField(
         verbose_name=_("Subject"),
         help_text=_("Campaign subject"),
     )
@@ -154,70 +161,6 @@ class MissiveCampaign(CommentTimestampedModel):
         help_text=_("First document content (HTML, converted to PDF for LRE)"),
     )
 
-    additional_context = JSONField(
-        default=dict,
-        blank=True,
-        verbose_name=_("Additional context"),
-        help_text=_("Additional context as JSON"),
-    )
-    additional_config = JSONField(
-        default=dict,
-        blank=True,
-        verbose_name=_("Additional configuration"),
-        help_text=_("Additional configuration as JSON"),
-    )
-    metadata = JSONField(
-        default=dict,
-        blank=True,
-        verbose_name=_("Metadata"),
-        help_text=_("Additional metadata as JSON"),
-    )
-    body_processors = JSONField(
-        default=list,
-        blank=True,
-        verbose_name=_("Body processors"),
-        help_text=_(
-            "Ordered list of processors applied to compiled campaign body/"
-            "first_document content. When non-empty, REPLACES the global "
-            "defaults (PYMISSIVE_DEFAULT_BODY_PROCESSORS) — make sure to "
-            "include django_template_processor here if you still want "
-            "{{ var }} / {% tag %} rendering. A missive's own non-empty "
-            "body_processors will in turn override these. Each entry may "
-            "be a dotted path string, a [path, kwargs] pair, or a "
-            "{\"processor\": path, \"kwargs\": {...}} dict."
-        ),
-    )
-    first_document_processors = JSONField(
-        default=list,
-        blank=True,
-        verbose_name=_("First document PDF processors"),
-        help_text=_(
-            "Ordered list of processors used to build the first_document "
-            "PDF for missives in this campaign. When non-empty, REPLACES "
-            "the global defaults (PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS) "
-            "— include django_pymissive.pdf_processors.weasyprint_renderer "
-            "as the first entry if you still want the default HTML→PDF "
-            "rendering. A missive's own non-empty first_document_processors "
-            "will in turn override these. Each entry may be a dotted path "
-            "string, a [path, kwargs] pair, or a {\"processor\": path, "
-            "\"kwargs\": {...}} dict."
-        ),
-    )
-    attachment_processors = JSONField(
-        default=list,
-        blank=True,
-        verbose_name=_("Attachment processors"),
-        help_text=_(
-            "Ordered list of processors applied to every attachment of "
-            "missives in this campaign right before sending. Each processor "
-            "receives (missive, attachment, content_bytes) and returns new "
-            "bytes. PDF-only processors (e.g. watermark_pdf_attachments) "
-            "skip non-PDF attachments. When non-empty, REPLACES the global "
-            "defaults (PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS). A missive's "
-            "own non-empty attachment_processors will in turn override these."
-        ),
-    )
-
     objects = MissiveCampaignManager()
     # Plain manager for select_for_update (PostgreSQL rejects FOR UPDATE with GROUP BY)
     objects_plain = models.Manager()
@@ -230,25 +173,19 @@ class MissiveCampaign(CommentTimestampedModel):
     def __str__(self):
         return self.subject
 
-    def campaign_context(self):
-        """Context for template rendering.
+    def get_browser_preview_path(self, *, preview_kind: str = "email") -> str:
+        """Relative URL for the staff preview of this campaign.
 
-        Includes related objects as ``{content_type_name: content_object}``,
-        one per content type (most recent wins).
+        ``preview_kind`` selects which template will be rendered server-side
+        (email, sms, postal — see ``PreviewView``). Returns ``""`` for an
+        unsaved campaign.
         """
-        context = {}
-        seen_ct: set = set()
-        for ro in self.to_campaignrelatedobject.select_related("content_type").all():
-            ct_name = ro.content_type.model
-            if ct_name not in seen_ct and ro.content_object is not None:
-                context[ct_name] = serialize_model_for_context(ro.content_object)
-                seen_ct.add(ct_name)
-        return context
-
-    @property
-    def base_url(self):
-        """Base URL for attachments and other needs. Uses get_base_url() from settings."""
-        return get_base_url(trailing_slash=False)
+        if not self.pk:
+            return ""
+        return (
+            reverse("django_pymissive:preview", args=["campaign", self.pk])
+            + f"?type={preview_kind}"
+        )
 
     @property
     def email_reply_to(self):
@@ -287,125 +224,15 @@ class MissiveCampaign(CommentTimestampedModel):
             "address": self.sender_address or "",
         }
 
-    def get_default_body_processors(self):
-        """Return default body processors (Django template rendering by default).
-
-        Override on a subclass or set ``PYMISSIVE_DEFAULT_BODY_PROCESSORS = []``
-        in Django settings to disable the default Django template rendering.
-        """
-        from ..body_processors import get_default_body_processors
-
-        return get_default_body_processors()
-
-    def get_body_processors(self):
-        """Resolve which processors apply, "most specific wins" semantics.
-
-        If ``self.body_processors`` is non-empty, those replace the defaults
-        entirely; otherwise the defaults from
-        :meth:`get_default_body_processors` are used. When overriding, make
-        sure to include ``django_template_processor`` if you still want
-        ``{{ var }}`` / ``{% tag %}`` rendering.
-        """
-        if self.body_processors:
-            return list(self.body_processors)
-        return self.get_default_body_processors()
-
-    def get_default_pdf_processors(self):
-        """Return the default PDF processor chain for ``first_document``.
-
-        Honors ``PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS`` from
-        settings, otherwise falls back to a single
-        :func:`~django_pymissive.pdf_processors.weasyprint_renderer`.
-        """
-        from ..pdf_processors import get_default_pdf_processors
-
-        return get_default_pdf_processors()
-
-    def get_first_document_processors(self):
-        """Resolve the PDF processor chain at the campaign level.
-
-        If ``self.first_document_processors`` is non-empty those replace
-        the defaults entirely; otherwise the defaults from
-        :meth:`get_default_pdf_processors` are used. Note that a missive's
-        own non-empty ``first_document_processors`` always wins over this.
-        """
-        if self.first_document_processors:
-            return list(self.first_document_processors)
-        return self.get_default_pdf_processors()
-
-    def get_default_attachment_processors(self):
-        """Return default attachment processors (see Missive equivalent)."""
-        from ..attachment_processors import get_default_attachment_processors
-
-        return get_default_attachment_processors()
-
-    def get_attachment_processors(self):
-        """Resolve attachment processors at the campaign level.
-
-        ``self.attachment_processors`` if non-empty, otherwise
-        :meth:`get_default_attachment_processors`. A missive's own
-        non-empty ``attachment_processors`` always wins over this.
-        """
-        if self.attachment_processors:
-            return list(self.attachment_processors)
-        return self.get_default_attachment_processors()
-
-    def apply_body_processors(self, content: str, *, field_name: str | None = None) -> str:
-        """Apply body processors (defaults + campaign) to ``content``."""
-        from ..body_processors import apply_body_processors
-
-        return apply_body_processors(
-            content,
-            self.get_body_processors(),
-            campaign=self,
-            field_name=field_name,
-            context=self.campaign_context(),
-        )
-
-    def _compile(self, raw, *, field_name: str | None = None) -> str:
-        """Run the body processor pipeline on ``raw``.
-
-        The default pipeline starts with the Django template processor
-        (rendering against ``campaign_context()``), then applies
-        campaign-level processors.
-        """
-        if not raw:
-            return ""
-        return self.apply_body_processors(str(raw), field_name=field_name)
-
-    def body_html_compiled(self):
-        """Render body HTML (email) with campaign context."""
-        return self._compile(self.body_html, field_name="body_html")
-
-    def body_text_compiled(self):
-        """Render body_text (email plain text) with campaign context."""
-        return self._compile(self.body_text, field_name="body_text")
-
-    def body_sms_compiled(self):
-        """Render body_sms (SMS) with campaign context."""
-        return self._compile(self.body_sms, field_name="body_sms")
-
-    def first_document_compiled(self):
-        """Render first_document with campaign context."""
-        return self._compile(self.first_document, field_name="first_document")
-
     @property
     def attachments(self):
+        """Campaign-level attachments (ATTACHMENT + VIRTUAL_ATTACHMENT)."""
         from .choices import MissiveAttachmentType
         from django.db.models import Q
         return self.to_campaigndocument.filter(
             Q(attachment_type=MissiveAttachmentType.ATTACHMENT)
             | Q(attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT),
         )
-
-    @property
-    def attachments_physical(self):
-        return self.attachments.filter(linked=False)
-
-    def get_serialized_attachments(self, linked=False):
-        """Get the attachments of the campaign."""
-        qs = self.attachments.filter(linked=linked)
-        return [attachment.get_serialized_attachment(linked=linked) for attachment in qs]
 
     def start_campaign(self):
         """Start the campaign."""

@@ -31,8 +31,8 @@ from ..managers import (
     MissiveMessageManager,
     MissiveHistoryManager,
 )
-from ..models.base import CommentTimestampedModel
-from ..fields import RichTextField, JSONField
+from ..models.mixins import CommentTimestampedModel, ConfigMixin, ProcessorsMixin
+from ..fields import RichTextField
 from ..dispatch_signals import (
     missive_post_duplicate,
     missive_post_send,
@@ -80,8 +80,8 @@ def _address_offset_lre_dict_to_css(offset: dict) -> str:
     return ".a4-address-provider .a4-recipient { " + " ".join(parts) + " }"
 
 
-class Missive(CommentTimestampedModel):
-    """Multi-channel missive model (email, SMS, address/LRE, application, etc.)."""
+class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
+    """Multi-channel missive (email, SMS, postal/LRE, …). Overrides :meth:`_parent_processors` for campaign cascade."""
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -168,8 +168,7 @@ class Missive(CommentTimestampedModel):
         verbose_name=_("Priority"),
         help_text=_("Priority level"),
     )
-    subject = models.CharField(
-        max_length=500,
+    subject = models.TextField(
         verbose_name=_("Subject"),
         help_text=_("Subject line (for email, SMS, etc.)"),
         blank=True,
@@ -236,12 +235,6 @@ class Missive(CommentTimestampedModel):
         verbose_name=_("Reply-To address"),
         help_text=_("Postal address for replies"),
     )
-    additional_context = JSONField(
-        default=dict,
-        blank=True,
-        verbose_name=_("Additional context"),
-        help_text=_("Additional context as JSON"),
-    )
     external_id = models.CharField(
         max_length=255,
         blank=True,
@@ -249,66 +242,6 @@ class Missive(CommentTimestampedModel):
         editable=False,
         verbose_name=_("External ID"),
         help_text=_("External identifier from the provider"),
-    )
-    metadata = JSONField(
-        default=dict,
-        blank=True,
-        verbose_name=_("Metadata"),
-        help_text=_("Additional metadata as JSON"),
-    )
-    additional_config = JSONField(
-        default=dict,
-        blank=True,
-        verbose_name=_("Additional configuration"),
-        help_text=_("Additional configuration as JSON"),
-    )
-    body_processors = JSONField(
-        default=list,
-        blank=True,
-        verbose_name=_("Body processors"),
-        help_text=_(
-            "Ordered list of processors applied to compiled subject/body/"
-            "first_document content. When non-empty, REPLACES the campaign "
-            "and global defaults (PYMISSIVE_DEFAULT_BODY_PROCESSORS) — make "
-            "sure to include django_template_processor here if you still "
-            "want {{ var }} / {% tag %} rendering. Each entry may be a "
-            "dotted path string, a [path, kwargs] pair, or a "
-            "{\"processor\": path, \"kwargs\": {...}} dict."
-        ),
-    )
-    first_document_processors = JSONField(
-        default=list,
-        blank=True,
-        verbose_name=_("First document PDF processors"),
-        help_text=_(
-            "Ordered list of processors used to build the first_document PDF "
-            "(postal/LRE letter). The first processor receives no input and "
-            "must produce PDF bytes (default: WeasyPrint render of the "
-            "compiled HTML); subsequent processors receive the previous "
-            "output and may transform it (watermark, append pages, sign...). "
-            "When non-empty, REPLACES the campaign and global defaults "
-            "(PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS) — include "
-            "django_pymissive.pdf_processors.weasyprint_renderer if you "
-            "still want the default HTML→PDF rendering. Each entry may be a "
-            "dotted path string, a [path, kwargs] pair, or a "
-            "{\"processor\": path, \"kwargs\": {...}} dict."
-        ),
-    )
-    attachment_processors = JSONField(
-        default=list,
-        blank=True,
-        verbose_name=_("Attachment processors"),
-        help_text=_(
-            "Ordered list of processors applied to every attachment's bytes "
-            "right before the missive is handed to the provider. Each "
-            "processor receives (missive, attachment, content_bytes) and "
-            "must return new bytes. PDF-only processors (e.g. "
-            "watermark_pdf_attachments) skip non-PDF attachments. When "
-            "non-empty, REPLACES the campaign and global defaults "
-            "(PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS). Each entry may be a "
-            "dotted path string, a [path, kwargs] pair, or a "
-            "{\"processor\": path, \"kwargs\": {...}} dict."
-        ),
     )
     webhook_url = models.URLField(
         max_length=255,
@@ -353,8 +286,7 @@ class Missive(CommentTimestampedModel):
             support = get_missive_support_from_type(self.missive_type)
             if support:
                 self.missive_support = support
-        # Leave empty when campaign assigned; get_serialized_data resolves via locally_or_campaign
-        # Use campaign_id to avoid FK resolution issues when creating via API/viewset
+        # Empty when campaign set — resolved via get_locally_or_campaign (use campaign_id for API)
         has_campaign = bool(self.campaign_id)
         if not self.acknowledgement and not has_campaign:
             self.acknowledgement = AcknowledgementLevel.BASIC_DELIVERY
@@ -368,6 +300,11 @@ class Missive(CommentTimestampedModel):
         self._ensure_default_provider()
         self._ensure_missive_defaults()
         super().save(*args, **kwargs)
+
+    @property
+    def is_persisted(self) -> bool:
+        """True after insert. Use ``_state.adding``, not ``pk`` (UUID is set at init)."""
+        return not self._state.adding
 
     def has_service(self, service):
         service_name = f"{service}_{self.missive_type}".lower()
@@ -394,8 +331,7 @@ class Missive(CommentTimestampedModel):
     def last_event_display(self):
         return dict(MissiveEventType.choices).get(self.last_event, self.last_event)
 
-    # Missive field → campaign field, per support type.
-    # Only fields whose names differ need an entry; absent fields use the same name on campaign.
+    # Missive field → campaign field when names differ (per support).
     _CAMPAIGN_FIELD_MAP: dict[str, dict[str, str]] = {
         "email": {
             "sender_name":    "sender_email_name",
@@ -416,7 +352,6 @@ class Missive(CommentTimestampedModel):
         },
     }
 
-    # Missive fields that may be inherited from the campaign, per support type.
     _CAMPAIGN_SOURCED_FIELDS: dict[str, list[str]] = {
         "email": [
             "subject", "body_html", "body_text",
@@ -438,12 +373,10 @@ class Missive(CommentTimestampedModel):
 
     @classmethod
     def get_campaign_sourced_fields(cls, support) -> list[str]:
-        """Return the missive field names that can be sourced from campaign for the given support."""
         return list(cls._CAMPAIGN_SOURCED_FIELDS.get((support or "").lower(), []))
 
     @property
     def campaign_sourced_field_names(self):
-        """Field names that can be sourced from campaign (for set_locally_ifnull / clear)."""
         names = []
         for field in self.get_campaign_sourced_fields(self.missive_support):
             if field not in names and hasattr(self, field):
@@ -451,12 +384,7 @@ class Missive(CommentTimestampedModel):
         return names + (["additional_context"] if self.campaign_id else [])
 
     def get_locally_or_campaign_value(self, field, fallback=None):
-        """Return local field value if set, else look up the matching campaign field.
-
-        The campaign field name is resolved via _CAMPAIGN_FIELD_MAP[support][field].
-        If the field has no entry in the map for the current support, the same name is
-        used on the campaign (identity mapping).
-        """
+        """Local value if set, else campaign field (via ``_CAMPAIGN_FIELD_MAP``)."""
         locally = getattr(self, field, None)
         if locally:
             return locally
@@ -467,8 +395,7 @@ class Missive(CommentTimestampedModel):
         return getattr(self.campaign, campaign_field, None) or fallback
 
     def set_locally_ifnull(self):
-        """Copy campaign values to local fields when null. Preserves content at send time
-        so that if the campaign changes later, already-sent missives keep their content."""
+        """Copy null missive fields from campaign (snapshot before send)."""
         if not self.campaign_id:
             return
         support = (self.missive_support or "").lower()
@@ -631,12 +558,27 @@ class Missive(CommentTimestampedModel):
         body = self.get_locally_or_campaign_value("body_html")
         return self.check_recipients() and bool(body and body.strip())
 
+    def _campaign_preview_kind(self) -> str:
+        """Map missive_type to the campaign preview ``?type=`` kind (email/sms/postal)."""
+        from ..views.preview import POSTAL_PREVIEW_MISSIVE_TYPES
+
+        mt = (self.missive_type or "").lower()
+        if mt in POSTAL_PREVIEW_MISSIVE_TYPES:
+            return "postal"
+        if mt in ("sms", "rcs"):
+            return "sms"
+        return "email"
+
     def get_browser_preview_path(self) -> str:
-        """Relative URL path for staff browser preview (postal includes first recipient segment)."""
+        """Staff preview URL, or campaign preview when unsaved, else ``""``."""
         from django.urls import reverse
         from ..views.preview import POSTAL_PREVIEW_MISSIVE_TYPES
 
-        if not self.pk:
+        if not self.is_persisted:
+            if self.campaign_id and self.campaign is not None:
+                return self.campaign.get_browser_preview_path(
+                    preview_kind=self._campaign_preview_kind(),
+                )
             return ""
         mt = (self.missive_type or "").lower()
         if mt in POSTAL_PREVIEW_MISSIVE_TYPES:
@@ -658,8 +600,10 @@ class Missive(CommentTimestampedModel):
 
     @property
     def show_preview_browser(self):
-        """Show the preview browser."""
-        url = self.base_url + self.get_browser_preview_path()
+        path = self.get_browser_preview_path()
+        if not path:
+            return mark_safe("")  # nosec B703 B308
+        url = self.base_url + path
         data = {
             "url": url,
             "icon": PREVIEW_ICON,
@@ -670,40 +614,35 @@ class Missive(CommentTimestampedModel):
 
     @property
     def show_preview_browser_text(self):
-        """Show the preview browser text."""
-        url = self.base_url + self.get_browser_preview_path()
+        path = self.get_browser_preview_path()
+        if not path:
+            return ""
+        url = self.base_url + path
         return f"- {_('Preview in browser')}:{SEPARATOR}{url}\n"
 
     def missive_context(self):
-        """Get the context of the missive.
+        """Template context: JSON bags → related objects → preview/attachment snippets.
 
-        Build order (each layer overrides the previous):
-        1. campaign.additional_context (JSON field)
-        2. missive.additional_context (JSON field)
-        3. campaign related objects: {content_type_name: content_object}, 1 per content type
-        4. missive related objects:  {content_type_name: content_object}, 1 per content type
-           (missive wins over campaign for the same content type)
-        5. preview/attachment helpers
+        Per content type: ``<ct>`` (first object) and ``<ct>_list`` (always a list).
+        Related objects: missive ∪ campaign, deduped by ``(content_type, pk)``,
+        missive first so ``<ct>`` is the most-specific row.
         """
         context = dict(getattr(self.campaign, "additional_context", {}) or {})
         context.update(self.additional_context or {})
 
-        # Campaign related objects
+        grouped: dict[str, list] = {}
+        seen: set[tuple[str, object]] = set()
+        self._collect_related_objects(
+            self.to_missiverelatedobject, into=grouped, seen=seen
+        )
         if self.campaign_id:
-            seen_ct: set = set()
-            for ro in self.campaign.to_campaignrelatedobject.select_related("content_type").all():
-                ct_name = ro.content_type.model
-                if ct_name not in seen_ct and ro.content_object is not None:
-                    context[ct_name] = serialize_model_for_context(ro.content_object)
-                    seen_ct.add(ct_name)
+            self._collect_related_objects(
+                self.campaign.to_campaignrelatedobject, into=grouped, seen=seen
+            )
 
-        # Missive related objects — override campaign's for the same content type
-        missive_seen_ct: set = set()
-        for ro in self.to_missiverelatedobject.select_related("content_type").all():
-            ct_name = ro.content_type.model
-            if ct_name not in missive_seen_ct and ro.content_object is not None:
-                context[ct_name] = serialize_model_for_context(ro.content_object)
-                missive_seen_ct.add(ct_name)
+        for ct_name, objs in grouped.items():
+            context[ct_name] = objs[0]
+            context[f"{ct_name}_list"] = objs
 
         context.update({
             "show_preview_browser": self.show_preview_browser,
@@ -711,18 +650,31 @@ class Missive(CommentTimestampedModel):
             "show_attachments_linked": self.show_attachments_linked,
             "show_attachments_linked_text": self.show_attachments_linked_text,
         })
-        print("context", context)
         return context
 
-    def get_provider_address_css_lre(self) -> str:
-        """Return extra CSS for the postal address zone when the provider defines it.
+    @staticmethod
+    def _collect_related_objects(
+        manager,
+        *,
+        into: dict,
+        seen: set,
+    ) -> None:
+        """Group by content type; skip deleted rows; dedup via ``seen``."""
+        for ro in manager.select_related("content_type").all():
+            obj = ro.content_object
+            if obj is None:
+                continue
+            ct_name = ro.content_type.model
+            key = (ct_name, obj.pk)
+            if key in seen:
+                continue
+            seen.add(key)
+            into.setdefault(ct_name, []).append(
+                serialize_model_for_context(obj)
+            )
 
-        Prefer :meth:`address_offset_lre` on the underlying provider (``dict`` of lengths:
-        ``top``, ``right``, ``bottom``, ``left``, ``width``, ``height``), converted to rules
-        for ``.a4-address-provider``. Otherwise use a legacy string property
-        ``address_css_lre``. ``ack_level`` is synced from this missive when the provider
-        exposes it so acknowledgement-dependent offsets work.
-        """
+    def get_provider_address_css_lre(self) -> str:
+        """CSS for ``.a4-address-provider`` from provider ``address_offset_lre`` or legacy string."""
         provider = getattr(self, "provider", None)
         if provider and hasattr(provider._provider, "address_offset_lre"):
             print("offset", provider._provider.address_offset_lre)
@@ -732,7 +684,6 @@ class Missive(CommentTimestampedModel):
         return ""
 
     def get_postal_letter_render_context(self, post_data=None, postal_recipient_pk=None):
-        """Context for the postal first page (browser + PDF): recipient block + letter body."""
         from ..views.preview import build_preview_context
 
         ctx = {"missive": self}
@@ -747,15 +698,8 @@ class Missive(CommentTimestampedModel):
         return ctx
 
     def body_to_pdf(self, **kwargs):
-        """Build the first_document PDF by running the PDF processors chain.
-
-        The chain is resolved via :meth:`get_first_document_processors`
-        ("most specific wins": missive → campaign → global defaults). The
-        default chain contains a single WeasyPrint renderer that converts
-        ``first_document_compiled`` to PDF; replace or extend it to add
-        watermarks, append disclaimer pages, sign, etc.
-        """
-        from ..pdf_processors import apply_pdf_processors
+        """Run :meth:`get_first_document_processors` (WeasyPrint + hooks by default)."""
+        from ..processors.pdf import apply_pdf_processors
 
         return apply_pdf_processors(
             self,
@@ -771,19 +715,8 @@ class Missive(CommentTimestampedModel):
         return (self.missive_type or "").lower() in POSTAL_PREVIEW_MISSIVE_TYPES
 
     def ensure_first_document(self):
-        """Generate or refresh the first_document PDF when the missive is postal-like.
-
-        Skipped when the missive is not saved yet (no PK) or is not postal —
-        callers can rely on this being a no-op in those cases. Used by the
-        browser preview to render the same PDF the recipient receives.
-
-        Errors raised by the PDF processor chain (e.g. ``ImportError``
-        when the watermark/postprocessing libs are not installed) are
-        logged with a full stack trace and swallowed so the preview still
-        renders instead of crashing the page. Look for
-        ``ensure_first_document failed`` in the Django logs to diagnose.
-        """
-        if not self.pk or not self.is_postal_like():
+        """Postal + persisted only; logs and swallows processor errors (preview must not 500)."""
+        if not self.is_persisted or not self.is_postal_like():
             return None
         try:
             return self.generate_first_document()
@@ -796,13 +729,7 @@ class Missive(CommentTimestampedModel):
             return None
 
     def generate_first_document(self):
-        """Generate first document PDF from first_document/body_html and save as attachment.
-
-        Looks up the existing first_document strictly by ``attachment_type``
-        and ``priority`` (0 is reserved for first_document), NOT by
-        filename — virtual attachments may end up with a path that happens
-        to contain ``first-document-`` and we don't want to overwrite them.
-        """
+        """Save/replace first_document attachment (type + priority 0, not by filename)."""
         from ..models.attachment import MissiveBaseAttachment, FIRST_DOCUMENT_PRIORITY
 
         pdf_bytes = self.body_to_pdf(postal_recipient_pk=None)
@@ -824,103 +751,14 @@ class Missive(CommentTimestampedModel):
         )
         return att
 
-    def get_default_body_processors(self):
-        """Return default body processors (Django template rendering by default).
-
-        Override on a subclass or set ``PYMISSIVE_DEFAULT_BODY_PROCESSORS = []``
-        in Django settings to disable the default Django template rendering.
-        """
-        from ..body_processors import get_default_body_processors
-
-        return get_default_body_processors()
-
-    def get_body_processors(self):
-        """Resolve which processors apply, with "most specific wins" semantics.
-
-        Resolution order (first non-empty wins; no concatenation):
-
-        1. ``self.body_processors`` if non-empty → those processors only.
-        2. ``self.campaign.body_processors`` if non-empty → those only.
-        3. Otherwise → :meth:`get_default_body_processors` (i.e.
-           ``PYMISSIVE_DEFAULT_BODY_PROCESSORS`` from settings, which by
-           default contains the Django template renderer).
-
-        Note: when overriding, you are responsible for including
-        ``django_pymissive.body_processors.django_template_processor`` in
-        your list if you still want ``{{ var }}`` / ``{% tag %}`` rendering.
-        """
-        if self.body_processors:
-            return list(self.body_processors)
-        if self.campaign_id and self.campaign is not None and self.campaign.body_processors:
-            return list(self.campaign.body_processors)
-        return self.get_default_body_processors()
-
-    def get_default_pdf_processors(self):
-        """Return the default PDF processor chain for ``first_document``.
-
-        Honors ``PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS`` from
-        settings, otherwise falls back to a single
-        :func:`~django_pymissive.pdf_processors.weasyprint_renderer`.
-        """
-        from ..pdf_processors import get_default_pdf_processors
-
-        return get_default_pdf_processors()
-
-    def get_first_document_processors(self):
-        """Resolve which PDF processors apply (same "most specific wins" rule).
-
-        Resolution order (first non-empty wins; no concatenation):
-
-        1. ``self.first_document_processors`` if non-empty → those only.
-        2. ``self.campaign.first_document_processors`` if non-empty → those only.
-        3. Otherwise → :meth:`get_default_pdf_processors`.
-
-        When overriding, include
-        ``django_pymissive.pdf_processors.weasyprint_renderer`` (or your
-        own renderer) as the first entry — postprocessors that come next
-        receive its output.
-        """
-        if self.first_document_processors:
-            return list(self.first_document_processors)
-        if (
-            self.campaign_id
-            and self.campaign is not None
-            and self.campaign.first_document_processors
-        ):
-            return list(self.campaign.first_document_processors)
-        return self.get_default_pdf_processors()
-
-    def get_default_attachment_processors(self):
-        """Return default attachment processors.
-
-        Honors ``settings.PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS`` (empty
-        list by default — attachments pass through unchanged unless the
-        user opts in).
-        """
-        from ..attachment_processors import get_default_attachment_processors
-
-        return get_default_attachment_processors()
-
-    def get_attachment_processors(self):
-        """Resolve which attachment processors apply ("most specific wins").
-
-        1. ``self.attachment_processors`` if non-empty → those only.
-        2. ``self.campaign.attachment_processors`` if non-empty → those only.
-        3. Otherwise → :meth:`get_default_attachment_processors`.
-        """
-        if self.attachment_processors:
-            return list(self.attachment_processors)
-        if (
-            self.campaign_id
-            and self.campaign is not None
-            and self.campaign.attachment_processors
-        ):
-            return list(self.campaign.attachment_processors)
-        return self.get_default_attachment_processors()
+    def _parent_processors(self, field_name: str):
+        """Fall back to ``campaign.<field_name>`` when set."""
+        if not (self.campaign_id and self.campaign is not None):
+            return None
+        return getattr(self.campaign, field_name, None) or None
 
     def apply_body_processors(self, content: str, *, field_name: str | None = None) -> str:
-        """Apply external body processors (defaults + campaign + missive) to ``content``."""
-        from ..body_processors import apply_body_processors
+        from ..processors.body import apply_body_processors
 
         return apply_body_processors(
             content,
@@ -932,13 +770,7 @@ class Missive(CommentTimestampedModel):
         )
 
     def _compiled_template_value(self, raw, *, field_name: str | None = None) -> str:
-        """Run the body processor pipeline on ``raw`` and return the result.
-
-        The default pipeline starts with the Django template processor (which
-        renders ``raw`` against ``missive_context()``), then applies campaign
-        and missive processors. Empty or invalid input → empty string
-        (preview-safe).
-        """
+        """Template render + body processors; empty input → ``""``."""
         if raw is None:
             return ""
         text = str(raw)
@@ -951,7 +783,6 @@ class Missive(CommentTimestampedModel):
 
     @property
     def subject_compiled(self):
-        """Compile the subject of the missive."""
         return self._compiled_template_value(
             self.get_locally_or_campaign_value("subject"),
             field_name="subject",
@@ -959,7 +790,6 @@ class Missive(CommentTimestampedModel):
 
     @property
     def body_html_compiled(self):
-        """Compile the HTML body of the missive."""
         return self._compiled_template_value(
             self.get_locally_or_campaign_value("body_html"),
             field_name="body_html",
@@ -967,7 +797,11 @@ class Missive(CommentTimestampedModel):
 
     @property
     def body_text_compiled(self):
-        """Compile the body text of the missive."""
+        # SMS/RCS store their payload in body_text but must compile under
+        # field_name="body_sms" so channel-aware body processors (signature,
+        # banner, …) pick the SMS variant instead of the email one.
+        if (self.missive_type or "").lower() in ("sms", "rcs"):
+            return self.body_sms_compiled
         return self._compiled_template_value(
             self.get_locally_or_campaign_value("body_text"),
             field_name="body_text",
@@ -975,7 +809,6 @@ class Missive(CommentTimestampedModel):
 
     @property
     def body_sms_compiled(self):
-        """Compile the body SMS of the missive."""
         return self._compiled_template_value(
             self.get_locally_or_campaign_value("body_text") or "",
             field_name="body_sms",
@@ -983,7 +816,6 @@ class Missive(CommentTimestampedModel):
 
     @property
     def first_document_compiled(self):
-        """Compile first_document (campaign) or fallback to body_html when no campaign."""
         return self._compiled_template_value(
             self.get_locally_or_campaign_value("body_html") or "",
             field_name="first_document",
@@ -995,12 +827,10 @@ class Missive(CommentTimestampedModel):
 
     @property
     def base_url(self):
-        """Base URL for attachments and other needs. Uses get_base_url() from settings."""
         return get_base_url(trailing_slash=False)
 
     @property
     def show_attachments_linked(self):
-        """Show the attachments linked."""
         html = "<div>"
         for attachment in self.get_serialized_attachments(linked=True):
             data = {
@@ -1015,39 +845,53 @@ class Missive(CommentTimestampedModel):
 
     @property
     def show_attachments_linked_text(self):
-        """Show the attachments linked text."""
+        # ``attachment['url']`` is already absolute — do not prefix ``base_url``.
         qs = self.get_serialized_attachments(linked=True)
         if not qs:
             return ""
         title = _("Attachments:")
         text = f"{title}{SEPARATOR}"
         for attachment in qs:
-            text += (
-                f"- {attachment['name']}\n{self.base_url}{attachment['url']}{SEPARATOR}"
-            )
+            text += f"- {attachment['name']}\n{attachment['url']}{SEPARATOR}"
         return text
 
     @property
     def attachments(self):
-        """Attachments from missive and campaign (when campaign_id is set)."""
-        from .attachment import MissiveBaseAttachment
+        """Campaign + missive attachments. Order: first_document → campaign → missive (``Case/When``)."""
+        from .attachment import MissiveBaseAttachment, FIRST_DOCUMENT_PRIORITY
         q_filter = models.Q(attachment_type=MissiveAttachmentType.ATTACHMENT) | models.Q(
             attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT
         )
         parent_q = models.Q(missive=self)
         if self.campaign_id:
             parent_q |= models.Q(campaign=self.campaign)
-        return MissiveBaseAttachment.objects.filter(parent_q, q_filter)
+        qs = MissiveBaseAttachment.objects.filter(parent_q, q_filter)
+        return qs.annotate(
+            _source_order=models.Case(
+                models.When(priority=FIRST_DOCUMENT_PRIORITY, then=models.Value(0)),
+                models.When(campaign__isnull=False, then=models.Value(1)),
+                default=models.Value(2),
+                output_field=models.IntegerField(),
+            )
+        ).order_by("_source_order", "priority")
 
     @property
     def attachments_physical(self):
-        return self.attachments.filter(linked=False)
+        """Preview/download set. Postal: all attachments; email: ``linked=False`` only."""
+        qs = self.attachments
+        if not self.is_postal_like():
+            qs = qs.filter(linked=False)
+        return qs
 
     def get_serialized_attachments(self, linked=False):
-        """Get the attachments of the missive."""
-        if not linked and self.missive_type == MissiveType.LRE:
+        """Provider payload. Postal ignores ``linked``; regenerates first_document when needed."""
+        if not linked and self.is_postal_like():
             self.generate_first_document()
-        return [a.get_serialized_attachment(linked=linked) for a in self.attachments.filter(linked=linked)]
+        if self.is_postal_like():
+            att_qs = self.attachments
+        else:
+            att_qs = self.attachments.filter(linked=linked)
+        return [a.get_serialized_attachment(linked=linked) for a in att_qs]
 
     #########################################################
     # Services
@@ -1065,16 +909,7 @@ class Missive(CommentTimestampedModel):
         return new_missive
 
     def duplicate_attachments(self, new_missive, source_missive):
-        """Copy attachments (regular + virtual) from source to new missive.
-
-        Excludes the first_document (priority 0) — it will be regenerated
-        from the new missive's data the next time
-        :meth:`ensure_first_document` runs (typically during preview or
-        send). Virtual attachments are copied by reference: the new row
-        points at the same ``attachment_object`` as the source, so the
-        duplicate sees the same external content (signature image, billing
-        PDF, fakeapp fixture...) without copying any file bytes.
-        """
+        """Copy attachments except first_document (regenerated on demand)."""
         from ..models.attachment import FIRST_DOCUMENT_PRIORITY
 
         attachments = (
@@ -1090,7 +925,6 @@ class Missive(CommentTimestampedModel):
             attachment.save()
 
     def duplicate_recipients(self, new_missive, source_missive):
-        """Copy recipients from source_missive to new_missive."""
         for recipient in source_missive.to_missiverecipient.all():
             recipient.pk = None
             recipient.id = None
@@ -1099,7 +933,6 @@ class Missive(CommentTimestampedModel):
             recipient.save()
 
     def duplicate_related_objects(self, new_missive, source_missive):
-        """Copy related objects (e.g. contact links) from source_missive to new_missive."""
         for rel_obj in source_missive.to_missiverelatedobject.all():
             rel_obj.pk = None
             rel_obj.id = None

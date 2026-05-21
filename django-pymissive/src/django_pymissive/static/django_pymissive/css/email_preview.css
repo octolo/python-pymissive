@@ -34,15 +34,16 @@
 
 .email-plaintext-collapsible {
     margin-bottom: 20px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    overflow: hidden;
 }
 
 .email-plaintext-collapsible summary {
     cursor: pointer;
     font-weight: bold;
-    padding: 10px;
-    background: #fff;
-    border: 1px solid #ddd;
-    border-radius: 4px;
+    padding: 10px 20px;
     list-style: none;
 }
 
@@ -60,8 +61,14 @@
     transform: rotate(90deg);
 }
 
-.email-plaintext-collapsible .email-html {
-    margin-top: 0;
+.email-plaintext-collapsible[open] summary {
+    border-bottom: 1px solid #ddd;
+}
+
+.email-plaintext-content {
+    margin: 0;
+    padding: 20px;
+    white-space: break-spaces;
 }
 
 .empty {
@@ -70,10 +77,18 @@
     text-align: center;
     padding: 40px;
 }
+.email-html-body .attachments {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px dashed #ddd;
+}
+
 .attachments {
     display: flex;
     gap: 10px;
- }
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
 
 .attachments a {
     border: 1px solid #ddd;

@@ -89,3 +89,29 @@ class PdfDocument(models.Model):
             "display_name": self.name.upper(),
             "is_published": self.published_at is not None,
         }
+
+
+class Contact(models.Model):
+    """Test contact (``./manage.py seed_fake_contacts``)."""
+
+    last_name = models.CharField(max_length=120)
+    first_name = models.CharField(max_length=120)
+    email = models.EmailField(unique=True)
+
+    class Meta:
+        app_label = "fakeapp"
+        verbose_name = "Contact (test fixture)"
+        ordering = ["last_name", "first_name"]
+
+    def __str__(self) -> str:
+        return f"{self.first_name} {self.last_name} <{self.email}>"
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.first_name} {self.last_name}".strip()
+
+    def to_context_dict(self) -> dict:
+        return {
+            "full_name": self.full_name,
+            "initials": f"{self.first_name[:1]}{self.last_name[:1]}".upper(),
+        }

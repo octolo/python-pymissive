@@ -301,8 +301,8 @@ class MissiveAdmin(AdminBoostModel):
         return obj.get_browser_preview_path()
 
     def has_preview_provider_confirm_permission(self, request, obj=None):
-        """Object-tool link: draft missives only (API eligibility is checked in the view)."""
-        return bool(obj and obj.pk and obj.status == MissiveStatus.DRAFT)
+        """Draft missives whose provider implements ``preview_<missive_type>``."""
+        return self.is_draft(obj) and obj.can_preview_missive()
 
     @admin_boost_view(
         "confirm",
@@ -488,7 +488,6 @@ class MissiveAdmin(AdminBoostModel):
             return hasattr(obj.provider._provider, service_name)
 
     def get_boost_object_tools(self, request, object_id):
-        """List object-tool links; omit entries when ``has_<view_name>_permission`` exists and denies."""
         items = []
         obj = self.get_object(request, admin_unquote(object_id)) if object_id else None
         opts = self.model._meta
@@ -623,6 +622,9 @@ class MissiveAdmin(AdminBoostModel):
         obj.set_billed()
         messages.success(request, _("Missive marked as paid successfully."))
 
+    def has_handle_history_permission(self, request, obj=None):
+        return bool(obj and obj.pk and obj.count_history)
+
     @admin_boost_view("redirect", _("Show history"))
     def handle_history(self, request, obj):
         url = reverse("admin:django_pymissive_missive_changelist")
@@ -631,6 +633,9 @@ class MissiveAdmin(AdminBoostModel):
             "thread_id": obj.thread_id,
         }
         return url + "?" + urlencode(data)
+
+    def has_handle_message_permission(self, request, obj=None):
+        return bool(obj and obj.pk and obj.count_message)
 
     @admin_boost_view("redirect", _("Show conversation"))
     def handle_message(self, request, obj):

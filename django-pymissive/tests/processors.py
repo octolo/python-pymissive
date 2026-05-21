@@ -9,10 +9,10 @@ JSON field to test per-instance overrides. Use as reference implementations
 for real business processors.
 
 The watermark / filigrane PDF processor lives in
-:mod:`django_pymissive.pdf_processors` (it's a built-in, not test-only).
+:mod:`django_pymissive.processors.pdf` (it's a built-in, not test-only).
 """
 
-from django_pymissive.body_processors import MissiveBodyProcessor
+from django_pymissive.processors.body import MissiveBodyProcessor
 
 
 SIGNATURE_HTML = (
@@ -31,7 +31,7 @@ SIGNATURE_TEXT = (
     "(signature appended by the test processor)"
 )
 
-SIGNATURE_SMS = " — django-pymissive"
+SIGNATURE_SMS = " - django-pymissive"
 
 
 def add_signature(content, *, missive=None, campaign=None, field_name=None, context=None, **kwargs):
@@ -76,7 +76,7 @@ class SignatureProcessor(MissiveBodyProcessor):
         if field_name == "body_text":
             return f"{content}\n\n--\n{team}"
         if field_name == "body_sms":
-            return f"{content} — {team}"
+            return f"{content} - {team}"
         return content
 
 

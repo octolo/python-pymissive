@@ -148,30 +148,44 @@ PYMISSIVE_ATTACHMENT_PATH_MAX_LENGTH = 4000
 #PYMISSIVE_DRY_RUN = True
 #PYMISSIVE_DISABLE_SEND = True
 PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
-    "django_pymissive.body_processors.django_template_processor",
+    # 1. Render Django template variables/tags ({{ var }}, {% if %}, …)
+    "django_pymissive.processors.body.django_template.django_template_processor",
+    # 2. Append a "Preview in browser" link at the end of the email body
+    "django_pymissive.processors.body.add_preview_browser.add_preview_browser",
+    # 3. Append the list of linked attachments at the end of the email body
+    "django_pymissive.processors.body.add_attachments_linked.add_attachments_linked",
+    # 4. Append the test signature (HTML for body_html, text for body_text)
     "tests.processors.add_signature",
 ]
 
 # Default chain for the postal first_document PDF. The first entry renders
 # the compiled HTML to PDF (WeasyPrint); subsequent entries receive the
 # previous PDF bytes and may transform them. Here we stamp every page with
-# a "DRAFT" filigrane to make it obvious the missive was generated against
-# this test project.
+# a filigrane whose text is resolved at run-time from (most specific wins):
+#   missive.additional_config["watermark"]
+#   campaign.additional_config["watermark"]
+#   settings.PYMISSIVE_WATERMARK
+#   ["nom", "date", "draft"]   ← built-in fallback
+# Font size auto-fits the page diagonal / number of lines unless pinned.
 PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS = [
-    "django_pymissive.pdf_processors.weasyprint_renderer",
+    "django_pymissive.processors.pdf.weasyprint_renderer.weasyprint_renderer",
     [
-        "django_pymissive.pdf_processors.watermark_processor",
-        {"text": "DRAFT", "alpha": 0.18},
+        "django_pymissive.processors.pdf.watermark.watermark_processor",
+        {"alpha": 0.18},
     ],
 ]
 
+# Default watermark lines used by both first_document and attachment PDF
+# processors when no per-missive / per-campaign override is configured.
+PYMISSIVE_WATERMARK = ["nom", "date", "draft"]
+
 # Default chain applied to every attachment's bytes right before they are
-# handed to the provider. Stamps a "DRAFT" filigrane on PDF attachments and
-# leaves all other types untouched (DOCX, JPG, etc. pass through).
+# handed to the provider. PDFs receive the same resolved filigrane; non-PDF
+# files (DOCX, JPG, etc.) pass through untouched.
 PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS = [
     [
-        "django_pymissive.attachment_processors.watermark_pdf_attachments",
-        {"text": "DRAFT", "alpha": 0.18},
+        "django_pymissive.processors.attachment.watermark.watermark_pdf_attachments",
+        {"alpha": 0.18},
     ],
 ]
 

@@ -1,0 +1,14 @@
+{% load i18n %}
+{% if doc.is_pdf %}
+<div class="pdf-attachment" data-pdf-url="{{ doc.attachment_download_url }}?v={{ doc.updated_at|date:'U' }}">
+    <div class="pdf-attachment-label">
+        <span aria-hidden="true">&#128196;</span>
+        <span class="pdf-attachment-name">
+            {% if doc.is_first_document %}{% trans "Letter (first page)" %}{% else %}{{ doc.filename|default:"unnamed" }}{% endif %}
+        </span>
+    </div>
+    <div class="pdf-pages">
+        <div class="pdf-loading">{% trans "Loading…" %}</div>
+    </div>
+</div>
+{% endif %}

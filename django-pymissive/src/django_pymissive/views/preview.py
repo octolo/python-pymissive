@@ -4,15 +4,12 @@ Campaign previews use an unsaved Missive with ``campaign`` (and ``campaign_id``)
 so templates and compiled bodies use the same code paths as a real missive.
 """
 
-from types import MethodType
-
 from django.contrib.admin.views.decorators import staff_member_required
 from django.forms import modelform_factory
 from django.http import Http404, HttpResponse
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.utils.decorators import method_decorator
-from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django.views.generic import DetailView, View
 
@@ -68,29 +65,13 @@ def _campaign_preview_kind_to_missive_type(kind: str) -> str:
     return str(MissiveType.EMAIL)
 
 
-def _safe_missive_context(missive):
-    """Template context without preview/attachment widgets (unsaved missive has no pk)."""
-    ctx = {}
-    if missive.campaign_id:
-        ctx = dict(getattr(missive.campaign, "additional_context", {}) or {})
-    ctx.update(missive.additional_context or {})
-    empty = mark_safe("")
-    ctx["show_preview_browser"] = empty
-    ctx["show_preview_browser_text"] = ""
-    ctx["show_attachments_linked"] = empty
-    ctx["show_attachments_linked_text"] = ""
-    return ctx
-
-
-def attach_unsaved_missive_preview_context(missive: Missive) -> None:
-    """Bind a safe ``missive_context`` when the row is not saved (campaign preview, draft POST)."""
-    if missive.pk is not None:
-        return
-    missive.missive_context = MethodType(_safe_missive_context, missive)
-
-
 def missive_for_campaign_preview(campaign: MissiveCampaign, preview_kind: str) -> Missive:
-    """Unsaved missive linked to ``campaign`` so getters and compilation match a real missive."""
+    """Unsaved missive linked to ``campaign`` so getters and compilation match a real missive.
+
+    The unsaved missive routes ``base_url + get_browser_preview_path()`` and the
+    ``show_*`` snippets through ``self.campaign`` automatically (see
+    ``Missive.get_browser_preview_path``), so no special context override is needed.
+    """
     missive = Missive(
         campaign=campaign,
         missive_type=_campaign_preview_kind_to_missive_type(preview_kind),
@@ -98,7 +79,6 @@ def missive_for_campaign_preview(campaign: MissiveCampaign, preview_kind: str) -
         thread_type=MissiveThreadType.MISSIVE,
     )
     missive._ensure_missive_defaults()
-    attach_unsaved_missive_preview_context(missive)
     return missive
 
 
@@ -262,7 +242,7 @@ def _build_lre_context(instance, post_data=None, postal_recipient_pk=None):
 
     recipients = []
     recipient_manager = getattr(instance, "to_missiverecipient", None)
-    if recipient_manager and getattr(instance, "pk", None):
+    if recipient_manager and getattr(instance, "is_persisted", False):
         try:
             for r in recipient_manager.filter(
                 recipient_type=MissiveRecipientType.RECIPIENT
@@ -513,7 +493,6 @@ class PreviewFormView(View):
             if isinstance(instance, Missive):
                 instance._ensure_missive_defaults()
             missive = instance
-            attach_unsaved_missive_preview_context(missive)
             mt = self._preview_kind_for_missive(missive, request.POST)
             context = {
                 "missive": missive,

@@ -1,9 +1,9 @@
-"""Unit tests for ``django_pymissive.attachment_processors``.
+"""Unit tests for ``django_pymissive.processors.attachment``.
 
 Covers the chain runner, the resolver helper
 (``resolve_attachment_processors_for``), and the
 :func:`watermark_pdf_attachments` adapter that delegates to
-:func:`pdf_processors.watermark_processor` only for PDF attachments.
+:func:`processors.pdf.watermark.watermark_processor` only for PDF attachments.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from unittest.mock import Mock
 import pytest
 from django.test import override_settings
 
-from django_pymissive.attachment_processors import (
+from django_pymissive.processors.attachment import (
     DEFAULT_ATTACHMENT_PROCESSORS,
     MissiveAttachmentProcessor,
     apply_attachment_processors,

@@ -57,30 +57,40 @@
         {% endif %}
     </div>
 
-    {% if missive.pk %}
+    {% if missive.is_persisted %}
         {% comment %}
-        Saved missive: render every PDF physical attachment in priority order
-        (first_document at priority 0 comes first, then the user's attachments).
-        Non-PDF attachments are intentionally skipped — no preview, no link.
+        Saved missive: every PDF physical attachment in priority order
+        (first_document at priority 0, then user attachments). Non-PDF skipped.
         {% endcomment %}
         {% for doc in missive.attachments_physical %}
-            {% if doc.is_pdf %}
-                <div class="pdf-attachment" data-pdf-url="{{ doc.attachment_download_url }}?v={{ doc.updated_at|date:'U' }}">
-                    <div class="pdf-attachment-label">
-                        <span aria-hidden="true">&#128196;</span>
-                        <span class="pdf-attachment-name">
-                            {% if doc.is_first_document %}{% trans "Letter (first page)" %}{% else %}{{ doc.filename|default:"unnamed" }}{% endif %}
-                        </span>
-                    </div>
-                    <div class="pdf-pages">
-                        <div class="pdf-loading">{% trans "Loading…" %}</div>
-                    </div>
-                </div>
-            {% endif %}
+            {% include "django_pymissive/includes/postal_pdf_attachment_preview.html" %}
         {% endfor %}
     {% else %}
-        {# Unsaved missive (campaign preview): fall back to inline HTML letter page. #}
-        {% include "django_pymissive/includes/postal_a4_letter_page.html" %}
+        {# Campaign preview: render the letter as a PDF (via download_pdf, which
+           runs body_to_pdf and the full first_document_processors chain incl.
+           watermark) instead of inline HTML, so the preview matches what the
+           recipient receives. Fall back to inline HTML when no campaign is
+           bound (e.g. ad-hoc unsaved missive preview). Other PDF attachments
+           follow underneath, also via PDF.js. #}
+        {% if campaign %}
+        <div class="pdf-attachment"
+             data-pdf-url="{% url 'django_pymissive:download_pdf' 'campaign' campaign.pk %}?type={{ campaign_preview_kind|urlencode }}">
+            <div class="pdf-attachment-label">
+                <span aria-hidden="true">&#128196;</span>
+                <span class="pdf-attachment-name">{% trans "Letter (first page)" %}</span>
+            </div>
+            <div class="pdf-pages">
+                <div class="pdf-loading">{% trans "Loading…" %}</div>
+            </div>
+        </div>
+        {% else %}
+            {% include "django_pymissive/includes/postal_a4_letter_page.html" %}
+        {% endif %}
+        {% for doc in missive.attachments_physical %}
+            {% if not doc.is_first_document %}
+                {% include "django_pymissive/includes/postal_pdf_attachment_preview.html" %}
+            {% endif %}
+        {% endfor %}
     {% endif %}
 
 </div>

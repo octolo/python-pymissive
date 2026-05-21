@@ -181,6 +181,41 @@ def test_generate_first_document_does_not_overwrite_virtual_attachment(settings)
     assert att.priority == FIRST_DOCUMENT_PRIORITY
 
 
+def test_ensure_first_document_skips_unsaved_missive(settings):
+    """Campaign preview uses an unsaved Missive (UUID pk set, row not in DB)."""
+    from django_pymissive.models.campaign import MissiveCampaign
+    from django_pymissive.views.preview import missive_for_campaign_preview
+
+    campaign = MissiveCampaign.objects.create(subject="Campaign preview")
+    missive = missive_for_campaign_preview(campaign, "postal")
+    assert missive._state.adding
+    assert missive.pk is not None
+    assert not missive.is_persisted
+    assert missive.ensure_first_document() is None
+    assert (
+        missive.to_missiveattachment.filter(
+            attachment_type=MissiveAttachmentType.ATTACHMENT,
+            priority=FIRST_DOCUMENT_PRIORITY,
+        ).count()
+        == 0
+    )
+
+
+def test_first_document_compiled_reads_campaign_first_document(settings):
+    settings.PYMISSIVE_DEFAULT_BODY_PROCESSORS = []
+    from django_pymissive.models.campaign import MissiveCampaign
+    from django_pymissive.views.preview import missive_for_campaign_preview
+
+    campaign = MissiveCampaign.objects.create(
+        subject="Camp",
+        first_document="<p>campaign letter</p>",
+        body_html="<p>email body</p>",
+    )
+    missive = missive_for_campaign_preview(campaign, "postal")
+    assert "campaign letter" in missive.first_document_compiled
+    assert "email body" not in missive.first_document_compiled
+
+
 def test_ensure_first_document_skips_non_postal(settings):
     """Email missives don't get a first-document — ``ensure_first_document`` is a no-op."""
     settings.PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS = [
@@ -318,6 +353,25 @@ def test_get_serialized_attachment_passthrough_when_chain_empty(settings):
     assert payload["content"] == b"raw bytes"
 
 
+def test_postal_attachments_ignore_linked_flag(settings):
+    """Postal/LRE: ``linked`` does not exclude attachments from send or preview."""
+    settings.PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS = []
+    settings.PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS = [
+        "tests.test_first_document_flow._record_renderer",
+    ]
+    missive = _make_lre_missive()
+    att = MissiveBaseAttachment.objects.create(
+        missive=missive,
+        attachment_type=MissiveAttachmentType.ATTACHMENT,
+        attachment_file=ContentFile(b"%PDF-1.4 linked", name="linked.pdf"),
+        linked=True,
+    )
+    assert att in list(missive.attachments_physical)
+    payloads = missive.get_serialized_attachments(linked=False)
+    linked_payload = next(p for p in payloads if p["name"] == "linked.pdf")
+    assert linked_payload["content"] == b"%PDF-1.4 linked"
+
+
 def test_get_serialized_attachment_linked_skips_chain(settings):
     """``linked=True`` returns metadata only — no read, no chain run."""
     _attachment_calls.clear()
@@ -395,7 +449,7 @@ def test_default_watermark_chain_stamps_pdf_attachments(small_pdf_bytes, setting
     pytest.importorskip("pypdf")
     settings.PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS = [
         [
-            "django_pymissive.attachment_processors.watermark_pdf_attachments",
+            "django_pymissive.processors.attachment.watermark.watermark_pdf_attachments",
             {"text": "WATERMARK_SENTINEL", "alpha": 0.18},
         ],
     ]

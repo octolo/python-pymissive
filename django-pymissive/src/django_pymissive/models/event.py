@@ -3,7 +3,7 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from .base import CommentTimestampedModel
+from .mixins import CommentTimestampedModel
 from .choices import MissiveEventType
 from ..managers.event import MissiveEventManager
 from django.utils import timezone

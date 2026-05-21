@@ -149,25 +149,24 @@ class MissiveVirtualAttachmentInline(admin.TabularInline):
     ]
 
 
-class CampaignAttachmentInline(admin.StackedInline):
-    """Inline for campaign attachments (stacked + fieldsets: même lisibilité que missive)."""
+class CampaignAttachmentBaseInline(admin.StackedInline):
+    """Base inline for campaign attachments (same UX as :class:`MissiveAttachmentBaseInline`)."""
 
-    model = CampaignAttachment
+    model = MissiveBaseAttachment
+    fk_name = "campaign"
     extra = 0
     fieldsets = _STANDALONE_ATTACHMENT_INLINE_FIELDSETS
+    verbose_name = _("Attachment")
+    verbose_name_plural = _("Attachments")
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(missive__isnull=True)
 
 
-class CampaignAttachmentBaseInline(admin.TabularInline):
-    """Base inline for campaign attachments."""
+class CampaignAttachmentInline(CampaignAttachmentBaseInline):
+    """Alias kept for imports; same stacked inline as :class:`CampaignAttachmentBaseInline`."""
 
-    model = CampaignAttachment
-    extra = 0
-    fields = [
-        "priority",
-        "page_count",
-        "external_id",
-        "linked",
-    ]
+    pass
 
 
 class CampaignVirtualAttachmentInline(admin.TabularInline):

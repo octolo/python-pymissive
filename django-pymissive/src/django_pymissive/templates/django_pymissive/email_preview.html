@@ -46,35 +46,38 @@
     <div class="email-body">
         {% if missive.body_html_compiled %}
             <fieldset class="email-html">
-                <legend>HTML Content</legend>
+                <legend>{% trans "HTML Content" %}</legend>
                 {{ missive.body_html_compiled|safe }}
             </fieldset>
         {% endif %}
+
+        {% with physical_attachments=missive.attachments_physical %}
+        {% if physical_attachments %}
+        <div class="attachments">
+            {% for doc in physical_attachments %}
+            {% if doc.attachment_url %}
+            <a href="{{ doc.attachment_url.url }}" target="_blank" rel="noopener">
+                <span>&#128196;</span>
+                <small>{{ doc.attachment_url.name|default:"unnamed" }}</small>
+            </a>
+            {% else %}
+            <span class="empty"><span>&#128196;</span> <small>{% trans "Not filled in" %}</small></span>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
         {% if missive.body_text_compiled %}
             <details class="email-plaintext-collapsible">
-                <summary>Plain Text Content</summary>
-                <fieldset class="email-html">
-                    <pre>{{ missive.body_text_compiled }}</pre>
-                </fieldset>
+                <summary>{% trans "Plain Text Content" %}</summary>
+                <pre class="email-plaintext-content">{{ missive.body_text_compiled }}</pre>
             </details>
         {% endif %}
+
         {% if not missive.body_html_compiled and not missive.body_text_compiled %}
             <p class="empty">{% trans 'No content' %}</p>
         {% endif %}
     </div>
-    {% if missive.attachments_physical %}
-    <div class="attachments">
-        {% for doc in missive.attachments_physical %}
-        {% if doc.attachment_url %}
-        <a href="{{ doc.attachment_url.url }}" target="_blank" rel="noopener">
-            <span>&#128196;</span>
-            <small>{{ doc.attachment_url.name|default:"unnamed" }}</small>
-        </a>
-        {% else %}
-        <span class="empty"><span>&#128196;</span> <small>{% trans "Not filled in" %}</small></span>
-        {% endif %}
-        {% endfor %}
-    </div>
-    {% endif %}
 </div>
 {% endblock %}
