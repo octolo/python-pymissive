@@ -108,7 +108,7 @@ ADDRESS_FIELDS = {
 GENERIC_SUPPORT = {
     "email": ["email", "email_marketing", "ere"],
     "phone": ["sms", "rcs", "voice_call",],
-    "address": ["lre"],
+    "address": ["lre", "hand_delivery"],
     "application": ["push_notification", "branded"],
 }
 

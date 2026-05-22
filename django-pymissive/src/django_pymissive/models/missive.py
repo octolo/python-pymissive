@@ -442,7 +442,10 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         support = self.missive_support.lower()
         name = self.get_locally_or_campaign_value("sender_name")
         sender = self.get_locally_or_campaign_value(f"sender_{support}")
-        sender = dict(sender) if support == "address" else str(sender) if sender else ""
+        if support == "address":
+            sender = dict(sender) if sender else {}
+        else:
+            sender = str(sender) if sender else ""
         return {
             "name": name or "",
             support: sender,
@@ -557,6 +560,42 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def check_lre(self):
         body = self.get_locally_or_campaign_value("body_html")
         return self.check_recipients() and bool(body and body.strip())
+
+    def check_hand_delivery(self):
+        """Hand-delivered missive: sender (name + address) + at least one named recipient.
+
+        Sender name resolution order:
+          1. ``self.sender_name``
+          2. Campaign ``sender_address_name``
+          3. Campaign ``sender_email_name``
+          4. Campaign ``sender_phone_name``
+
+        Sender address: ``self.sender_address`` then campaign ``sender_address``.
+        Recipient: only a non-empty ``name`` is required (no email/phone/address).
+        """
+        has_named_recipient = (
+            self.recipients
+            .filter(recipient_type=MissiveRecipientType.RECIPIENT)
+            .exclude(name="")
+            .exclude(name__isnull=True)
+            .exists()
+        )
+        if not has_named_recipient:
+            return False
+
+        sender_name = self.sender_name
+        if not sender_name and self.campaign_id and self.campaign is not None:
+            for field in ("sender_address_name", "sender_email_name", "sender_phone_name"):
+                sender_name = getattr(self.campaign, field, None)
+                if sender_name:
+                    break
+        if not sender_name:
+            return False
+
+        sender_address = self.sender_address
+        if not sender_address and self.campaign_id and self.campaign is not None:
+            sender_address = self.campaign.sender_address
+        return bool(sender_address)
 
     def _campaign_preview_kind(self) -> str:
         """Map missive_type to the campaign preview ``?type=`` kind (email/sms/postal)."""
@@ -975,13 +1014,29 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     def _update_recipients(self, recipients):
         for recipient in recipients:
-            rec = self.to_missiverecipient.get(id=recipient.get("internal_id"))
+            internal_id = recipient.get("internal_id")
+            if not internal_id:
+                continue
+            rec = self.to_missiverecipient.filter(id=internal_id).first()
+            if rec is None:
+                continue
             rec.external_id = recipient.get("external_id")
             rec.save(update_fields=["external_id"])
 
     def _update_attachments(self, attachments):
+        """Echo back ``external_id`` for missive-owned attachments only.
+
+        ``get_serialized_attachments`` may include campaign-owned attachments
+        (``self.attachments`` joins ``missive`` and ``campaign``); their ids
+        are not in ``to_missiveattachment``, so we silently skip them.
+        """
         for attachment in attachments:
-            att = self.to_missiveattachment.get(id=attachment.get("internal_id"))
+            internal_id = attachment.get("internal_id")
+            if not internal_id:
+                continue
+            att = self.to_missiveattachment.filter(id=internal_id).first()
+            if att is None:
+                continue
             att.external_id = attachment.get("external_id")
             att.save(update_fields=["external_id"])
 
@@ -1119,11 +1174,20 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             self.save(update_fields=["status"])
 
     def retrieve_missive(self):
-        """Retrieve the status of the missive from the provider."""
+        """Retrieve the status of the missive from the provider, then recompute status.
+
+        Even when the provider returns no new events (e.g. ``hand_delivery``
+        which has no remote state to fetch), we still recompute the missive
+        and per-recipient status from the events already in DB so the
+        "Status" admin button is never a no-op.
+        """
         response = self.call_provider_service("retrieve", **self.get_serialized_data(attachments=False))
         events = response.get("events")
         if events:
             self.handle_events(events)
+        for recipient in self.recipients.all():
+            recipient.set_status()
+        self.set_status()
 
     def set_status(self):
         from ..models.event import MissiveEvent

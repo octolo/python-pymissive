@@ -1,5 +1,6 @@
 TYPES = {
     "lre": "Electronic registered letter (LRE)",
+    "hand_delivery": "Hand delivery",
 }
 
 FIELDS = {

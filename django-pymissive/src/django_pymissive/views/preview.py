@@ -35,6 +35,7 @@ MISSIVE_TEMPLATE_MAP = {
     "postal_signature": "django_pymissive/postal_preview.html",
     "lre": "django_pymissive/postal_preview.html",
     "lre_qualified": "django_pymissive/postal_preview.html",
+    "hand_delivery": "django_pymissive/postal_preview.html",
 }
 
 DEFAULT_TEMPLATE = "django_pymissive/base_preview.html"

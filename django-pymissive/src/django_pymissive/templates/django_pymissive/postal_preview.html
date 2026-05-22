@@ -66,12 +66,14 @@
             {% include "django_pymissive/includes/postal_pdf_attachment_preview.html" %}
         {% endfor %}
     {% else %}
-        {# Campaign preview: render the letter as a PDF (via download_pdf, which
-           runs body_to_pdf and the full first_document_processors chain incl.
-           watermark) instead of inline HTML, so the preview matches what the
-           recipient receives. Fall back to inline HTML when no campaign is
-           bound (e.g. ad-hoc unsaved missive preview). Other PDF attachments
-           follow underneath, also via PDF.js. #}
+        {% comment %}
+        Campaign preview: render the letter as a PDF (via download_pdf, which
+        runs body_to_pdf and the full first_document_processors chain incl.
+        watermark) instead of inline HTML, so the preview matches what the
+        recipient receives. Fall back to inline HTML when no campaign is
+        bound (e.g. ad-hoc unsaved missive preview). Other PDF attachments
+        follow underneath, also via PDF.js.
+        {% endcomment %}
         {% if campaign %}
         <div class="pdf-attachment"
              data-pdf-url="{% url 'django_pymissive:download_pdf' 'campaign' campaign.pk %}?type={{ campaign_preview_kind|urlencode }}">
