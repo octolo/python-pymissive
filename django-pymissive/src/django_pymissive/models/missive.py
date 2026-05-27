@@ -1203,7 +1203,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     #########################################################
 
     def can_billings(self):
-        return self.has_service("get_billings") and self.external_id
+        return self.has_service("get_billings") and self.external_id and not is_dry_run()
 
     def get_billings(self):
         """Get the billings of the missive."""
