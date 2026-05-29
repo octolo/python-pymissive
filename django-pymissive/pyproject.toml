@@ -4,7 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django-pymissive"
+<<<<<<< HEAD
 version = "1.1.1"
+=======
+version = "1.1.0"
+>>>>>>> 09cb3fb (Add django-pymissive smoke tests)
 description = "Django library for multi-channel missive management (email, SMS, push, postal, etc.)"
 readme = "README.md"
 authors = [
@@ -35,6 +39,7 @@ requires-python = ">=3.10"
 dependencies = [
     "Django>=5.0",
     "django-providerkit>=1.1.1",
+    "django-geoaddress>=1.0.2",
     "django-phonenumber-field[phonenumbers]>=7.0",
     "babel>=2.0",
     "pymissive>=1.1.1",
@@ -65,6 +70,7 @@ pdf = [
 ]
 test = [
     "pytest>=8",
+    "pytest-django>=4.8",
     "python-dotenv",
 ]
 
