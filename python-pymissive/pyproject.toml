@@ -4,11 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymissive"
-<<<<<<< HEAD
 version = "1.1.1"
-=======
-version = "1.1.0"
->>>>>>> 09cb3fb (Add django-pymissive smoke tests)
 description = "Framework-agnostic messaging library for multi-channel communication."
 authors = [{ name = "Octolo", email = "dev@octolo.tech" }]
 readme = "README.md"
