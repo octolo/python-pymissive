@@ -65,7 +65,7 @@ class MissiveEventAdmin(AdminBoostModel):
         "event",
         "missive",
         "recipient",
-        "missive__provider",
+        "missive_provider",
         "occurred_at",
         "client_initiated",
     ]
@@ -131,6 +131,10 @@ class MissiveEventAdmin(AdminBoostModel):
 
     def has_replay_permission(self, request, obj=None):
         return obj and obj.pk and obj.can_replay()
+
+    @admin.display(ordering="missive__provider", description=_("Provider"))
+    def missive_provider(self, obj):
+        return obj.missive.provider if obj.missive_id else None
 
     def handle_replay(self, request, obj=None):
         """Handle replay of event."""

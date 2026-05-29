@@ -16,11 +16,10 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Web Environment",
     "Framework :: Django",
-    "Framework :: Django :: 3.2",
-    "Framework :: Django :: 4.0",
-    "Framework :: Django :: 4.1",
-    "Framework :: Django :: 4.2",
     "Framework :: Django :: 5.0",
+    "Framework :: Django :: 5.1",
+    "Framework :: Django :: 5.2",
+
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
@@ -34,8 +33,9 @@ classifiers = [
 keywords = ["django", "missive"]
 requires-python = ">=3.10"
 dependencies = [
-    "Django>=3.2",
+    "Django>=5.0",
     "django-providerkit>=1.1.1",
+    "django-geoaddress>=1.0.2",
     "django-phonenumber-field[phonenumbers]>=7.0",
     "babel>=2.0",
     "pymissive>=1.1.1",
@@ -64,6 +64,12 @@ pdf = [
     "pypdf>=4.0",
     "reportlab>=4.0",
 ]
+test = [
+    "pytest>=8",
+    "pytest-django>=4.8",
+    "python-dotenv",
+]
+
 
 [project.urls]
 Homepage = "https://github.com/octolo/python-missive"
@@ -89,4 +95,3 @@ ignore = ["migrations"]
 
 [tool.django-stubs]
 django_settings_module = "tests.settings"
-

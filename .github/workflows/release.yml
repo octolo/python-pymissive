@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.package_name }}
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package_name: pymissive
+            working_directory: python-pymissive
+            packages_dir: python-pymissive/dist/
+          - package_name: django-pymissive
+            working_directory: django-pymissive
+            packages_dir: django-pymissive/dist/
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build distributions
+        working-directory: ${{ matrix.working_directory }}
+        run: |
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.package_name }}" = "django-pymissive" ]; then
+            python -m pip install "Django==5.2.*"
+            python -m pip install -e ../python-pymissive
+          fi
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package_name }}-distributions
+          path: ${{ matrix.packages_dir }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish ${{ matrix.package_name }} to ${{ matrix.repository }}
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package_name: pymissive
+            packages_dir: python-pymissive/dist/
+            repository: testpypi
+            repository_url: https://test.pypi.org/legacy/
+          - package_name: pymissive
+            packages_dir: python-pymissive/dist/
+            repository: pypi
+            repository_url: ""
+          - package_name: django-pymissive
+            packages_dir: django-pymissive/dist/
+            repository: testpypi
+            repository_url: https://test.pypi.org/legacy/
+          - package_name: django-pymissive
+            packages_dir: django-pymissive/dist/
+            repository: pypi
+            repository_url: ""
+
+    steps:
+      - name: Download distributions
+        if: ${{ (matrix.repository == 'testpypi' && contains(github.ref_name, 'rc')) || (matrix.repository == 'pypi' && !contains(github.ref_name, 'rc')) }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.package_name }}-distributions
+          path: ${{ matrix.packages_dir }}
+
+      - name: Generate artifact attestation
+        if: ${{ (matrix.repository == 'testpypi' && contains(github.ref_name, 'rc')) || (matrix.repository == 'pypi' && !contains(github.ref_name, 'rc')) }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ matrix.packages_dir }}*
+
+      - name: Publish to TestPyPI
+        if: ${{ matrix.repository == 'testpypi' && contains(github.ref_name, 'rc') }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ matrix.repository_url }}
+          packages-dir: ${{ matrix.packages_dir }}
+
+      - name: Publish to PyPI
+        if: ${{ matrix.repository == 'pypi' && !contains(github.ref_name, 'rc') }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ${{ matrix.packages_dir }}
