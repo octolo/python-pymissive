@@ -8,7 +8,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('django_pymissive', '0004_missiveproof_alter_missivecampaign_options_and_more'),
+        ('django_pymissive', '0007_alter_missive_missive_type_and_more'),
     ]
 
     operations = [
