@@ -31,6 +31,10 @@ from ..fields import JSONField
 FIRST_DOCUMENT_PRIORITY = 0
 
 
+def _default_attachment_object_arguments():
+    return {"method": "retrieve_attachment", "args": [], "kwargs": {}}
+
+
 def _attachment_upload_to(instance, filename):
     """Return upload path based on attachment class."""
     upload_to = getattr(settings, 'PYMISSIVE_ATTACHMENT_UPLOAD_TO', None)
@@ -158,7 +162,7 @@ class MissiveBaseAttachment(CommentTimestampedModel):
     )
 
     attachment_object_arguments = JSONField(
-        default=dict({"method": "retrieve_attachment", "args": [], "kwargs": {}}),
+        default=_default_attachment_object_arguments,
         blank=True,
         verbose_name=_("Attachment Object Arguments"),
         help_text=_("Arguments to pass to the file method (as dict for **kwargs)"),

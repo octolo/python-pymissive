@@ -14,6 +14,17 @@ def get_default_webhook_scheme():
     """Return default scheme for webhook (serializable for migrations)."""
     return WebhookScheme.HTTPS if get_default_scheme() == "https" else WebhookScheme.HTTP
 
+
+WEBHOOK_FIELD_MAX_LENGTHS = {
+    "id": 255,
+    "external_id": 255,
+    "type": 50,
+    "url": 2000,
+    "event": 50,
+    "reason": 500,
+}
+
+
 class MissiveWebhook(models.Model):
     """Webhook configuration for missive events."""
 
@@ -124,5 +135,7 @@ for field, cfg in WEBHOOK_FIELDS.items():
         }
         if field == "type":
             field_cfg["choices"] = MissiveType.choices
+        if cfg["format"] == "str":
+            field_cfg["max_length"] = WEBHOOK_FIELD_MAX_LENGTHS.get(field, 255)
         db_field = fields_associations[cfg["format"]](**field_cfg)
         MissiveWebhook.add_to_class(field, db_field)
