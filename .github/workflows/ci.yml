@@ -1,0 +1,111 @@
+name: Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: ${{ matrix.package_name }} tests py${{ matrix.python_version }} ${{ matrix.django_version }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        package_name: ["pymissive", "django-pymissive"]
+        python_version: ["3.10", "3.11", "3.12"]
+        django_version: ["", "5.0.*", "5.1.*", "5.2.*"]
+        exclude:
+          - package_name: pymissive
+            django_version: "5.0.*"
+          - package_name: pymissive
+            django_version: "5.1.*"
+          - package_name: pymissive
+            django_version: "5.2.*"
+          - package_name: django-pymissive
+            django_version: ""
+        include:
+          - package_name: pymissive
+            working_directory: python-pymissive
+            test_command: python -c "import pymissive; print(pymissive.__name__)"
+          - package_name: django-pymissive
+            working_directory: django-pymissive
+            test_command: python -m pytest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python_version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.working_directory }}
+        run: |
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.package_name }}" = "django-pymissive" ]; then
+            python -m pip install -e ".[test]"
+          else
+            python -m pip install -e .
+          fi
+
+      - name: Install local pymissive
+        if: ${{ matrix.package_name == 'django-pymissive' }}
+        working-directory: ${{ matrix.working_directory }}
+        run: python -m pip install -e ../python-pymissive
+
+      - name: Install Django
+        if: ${{ matrix.package_name == 'django-pymissive' }}
+        working-directory: ${{ matrix.working_directory }}
+        run: python -m pip install "Django==${{ matrix.django_version }}"
+
+      - name: Django system check
+        if: ${{ matrix.package_name == 'django-pymissive' }}
+        working-directory: ${{ matrix.working_directory }}
+        run: python manage.py check
+
+      - name: Run tests
+        working-directory: ${{ matrix.working_directory }}
+        run: ${{ matrix.test_command }}
+
+  build:
+    name: Build ${{ matrix.package_name }}
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package_name: pymissive
+            working_directory: python-pymissive
+          - package_name: django-pymissive
+            working_directory: django-pymissive
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build distributions
+        working-directory: ${{ matrix.working_directory }}
+        run: |
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.package_name }}" = "django-pymissive" ]; then
+            python -m pip install "Django==5.2.*"
+            python -m pip install -e ../python-pymissive
+          fi
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
