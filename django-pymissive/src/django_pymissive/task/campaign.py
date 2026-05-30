@@ -1,22 +1,8 @@
-from django.utils import timezone
-
 from ..models.campaign import MissiveScheduledCampaign
 
 
 def run_campaign(campaign_id):
-    scheduled = MissiveScheduledCampaign.objects.get(
-        id=campaign_id, send_date__isnull=True
-    )
-    scheduled.send_date = timezone.now()
-    scheduled.save()
-    try:
-        scheduled.run_campaign()
-    finally:
-        # Clear processing flag so campaign can be restarted if needed
-        campaign = scheduled.campaign
-        metadata = dict(campaign.metadata or {})
-        metadata.pop("processing", None)
-        campaign.metadata = metadata
-        campaign.save(update_fields=["metadata"])
-    scheduled.ended_at = timezone.now()
-    scheduled.save()
+    # Fetch by id only; run_with_tracking() performs the atomic send_date claim
+    # and returns early if the run was already started by another worker.
+    scheduled = MissiveScheduledCampaign.objects.get(id=campaign_id)
+    scheduled.run_with_tracking()

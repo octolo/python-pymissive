@@ -145,7 +145,7 @@ MISSIVE_QUALIFIED_ACKNOWLEDGEMENT = False
 
 # PYMISSIVE_SAVE_UNTREATED_EVENTS = True  # Save events that could not be processed (default: False)
 PYMISSIVE_ATTACHMENT_PATH_MAX_LENGTH = 4000
-#PYMISSIVE_DRY_RUN = True
+PYMISSIVE_DRY_RUN = True
 #PYMISSIVE_DISABLE_SEND = True
 PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
     # 1. Render Django template variables/tags ({{ var }}, {% if %}, …)

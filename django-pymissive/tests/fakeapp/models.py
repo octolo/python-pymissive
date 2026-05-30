@@ -115,3 +115,8 @@ class Contact(models.Model):
             "full_name": self.full_name,
             "initials": f"{self.first_name[:1]}{self.last_name[:1]}".upper(),
         }
+
+    def run_campaign_contact(self, scheduled_id, **kwargs) -> None:
+        """Delegate to fakeapp runner — usable as task_object on MissiveScheduledCampaign."""
+        from .run_campaign import run_fakeapp_campaign
+        run_fakeapp_campaign(scheduled_id, **kwargs)

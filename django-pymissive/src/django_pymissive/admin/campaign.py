@@ -4,6 +4,7 @@ from urllib.parse import unquote
 
 from django.contrib import admin
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
@@ -20,9 +21,51 @@ from pymissive.config import MISSIVE_TYPES
 
 from ..models.campaign import MissiveCampaign, MissiveScheduledCampaign
 from ..models.attachment import MissiveBaseAttachment
+from ..fields import RichTextField
 from ..utils import recalculate_attachment_priorities
 from .attachment import CampaignAttachmentBaseInline
 from .related_object import CampaignRelatedObjectInline
+
+
+_SCHEDULED_CAMPAIGN_INLINE_FIELDSETS = (
+    (
+        None,
+        {
+            "fields": (
+                "missive_type",
+                "scheduled_send_date",
+            ),
+        },
+    ),
+    (
+        _("Tracking"),
+        {
+            "classes": ("collapse",),
+            "fields": (
+                "send_date",
+                "ended_at",
+            ),
+        },
+    ),
+    (
+        _("External task object"),
+        {
+            "classes": ("collapse",),
+            "fields": (
+                "external_task_backend",
+                ("task_content_type", "task_object_id"),
+                "task_object_arguments",
+            ),
+        },
+    ),
+    (
+        _("Config"),
+        {
+            "classes": ("collapse",),
+            "fields": ("additional_config",),
+        },
+    ),
+)
 
 
 @admin.register(MissiveScheduledCampaign)
@@ -31,41 +74,232 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
 
     list_display = [
         "campaign",
+        "missive_type",
         "scheduled_send_date",
         "send_date",
         "ended_at",
+        "task_object_display",
         "comment",
-        "additional_config",
     ]
+    list_filter = ["missive_type"]
     readonly_fields = [
         "campaign",
-        "scheduled_send_date",
         "send_date",
         "ended_at",
         "created_at",
         "updated_at",
     ]
 
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj))
+        if obj and not obj.can_send:
+            for field in ("missive_type", "scheduled_send_date", "external_task_backend",
+                          "task_content_type", "task_object_id", "task_object_arguments",
+                          "additional_config"):
+                if field not in readonly:
+                    readonly.append(field)
+        return readonly
 
-class MissiveScheduledCampaignInline(admin.TabularInline):
+    fieldsets = [
+        (
+            None,
+            {
+                "fields": (
+                    "campaign",
+                    "missive_type",
+                    "scheduled_send_date",
+                    "send_date",
+                    "ended_at",
+                )
+            },
+        ),
+    ]
+
+    def change_fieldsets(self):
+        self.add_to_fieldset(
+            _("External task object"),
+            [
+                "external_task_backend",
+                "task_content_type",
+                "task_object_id",
+                "task_object_arguments",
+            ],
+            classes=("collapse",),
+        )
+        self.add_to_fieldset(
+            _("Config / audit"),
+            ["additional_config", "comment", "created_at", "updated_at"],
+            classes=("collapse",),
+        )
+
+    changeform_actions = {
+        "start_campaign": _("Start campaign"),
+        "reschedule": _("Reschedule"),
+        "duplicate": _("Duplicate"),
+    }
+
+    def has_start_campaign_permission(self, request, obj=None):
+        return bool(obj and obj.pk and obj.can_send)
+
+    def has_reschedule_permission(self, request, obj=None):
+        return bool(obj and obj.pk and not obj.can_send)
+
+    @admin_boost_action("reschedule", _("Reschedule"))
+    def handle_reschedule(self, request, object_id):
+        return redirect(
+            reverse(
+                "admin:django_pymissive_missivescheduledcampaign_reschedule",
+                args=[object_id],
+            )
+        )
+
+    @admin_boost_view("confirm", _("Reschedule"), hidden=True)
+    def reschedule(self, request, obj, confirmed=False):
+        if not confirmed:
+            return {"confirm": _("Create a new scheduled send now (duplicating this configuration)?")}
+        new_scheduled = MissiveScheduledCampaign.objects.create(
+            campaign=obj.campaign,
+            scheduled_send_date=timezone.now(),
+            missive_type=obj.missive_type,
+            task_content_type=obj.task_content_type,
+            task_object_id=obj.task_object_id,
+            task_object_arguments=obj.task_object_arguments,
+            external_task_backend=obj.external_task_backend,
+            additional_config=obj.additional_config,
+            comment=obj.comment,
+        )
+        messages.success(request, _("New scheduled send created."))
+        return redirect(
+            reverse(
+                "admin:django_pymissive_missivescheduledcampaign_change",
+                args=[new_scheduled.pk],
+            )
+        )
+
+    @admin_boost_action("start_campaign", _("Start campaign"))
+    def handle_start_campaign(self, request, object_id):
+        return redirect(
+            reverse(
+                "admin:django_pymissive_missivescheduledcampaign_start_campaign",
+                args=[object_id],
+            )
+        )
+
+    @admin_boost_view("confirm", _("Start campaign"), hidden=True)
+    def start_campaign(self, request, obj, confirmed=False):
+        if not obj.can_send:
+            messages.error(request, _("This scheduled campaign cannot be started (already sent or not yet due)."))
+            return redirect(
+                reverse("admin:django_pymissive_missivescheduledcampaign_change", args=[obj.pk])
+            )
+        if not confirmed:
+            return {"confirm": _("Are you sure you want to start this scheduled campaign?")}
+        obj.start_scheduled_campaign()
+        messages.success(request, _("Scheduled campaign started successfully."))
+        return redirect(reverse("admin:django_pymissive_missivescheduledcampaign_changelist"))
+
+    def has_duplicate_permission(self, request, obj=None):
+        return bool(obj and obj.pk)
+
+    @admin_boost_action("duplicate", _("Duplicate"))
+    def handle_duplicate(self, request, object_id):
+        return redirect(
+            reverse(
+                "admin:django_pymissive_missivescheduledcampaign_duplicate",
+                args=[object_id],
+            )
+        )
+
+    @admin_boost_view("confirm", _("Duplicate"), hidden=True)
+    def duplicate(self, request, obj, confirmed=False):
+        if not confirmed:
+            return {"confirm": _("Duplicate this scheduled send? The copy will not be started automatically.")}
+        new_scheduled = MissiveScheduledCampaign.objects.create(
+            campaign=obj.campaign,
+            scheduled_send_date=obj.scheduled_send_date,
+            missive_type=obj.missive_type,
+            task_content_type=obj.task_content_type,
+            task_object_id=obj.task_object_id,
+            task_object_arguments=obj.task_object_arguments,
+            external_task_backend=obj.external_task_backend,
+            additional_config=obj.additional_config,
+            comment=obj.comment,
+        )
+        messages.success(request, _("Scheduled send duplicated — you can edit it before starting."))
+        return redirect(
+            reverse(
+                "admin:django_pymissive_missivescheduledcampaign_change",
+                args=[new_scheduled.pk],
+            )
+        )
+
+    def task_object_display(self, obj):
+        if obj.task_content_type_id and obj.task_object_id:
+            task_obj = obj.task_object
+            if task_obj:
+                return format_html(
+                    "<small>{}: {}</small>",
+                    obj.task_content_type,
+                    task_obj,
+                )
+            return format_html(
+                "<small>{} #{} (deleted)</small>",
+                obj.task_content_type,
+                obj.task_object_id,
+            )
+        return "-"
+
+    task_object_display.short_description = _("Task object")
+
+
+class MissiveScheduledCampaignInline(admin.StackedInline):
     """Inline for missive scheduled campaign model."""
 
     model = MissiveScheduledCampaign
     extra = 0
-    fields = [
-        "scheduled_send_date",
-        "additional_config",
-        "send_date",
-        "ended_at",
-    ]
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "change_link",
+                    "missive_type",
+                    "scheduled_send_date",
+                ),
+            },
+        ),
+    ) + _SCHEDULED_CAMPAIGN_INLINE_FIELDSETS[1:]
     readonly_fields = [
-        "campaign",
+        "change_link",
         "send_date",
         "ended_at",
     ]
 
+    def change_link(self, obj):
+        if not obj.pk:
+            return "-"
+        url = reverse(
+            "admin:django_pymissive_missivescheduledcampaign_change",
+            args=[obj.pk],
+        )
+        return format_html('<a href="{}">{}</a>', url, _("Open scheduled send →"))
+
+    change_link.short_description = ""
+
     def has_change_permission(self, request, obj=None):
-        return False
+        # When called from get_formsets_with_inlines, obj is the *parent*
+        # MissiveCampaign — not a MissiveScheduledCampaign instance.
+        # Allow the inline to render; per-row locking is handled via
+        # get_readonly_fields below.
+        if not isinstance(obj, MissiveScheduledCampaign):
+            return True
+        return obj.can_send
+
+    def get_readonly_fields(self, request, obj=None):
+        if isinstance(obj, MissiveScheduledCampaign) and not obj.can_send:
+            return [f.name for f in MissiveScheduledCampaign._meta.get_fields()
+                    if hasattr(f, "column")]
+        return list(self.readonly_fields)
 
 
 @admin.register(MissiveCampaign)
@@ -101,6 +335,8 @@ class MissiveCampaignAdmin(AdminBoostModel):
         recalculate_attachment_priorities(campaign_id=parent.pk if parent else None)
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
+        if isinstance(db_field, RichTextField):
+            kwargs.setdefault("required", False)
         if isinstance(db_field, PhoneNumberField):
             kwargs.setdefault("required", False)
             if db_field.null:
@@ -115,10 +351,7 @@ class MissiveCampaignAdmin(AdminBoostModel):
         (
             None,
             {
-                "fields": (
-                    "subject",
-                    "description",
-                )
+                "fields": ("subject", "description"),
             },
         ),
     ]
@@ -271,7 +504,7 @@ class MissiveCampaignAdmin(AdminBoostModel):
             return {"confirm": _("Are you sure you want to start this campaign?")}
         obj.start_campaign()
         messages.success(request, _("Campaign started successfully."))
-        return redirect(reverse("admin:django_pymissive_missivecampaign_changelist"), args=[obj.pk])
+        return redirect(reverse("admin:django_pymissive_missivecampaign_changelist"))
 
     @admin_boost_view("redirect", _("Show missives"))
     def handle_show_missives(self, request, obj):
