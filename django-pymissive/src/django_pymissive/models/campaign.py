@@ -237,6 +237,84 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             | Q(attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT),
         )
 
+    def get_progress_path(self) -> str:
+        """Relative URL for the live progress page of this campaign."""
+        if not self.pk:
+            return ""
+        return reverse("django_pymissive:campaign_progress", args=[self.pk])
+
+    def get_absolute_url(self):
+        """Used by Django admin "View on site"."""
+        return self.get_progress_path()
+
+    def progress_payload(self) -> dict:
+        """JSON-serializable progress snapshot for the campaign front page."""
+        from django.db.models import Count, Q
+        from pymissive.config import MISSIVE_TYPES
+        from ..managers.scheduler import ERROR_STATUSES
+        from ..models.choices import MissiveStatus
+
+        rows = self.to_missive.values("missive_type").annotate(
+            total=Count("id"),
+            sent=Count("id", filter=~Q(status=MissiveStatus.DRAFT)),
+            error=Count("id", filter=Q(status__in=ERROR_STATUSES)),
+        )
+
+        by_type: dict = {}
+        total_count = sent_count = error_count = 0
+
+        for row in rows:
+            mtype = row["missive_type"]
+            total = row["total"]
+            sent = row["sent"]
+            error = row["error"]
+            total_count += total
+            sent_count += sent
+            error_count += error
+            by_type[mtype] = {
+                "label": MISSIVE_TYPES.get(mtype, mtype),
+                "total": total,
+                "sent": sent,
+                "error": error,
+                "progress": round(sent / total * 100) if total else 0,
+            }
+
+        progress = round(sent_count / total_count * 100) if total_count else 0
+        is_processing = bool((self.metadata or {}).get("processing"))
+
+        if is_processing:
+            status = "running"
+        elif total_count and not self.to_missive.filter(status=MissiveStatus.DRAFT).exists():
+            status = "completed"
+        else:
+            status = "pending"
+
+        runs = []
+        for run in self.to_missivecampaignsend.order_by("-created_at")[:10]:
+            runs.append({
+                "id": run.id,
+                "scheduled_send_date": (
+                    run.scheduled_send_date.isoformat() if run.scheduled_send_date else None
+                ),
+                "send_date": run.send_date.isoformat() if run.send_date else None,
+                "ended_at": run.ended_at.isoformat() if run.ended_at else None,
+                "status": run.run_status,
+                "url": run.get_progress_path(),
+            })
+
+        return {
+            "id": str(self.pk),
+            "subject": self.subject,
+            "running": is_processing,
+            "status": status,
+            "total_count": total_count,
+            "sent_count": sent_count,
+            "error_count": error_count,
+            "progress": progress,
+            "by_type": by_type,
+            "runs": runs,
+        }
+
     def start_campaign(self):
         """Start the campaign."""
         with transaction.atomic():

@@ -175,6 +175,38 @@ body {
     pointer-events: none;
 }
 
+.json-debug {
+    margin-bottom: 16px;
+}
+
+.json-debug summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #6b7280;
+    user-select: none;
+}
+
+.json-debug summary:hover {
+    color: #374151;
+}
+
+.json-pre {
+    margin: 12px 0 0;
+    padding: 12px;
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    line-height: 1.6;
+    overflow-x: auto;
+    white-space: pre;
+    color: #1f2937;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
 .scheduler-footer {
     margin-top: 8px;
     font-size: 0.8rem;

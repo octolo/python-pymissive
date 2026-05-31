@@ -16,6 +16,7 @@
         overallBar: document.getElementById("scheduler-overall-bar"),
         overallErrors: document.getElementById("scheduler-overall-errors"),
         typeList: document.getElementById("scheduler-type-list"),
+        jsonPre: document.getElementById("scheduler-json-pre"),
     };
 
     function formatUpdated() {
@@ -102,6 +103,9 @@
             }
         }
         renderTypeList(data.by_type);
+        if (els.jsonPre) {
+            els.jsonPre.textContent = JSON.stringify(data, null, 2);
+        }
         formatUpdated();
     }
 

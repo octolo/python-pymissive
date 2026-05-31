@@ -1,6 +1,7 @@
 """Missive scheduled campaign model."""
 
 import logging
+import uuid
 
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -69,6 +70,12 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
     from the actual missive statuses.
     """
 
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name=_("ID"),
+    )
     campaign = models.ForeignKey(
         "django_pymissive.MissiveCampaign",
         on_delete=models.CASCADE,
@@ -171,7 +178,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
     class Meta:
         verbose_name = _("Campaign send")
         verbose_name_plural = _("Campaign sends")
-        ordering = ["-scheduled_send_date", "-ended_at", "-id"]
+        ordering = ["-scheduled_send_date", "-ended_at", "-created_at"]
 
     # ------------------------------------------------------------------
     # URL / view
@@ -344,7 +351,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         """Async-dispatch the campaign run via the configured backend."""
         from ..task import get_campaign_backend
         backend = get_campaign_backend()
-        backend.delay(self.id)
+        backend.delay(str(self.id))
 
     # ------------------------------------------------------------------
     # Execution
@@ -369,6 +376,16 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             if not claimed:
                 return
             self.send_date = now
+
+            # When retry_failed is set, duplicate the campaign's error missives
+            # into fresh DRAFTs at claim time — same transaction as the date
+            # claim, before attaching drafts to this run. The originals become
+            # HISTORY with their scheduler FK left untouched (we never re-point
+            # the run that already dispatched them); each duplicate is a brand
+            # new DRAFT attached to this run. Done here (not in run_campaign) so
+            # retry works generically for every backend the task dispatches to.
+            if self.retry_failed:
+                self._retry_error_missives()
 
             # Attach all relevant DRAFT missives to this scheduler in the same
             # transaction as the send_date claim, so live count annotations are
@@ -489,10 +506,16 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         return failures
 
     def _retry_error_missives(self) -> int:
-        """Reset failed campaign missives (excluding history) back to DRAFT for a second pass.
+        """Duplicate the campaign's error missives as fresh DRAFTs for this run.
 
-        Missives are re-attached to this scheduler so that live count annotations
-        remain accurate. Returns the number of missives reset.
+        Called from :meth:`run_with_tracking` at claim time (before drafts are
+        attached). Each error missive is moved to HISTORY — its ``scheduler`` FK
+        is left untouched so the run that originally dispatched it keeps its
+        history — and replaced by a clean duplicate (status=DRAFT, no
+        external_id) attached to *this* scheduler. This mirrors
+        :meth:`~django_pymissive.models.missive.Missive.resend_missive` so that
+        campaign-sourced fields are re-resolved at send time and the provider
+        sees a brand-new submission. Returns the number of missives duplicated.
         """
         qs = self.campaign.to_missive.filter(
             status__in=ERROR_STATUSES,
@@ -501,7 +524,22 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         )
         if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
             qs = qs.filter(missive_type=self.missive_type)
-        return qs.update(status=MissiveStatus.DRAFT, scheduler=self)
+
+        count = 0
+        with transaction.atomic():
+            for missive in qs:
+                missive.thread_type = MissiveThreadType.HISTORY
+                missive.save(update_fields=["thread_type"])
+                new_missive = missive.duplicate_missive(
+                    thread_type=MissiveThreadType.MISSIVE,
+                    thread_id=missive.thread_id,
+                    resend=True,
+                )
+                new_missive.scheduler = self
+                new_missive.save(update_fields=["scheduler"])
+                count += 1
+
+        return count
 
     def run_campaign(self):
         """Execute the campaign — task_object, external backend, or built-in loop."""
@@ -521,12 +559,6 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             import_string(self.external_task_backend)(self.id)
         else:
             self.process_missives()
-            if self.retry_failed and self._retry_error_missives():
-                logger.info(
-                    "Scheduler %s: retrying error missives (retry_on_error=True)",
-                    self.pk,
-                )
-                self.process_missives()
 
     def clean(self):
         """Validate the configured runner."""

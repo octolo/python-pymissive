@@ -32,6 +32,8 @@ from .scheduler import MissiveScheduledCampaignInline
 class MissiveCampaignAdmin(AdminBoostModel):
     """Admin for missive campaign model."""
 
+    view_on_site = True
+
     list_display = [
         "subject_display",
         "types_display",
@@ -229,7 +231,7 @@ class MissiveCampaignAdmin(AdminBoostModel):
             return {"confirm": _("Are you sure you want to start this campaign?")}
         obj.start_campaign()
         messages.success(request, _("Campaign started successfully."))
-        return redirect(reverse("admin:django_pymissive_missivecampaign_changelist"))
+        return redirect(obj.get_progress_path())
 
     @admin_boost_view("redirect", _("Show missives"))
     def handle_show_missives(self, request, obj):

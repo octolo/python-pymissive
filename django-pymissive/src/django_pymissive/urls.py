@@ -4,6 +4,7 @@ from django.urls import URLPattern, path
 
 from .views.attachment import MissiveAttachmentDownloadView
 from .views.preview import DownloadPDFView, PreviewFormView, PreviewView
+from .views.campaign import CampaignProgressView
 from .views.scheduler import SchedulerProgressView
 from .views.webhook import WebhookView
 
@@ -46,8 +47,13 @@ urlpatterns: List[URLPattern] = [
         name="download_pdf",
     ),
     path(
-        "scheduler/<int:pk>/",
+        "scheduler/<uuid:pk>/",
         SchedulerProgressView.as_view(),
         name="scheduler_progress",
+    ),
+    path(
+        "campaign/<uuid:pk>/progress/",
+        CampaignProgressView.as_view(),
+        name="campaign_progress",
     ),
 ]

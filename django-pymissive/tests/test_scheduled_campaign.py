@@ -20,8 +20,9 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from django_pymissive.models.campaign import MissiveCampaign, MissiveScheduledCampaign
-from django_pymissive.models.choices import MissiveStatus
+from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.scheduler import MissiveScheduledCampaign
+from django_pymissive.models.choices import MissiveStatus, MissiveThreadType
 from django_pymissive.models.missive import Missive
 from tests.fakeapp.models import Contact
 
@@ -337,6 +338,113 @@ def test_run_campaign_external_task_backend(settings):
         sched.run_campaign()
 
     assert called_with == [sched.id]
+
+
+def test_run_with_tracking_retry_duplicates_error_missives_at_claim():
+    """retry_failed: error missives are duplicated as fresh DRAFTs at claim time."""
+    c = _campaign()
+    # A previous run that dispatched the failed missive.
+    old_run = _scheduled(c)
+    failed = _missive(c, status=MissiveStatus.FAILED, missive_type="email")
+    failed.scheduler = old_run
+    failed.save(update_fields=["scheduler"])
+
+    sched = _scheduled(c, retry_failed=True)
+    with patch.object(MissiveScheduledCampaign, "run_campaign"):
+        sched.run_with_tracking()
+
+    # original is archived as HISTORY, its (old) scheduler FK untouched
+    failed.refresh_from_db()
+    assert failed.thread_type == MissiveThreadType.HISTORY
+    assert failed.scheduler_id == old_run.id
+
+    # a fresh DRAFT duplicate is attached to the NEW scheduler
+    dups = Missive.objects.filter(
+        campaign=c, status=MissiveStatus.DRAFT, scheduler=sched
+    )
+    assert dups.count() == 1
+    assert dups.first().thread_id == failed.thread_id
+
+
+def test_run_with_tracking_retry_processed_generically_by_backend():
+    """The duplicated DRAFT is sent by run_campaign (built-in loop) like any draft."""
+    c = _campaign()
+    _missive(c, status=MissiveStatus.FAILED, missive_type="email")
+    sched = _scheduled(c, retry_failed=True)
+
+    called = []
+    with patch.object(Missive, "send_missive", lambda self: called.append(self.pk)):
+        sched.run_with_tracking()
+
+    # the retry duplicate was claimed and sent
+    assert len(called) == 1
+
+
+def test_run_with_tracking_retry_generic_via_external_backend(settings):
+    """Retry duplicates are sent by ANY backend, not just the built-in loop.
+
+    The duplication happens in run_with_tracking before run_campaign dispatches,
+    so an external_task_backend (here the fakeapp runner) processes the retry
+    duplicate generically — proven by the hook processor the runner injects.
+    """
+    settings.PYMISSIVE_ALLOWED_TASK_BACKENDS = ["tests.fakeapp.run_campaign"]
+    c = _campaign()
+    _missive(c, status=MissiveStatus.FAILED, missive_type="email")
+    sched = _scheduled(
+        c,
+        retry_failed=True,
+        external_task_backend="tests.fakeapp.run_campaign.run_fakeapp_campaign",
+    )
+
+    sent = []
+    with patch.object(Missive, "send_missive", lambda self: sent.append(self.pk)):
+        sched.run_with_tracking()
+
+    # the retry duplicate flowed through the external backend and got sent
+    assert len(sent) == 1
+    dup = Missive.objects.get(pk=sent[0])
+    assert dup.scheduler_id == sched.id
+    # the fakeapp runner injected its hook processor before sending
+    assert "tests.fakeapp.hook.add_fake_text" in (dup.body_processors or [])
+
+
+def test_run_with_tracking_retry_generic_via_task_object():
+    """Retry duplicates are also processed via a task_object delegate (fakeapp Contact)."""
+    c = _campaign()
+    _missive(c, status=MissiveStatus.FAILED, missive_type="email")
+    contact = Contact.objects.create(
+        first_name="Carol", last_name="Test", email="carol@test.com"
+    )
+    ct = ContentType.objects.get_for_model(Contact)
+    sched = _scheduled(
+        c,
+        retry_failed=True,
+        task_content_type=ct,
+        task_object_id=contact.pk,
+        task_object_arguments={"run_method": "run_campaign_contact"},
+    )
+
+    sent = []
+    with patch.object(Missive, "send_missive", lambda self: sent.append(self.pk)):
+        sched.run_with_tracking()
+
+    assert len(sent) == 1
+    dup = Missive.objects.get(pk=sent[0])
+    assert dup.scheduler_id == sched.id
+    assert "tests.fakeapp.hook.add_fake_text" in (dup.body_processors or [])
+
+
+def test_run_with_tracking_no_retry_leaves_errors_untouched():
+    """Without retry_failed, error missives are not duplicated."""
+    c = _campaign()
+    failed = _missive(c, status=MissiveStatus.FAILED, missive_type="email")
+    sched = _scheduled(c)  # retry_failed defaults to False
+    with patch.object(MissiveScheduledCampaign, "run_campaign"):
+        sched.run_with_tracking()
+
+    failed.refresh_from_db()
+    assert failed.thread_type == MissiveThreadType.MISSIVE
+    assert Missive.objects.filter(campaign=c).count() == 1
 
 
 def test_run_campaign_raises_if_task_object_deleted():

@@ -242,9 +242,11 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
             )
         )
 
-    @admin_boost_view("redirect", _("Live progress"))
-    def handle_scheduler_progress(self, request, obj):
-        return obj.get_absolute_url()
+    @admin_boost_view("redirect", _("Show missives"))
+    def handle_show_missives(self, request, obj):
+        url = reverse("admin:django_pymissive_missive_changelist")
+        url += f"?scheduler={obj.pk}"
+        return url
 
     # -- display methods --
 

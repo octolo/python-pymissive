@@ -146,7 +146,11 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         from django_pymissive.models import MissiveCampaign, Missive
         from django_pymissive.models.recipient import MissiveRecipient
-        from django_pymissive.models.choices import MissiveRecipientType, MissiveStatus
+        from django_pymissive.models.choices import (
+            MissiveRecipientType,
+            MissiveStatus,
+            MissiveSupport,
+        )
 
         count = options["count"]
         if count < 1:
@@ -232,6 +236,7 @@ class Command(BaseCommand):
                     recipients.append(MissiveRecipient(
                         missive=m,
                         recipient_type=MissiveRecipientType.RECIPIENT,
+                        recipient_support=MissiveSupport.EMAIL,
                         name=name,
                         email=_email(idx),
                     ))
@@ -239,6 +244,7 @@ class Command(BaseCommand):
                     recipients.append(MissiveRecipient(
                         missive=m,
                         recipient_type=MissiveRecipientType.RECIPIENT,
+                        recipient_support=MissiveSupport.PHONE,
                         name=name,
                         phone=_phone(idx),
                     ))
@@ -246,6 +252,7 @@ class Command(BaseCommand):
                     recipients.append(MissiveRecipient(
                         missive=m,
                         recipient_type=MissiveRecipientType.RECIPIENT,
+                        recipient_support=MissiveSupport.ADDRESS,
                         name=name,
                         address=_address(idx),
                     ))
@@ -254,6 +261,7 @@ class Command(BaseCommand):
                     recipients.append(MissiveRecipient(
                         missive=m,
                         recipient_type=MissiveRecipientType.RECIPIENT,
+                        recipient_support=MissiveSupport.EMAIL,
                         name=name,
                         email=_email(idx),
                     ))
