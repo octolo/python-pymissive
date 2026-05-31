@@ -97,6 +97,15 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         verbose_name=_("Campaign"),
         help_text=_("Optional campaign this missive belongs to"),
     )
+    scheduler = models.ForeignKey(
+        "django_pymissive.MissiveScheduledCampaign",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="to_missive",
+        verbose_name=_("Scheduler"),
+        help_text=_("Optional scheduled campaign run that triggered this missive"),
+    )
     thread_id = models.UUIDField(
         default=uuid.uuid4,
         editable=False,

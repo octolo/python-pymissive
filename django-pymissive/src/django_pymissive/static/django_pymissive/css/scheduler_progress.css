@@ -1,0 +1,190 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.5;
+    color: #1f2937;
+    background: #f3f4f6;
+}
+
+.scheduler-page {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 40px;
+}
+
+.scheduler-header {
+    margin-bottom: 20px;
+}
+
+.scheduler-kicker {
+    margin: 0 0 4px;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6b7280;
+}
+
+.scheduler-title {
+    margin: 0 0 12px;
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.scheduler-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    font-size: 0.9rem;
+    color: #4b5563;
+}
+
+.scheduler-status {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: capitalize;
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.scheduler-status[data-status="running"] {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.scheduler-status[data-status="completed"] {
+    background: #d1fae5;
+    color: #047857;
+}
+
+.scheduler-status[data-status="pending"] {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+.card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.scheduler-section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.scheduler-section-head h2,
+.scheduler-types h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.scheduler-stats,
+.type-stats {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #6b7280;
+    white-space: nowrap;
+}
+
+.progress-track {
+    position: relative;
+    height: 10px;
+    background: #e5e7eb;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: #417690;
+    border-radius: 999px;
+    transition: width 0.35s ease;
+}
+
+.progress-bar--overall {
+    background: #2563eb;
+}
+
+.scheduler-errors,
+.type-errors {
+    margin: 8px 0 0;
+    font-size: 0.85rem;
+    color: #b91c1c;
+}
+
+.type-list {
+    list-style: none;
+    margin: 16px 0 0;
+    padding: 0;
+}
+
+.type-item + .type-item {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #f3f4f6;
+}
+
+.type-item-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.type-label {
+    font-weight: 500;
+}
+
+.type-empty {
+    color: #9ca3af;
+    font-style: italic;
+}
+
+.type-errors-badge {
+    margin-left: auto;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #dc2626;
+    background: #fee2e2;
+    padding: 1px 7px;
+    border-radius: 10px;
+}
+
+.progress-bar--error {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: #fca5a5;
+    pointer-events: none;
+}
+
+.scheduler-footer {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    color: #9ca3af;
+    word-break: break-all;
+}
+
+.scheduler-footer code {
+    background: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+}

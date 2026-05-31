@@ -1,14 +1,18 @@
 """Utility functions for django_pymissive."""
 
+import logging
 import os
 from urllib.parse import urlparse
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.urls import reverse
+from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
 from .models.recipient import MissiveRecipient
+
+logger = logging.getLogger(__name__)
 
 
 def serialize_model_for_context(obj) -> dict:
@@ -215,6 +219,55 @@ def validate_attachment_for_missive_type(filename: str, missive_type: str | None
                 "allowed": ", ".join(allowed),
             }
         )
+
+
+def is_progress_enabled() -> bool:
+    """Return True when scheduled-campaign progress tracking is enabled.
+
+    Controlled by ``settings.PYMISSIVE_PROGRESS_ENABLED`` (default True).
+    When disabled, ``MissiveScheduledCampaign.run_campaign`` sends missives
+    without updating the counter or calling the progress hook.
+    """
+    return bool(getattr(settings, "PYMISSIVE_PROGRESS_ENABLED", True))
+
+
+def default_progress_hook(scheduled) -> None:
+    """Default progress hook: log the current run progress to the console.
+
+    Receives the :class:`~django_pymissive.models.campaign.MissiveScheduledCampaign`
+    being run, which exposes ``sent_count``, ``total_count`` and ``progress``.
+    """
+    logger.info(
+        "Campaign %s progress: %s/%s (%s%%)",
+        scheduled.campaign_id,
+        getattr(scheduled, "sent_count", 0),
+        getattr(scheduled, "total_count", 0),
+        scheduled.progress,
+    )
+
+
+def _resolve_hook(hook):
+    """Resolve a single hook (dotted path string or callable) to a callable."""
+    return hook if callable(hook) else import_string(hook)
+
+
+def get_progress_hooks():
+    """Resolve the configured progress hooks to a list of callables.
+
+    ``settings.PYMISSIVE_PROGRESS_HOOK`` may be:
+
+    - **unset / None** → ``[default_progress_hook]`` (console log).
+    - a single dotted import path (string) or callable → a one-item list.
+    - a list/tuple of dotted paths and/or callables → resolved in order.
+
+    Each hook is called with the scheduled campaign at every progress step.
+    """
+    hook = getattr(settings, "PYMISSIVE_PROGRESS_HOOK", None)
+    if hook is None:
+        return [default_progress_hook]
+    if isinstance(hook, (list, tuple)):
+        return [_resolve_hook(h) for h in hook]
+    return [_resolve_hook(hook)]
 
 
 def is_dry_run() -> bool:

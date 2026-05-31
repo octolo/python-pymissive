@@ -10,7 +10,8 @@ from .attachment import (
     CampaignVirtualAttachment,
     MissiveProof,
 )
-from .campaign import MissiveCampaign, MissiveScheduledCampaign
+from .campaign import MissiveCampaign
+from .scheduler import MissiveScheduledCampaign
 from .choices import (
     AcknowledgementLevel,
     MissiveEventType,

@@ -166,6 +166,7 @@ class MissiveAdmin(AdminBoostModel):
     ]
     raw_id_fields = [
         "campaign",
+        "scheduler",
     ]
     inlines = [
         MissiveRecipientEmailInline,
@@ -419,6 +420,7 @@ class MissiveAdmin(AdminBoostModel):
             _("Tracking"),
             [
                 "campaign",
+                "scheduler",
                 "status",
                 "webhook_url",
                 "external_id_display",

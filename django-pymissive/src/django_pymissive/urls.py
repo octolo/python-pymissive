@@ -4,6 +4,7 @@ from django.urls import URLPattern, path
 
 from .views.attachment import MissiveAttachmentDownloadView
 from .views.preview import DownloadPDFView, PreviewFormView, PreviewView
+from .views.scheduler import SchedulerProgressView
 from .views.webhook import WebhookView
 
 app_name = "django_pymissive"
@@ -43,5 +44,10 @@ urlpatterns: List[URLPattern] = [
         "pdf/<str:campaign_or_missive>/<uuid:pk>/",
         DownloadPDFView.as_view(),
         name="download_pdf",
+    ),
+    path(
+        "scheduler/<int:pk>/",
+        SchedulerProgressView.as_view(),
+        name="scheduler_progress",
     ),
 ]

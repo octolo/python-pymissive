@@ -48,7 +48,7 @@ class BaseMissiveManager(models.Manager):
         )
 
     def last_scheduled_subquery(self, field: str = "event"):
-        from ..models.campaign import MissiveScheduledCampaign
+        from ..models.scheduler import MissiveScheduledCampaign
 
         return Subquery(
             MissiveScheduledCampaign.objects.filter(

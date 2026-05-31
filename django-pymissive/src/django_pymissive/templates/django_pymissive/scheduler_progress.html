@@ -1,0 +1,81 @@
+{% load static i18n %}
+<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE|default:'en' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="{% static 'django_pymissive/css/scheduler_progress.css' %}">
+</head>
+<body>
+    <main class="scheduler-page" id="scheduler-root"
+          data-json-url="{{ json_url }}"
+          data-poll-ms="2000">
+        <header class="scheduler-header">
+            <p class="scheduler-kicker">{% trans "Campaign send" %}</p>
+            <h1 class="scheduler-title">{{ progress.campaign_subject }}</h1>
+            <div class="scheduler-meta">
+                <span class="scheduler-status" data-status="{{ progress.status }}">
+                    {{ progress.status }}
+                </span>
+                <span class="scheduler-meta-item" id="scheduler-updated">
+                    {% trans "Updated" %}: —
+                </span>
+            </div>
+        </header>
+
+        <section class="scheduler-overall card">
+            <div class="scheduler-section-head">
+                <h2>{% trans "Overall progress" %}</h2>
+                <p class="scheduler-stats" id="scheduler-overall-stats">
+                    {{ progress.total_sent_count }} / {{ progress.total_count }}
+                    ({{ progress.progress }}%)
+                </p>
+            </div>
+            <div class="progress-track" aria-hidden="true">
+                <div class="progress-bar progress-bar--overall"
+                     id="scheduler-overall-bar"
+                     style="width: {{ progress.progress }}%"></div>
+            </div>
+            <p class="scheduler-errors" id="scheduler-overall-errors"
+               {% if not progress.total_error_count %}hidden{% endif %}>
+                {{ progress.total_error_count }} {% trans "error(s)" %}
+            </p>
+        </section>
+
+        <section class="scheduler-types card">
+            <h2>{% trans "Progress by channel" %}</h2>
+            <ul class="type-list" id="scheduler-type-list">
+                {% for type_key, type_data in progress.by_type.items %}
+                <li class="type-item" data-type="{{ type_key }}">
+                    <div class="type-item-head">
+                        <span class="type-label">{{ type_data.label }}</span>
+                        <span class="type-stats">
+                            {{ type_data.sent }} / {{ type_data.total }}
+                            ({{ type_data.progress }}%)
+                        </span>
+                        {% if type_data.error %}
+                        <span class="type-errors-badge">{{ type_data.error }} {% trans "err" %}</span>
+                        {% endif %}
+                    </div>
+                    <div class="progress-track" aria-hidden="true">
+                        <div class="progress-bar" style="width: {{ type_data.progress }}%"></div>
+                        {% if type_data.error %}
+                        <div class="progress-bar progress-bar--error"
+                             style="width: {% widthratio type_data.error type_data.total 100 %}%"></div>
+                        {% endif %}
+                    </div>
+                </li>
+                {% empty %}
+                <li class="type-empty">{% trans "No missives attached to this run yet." %}</li>
+                {% endfor %}
+            </ul>
+        </section>
+
+        <footer class="scheduler-footer">
+            <code>{{ json_url }}</code>
+        </footer>
+    </main>
+    <script src="{% static 'django_pymissive/js/scheduler_progress.js' %}"></script>
+</body>
+</html>

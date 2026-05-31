@@ -7,6 +7,7 @@ from .missive import (
     MissiveHistoryManager,
 )
 from .campaign import MissiveCampaignManager
+from .scheduler import MissiveScheduledCampaignManager
 from .event import MissiveEventManager
 from .attachment import (
     MissiveBaseAttachmentManager,
@@ -34,6 +35,7 @@ __all__ = [
     "MissiveMessageManager",
     "MissiveHistoryManager",
     "MissiveCampaignManager",
+    "MissiveScheduledCampaignManager",
     "MissiveEventManager",
     "MissiveBaseAttachmentManager",
     "MissiveAttachmentManager",
