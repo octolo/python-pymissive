@@ -34,6 +34,84 @@ def forwards_assign_uuids(apps, schema_editor):
             Missive.objects.filter(pk=missive_pk).update(tmp_scheduler=new_uuid)
 
 
+def swap_scheduler_pk_to_uuid(apps, schema_editor):
+    """Swap the integer pk for the pre-populated UUID tmp_uuid column.
+
+    On SQLite, Django 5.0/5.1 cannot atomically drop a pk column and rename
+    another column to take its place: RemoveField on the pk implicitly
+    re-introduces an ``id`` AutoField, so the subsequent RenameField fails with
+    "duplicate column name: id". We work around this by doing the entire table
+    reconstruction in a single explicit SQL sequence.
+
+    On other databases (PostgreSQL, MySQL) standard DDL is used instead.
+    """
+    tbl = "django_pymissive_missivescheduledcampaign"
+    vendor = schema_editor.connection.vendor
+
+    if vendor == "sqlite":
+        with schema_editor.connection.cursor() as cur:
+            cur.execute(f"""
+                CREATE TABLE "{tbl}__new" (
+                    "id"                    char(32)     NOT NULL PRIMARY KEY,
+                    "comment"               text         NULL,
+                    "created_at"            datetime     NOT NULL,
+                    "updated_at"            datetime     NOT NULL,
+                    "scheduled_send_date"   datetime     NULL,
+                    "send_date"             datetime     NULL,
+                    "ended_at"              datetime     NULL,
+                    "additional_config"     text         NOT NULL
+                        CHECK ((JSON_VALID("additional_config") OR "additional_config" IS NULL)),
+                    "campaign_id"           char(32)     NOT NULL
+                        REFERENCES "django_pymissive_missivecampaign" ("id")
+                        DEFERRABLE INITIALLY DEFERRED,
+                    "external_task_backend" varchar(500) NOT NULL,
+                    "missive_type"          varchar(50)  NOT NULL,
+                    "task_content_type_id"  integer      NULL
+                        REFERENCES "django_content_type" ("id")
+                        DEFERRABLE INITIALLY DEFERRED,
+                    "task_object_arguments" text         NOT NULL
+                        CHECK ((JSON_VALID("task_object_arguments") OR "task_object_arguments" IS NULL)),
+                    "task_object_id"        integer unsigned NULL
+                        CHECK ("task_object_id" >= 0),
+                    "retry_failed"          bool         NOT NULL
+                )
+            """)
+            cur.execute(f"""
+                INSERT INTO "{tbl}__new"
+                    ("id", "comment", "created_at", "updated_at",
+                     "scheduled_send_date", "send_date", "ended_at",
+                     "additional_config", "campaign_id",
+                     "external_task_backend", "missive_type",
+                     "task_content_type_id", "task_object_arguments",
+                     "task_object_id", "retry_failed")
+                SELECT
+                    "tmp_uuid", "comment", "created_at", "updated_at",
+                    "scheduled_send_date", "send_date", "ended_at",
+                    "additional_config", "campaign_id",
+                    "external_task_backend", "missive_type",
+                    "task_content_type_id", "task_object_arguments",
+                    "task_object_id", "retry_failed"
+                FROM "{tbl}"
+            """)
+            cur.execute(f'DROP TABLE "{tbl}"')
+            cur.execute(f'ALTER TABLE "{tbl}__new" RENAME TO "{tbl}"')
+            cur.execute(
+                f'CREATE INDEX "django_pymissive_missivescheduledcampaign_campaign_id_5fff8da3"'
+                f' ON "{tbl}" ("campaign_id")'
+            )
+            cur.execute(
+                f'CREATE INDEX "django_pymissive_missivescheduledcampaign_task_content_type_id_015368e2"'
+                f' ON "{tbl}" ("task_content_type_id")'
+            )
+    else:
+        # PostgreSQL / MySQL: standard DDL — these databases handle pk column
+        # removal and column rename without implicit pk re-injection.
+        with schema_editor.connection.cursor() as cur:
+            cur.execute(f'ALTER TABLE "{tbl}" DROP COLUMN "id"')
+            cur.execute(f'ALTER TABLE "{tbl}" RENAME COLUMN "tmp_uuid" TO "id"')
+            cur.execute(f'ALTER TABLE "{tbl}" ADD PRIMARY KEY ("id")')
+
+
 def backwards_noop(apps, schema_editor):
     """Reversing the UUID conversion to integer ids is not supported."""
     pass
@@ -63,25 +141,32 @@ class Migration(migrations.Migration):
         ),
         # 2. Backfill: assign a UUID per scheduler and carry over the FK links.
         migrations.RunPython(forwards_assign_uuids, backwards_noop),
-        # 3. Drop the old integer FK and primary key.
+        # 3. Swap the scheduler pk: integer id → UUID (cross-version SQLite safe).
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(swap_scheduler_pk_to_uuid, migrations.RunPython.noop),
+            ],
+            state_operations=[
+                migrations.RemoveField(
+                    model_name='missivescheduledcampaign',
+                    name='id',
+                ),
+                migrations.RenameField(
+                    model_name='missivescheduledcampaign',
+                    old_name='tmp_uuid',
+                    new_name='id',
+                ),
+                migrations.AlterField(
+                    model_name='missivescheduledcampaign',
+                    name='id',
+                    field=models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False, verbose_name='ID'),
+                ),
+            ],
+        ),
+        # 4. Promote tmp_scheduler → scheduler FK on Missive.
         migrations.RemoveField(
             model_name='missive',
             name='scheduler',
-        ),
-        migrations.RemoveField(
-            model_name='missivescheduledcampaign',
-            name='id',
-        ),
-        # 4. Promote the UUID columns to be the primary key / FK.
-        migrations.RenameField(
-            model_name='missivescheduledcampaign',
-            old_name='tmp_uuid',
-            new_name='id',
-        ),
-        migrations.AlterField(
-            model_name='missivescheduledcampaign',
-            name='id',
-            field=models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False, verbose_name='ID'),
         ),
         migrations.RenameField(
             model_name='missive',
