@@ -106,8 +106,11 @@ def swap_scheduler_pk_to_uuid(apps, schema_editor):
     else:
         # PostgreSQL / MySQL: standard DDL — these databases handle pk column
         # removal and column rename without implicit pk re-injection.
+        # CASCADE drops any FK constraints that reference the old integer id
+        # (e.g. django_pymissive_missive.scheduler_id); they are recreated
+        # later in this migration when the Missive.scheduler field is altered.
         with schema_editor.connection.cursor() as cur:
-            cur.execute(f'ALTER TABLE "{tbl}" DROP COLUMN "id"')
+            cur.execute(f'ALTER TABLE "{tbl}" DROP COLUMN "id" CASCADE')
             cur.execute(f'ALTER TABLE "{tbl}" RENAME COLUMN "tmp_uuid" TO "id"')
             cur.execute(f'ALTER TABLE "{tbl}" ADD PRIMARY KEY ("id")')
 
