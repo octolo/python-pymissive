@@ -121,7 +121,7 @@ class MailevaProvider(MissiveProviderBase):
         return "v4" if self.is_acknowledgement_of_receipt() else "v2"
 
     def is_mode_sandbox(self) -> bool:
-        return False #self._get_config_or_env("SANDBOX", False)
+        return self._get_config_or_env("SANDBOX", False)
 
     def get_endpoint(self, endpoint: str, prefix: str = "api") -> str:
         return self.endpoints[endpoint].format(
