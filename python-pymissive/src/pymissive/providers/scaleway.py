@@ -6,6 +6,8 @@ from typing import Any
 
 import requests
 
+from pymissive.utils import is_disable_send
+
 from .base import MissiveProviderBase
 
 
@@ -267,6 +269,8 @@ class ScalewayProvider(MissiveProviderBase):
     def send_email(self, **kwargs: Any) -> dict[str, Any]:
         """Send email via Scaleway."""
         self._prepare_email(**kwargs)
+        if is_disable_send():
+            return self._disabled_send_response("send_email", external_id=kwargs.get("external_id"))
         response = requests.post(
             self._build_url("email"),
             headers=self._get_headers(),

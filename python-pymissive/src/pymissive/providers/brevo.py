@@ -4,6 +4,8 @@ import contextlib
 import json
 from typing import Any
 
+from pymissive.utils import is_disable_send
+
 from .base import MissiveProviderBase
 
 
@@ -287,6 +289,8 @@ class BrevoAPIProvider(MissiveProviderBase):
         if attachments:
             send_kwargs["attachment"] = attachments
 
+        if is_disable_send():
+            return self._disabled_send_response("send_email", external_id=kwargs.get("external_id"))
         client = self._get_email_client()
         response = client.transactional_emails.send_transac_email(**send_kwargs)
         return self._response_to_dict(response)
@@ -392,6 +396,8 @@ class BrevoAPIProvider(MissiveProviderBase):
         sender_name = sender.get("phone") or sender.get("name") or "Missive"
         content = kwargs.get("body_text", "")
 
+        if is_disable_send():
+            return self._disabled_send_response("send_sms", external_id=kwargs.get("external_id"))
         body = _json.dumps({"sender": sender_name, "recipient": recipient, "content": content}).encode("utf-8")
         req = Request(
             "https://api.brevo.com/v3/transactionalSMS/sms",
@@ -467,6 +473,8 @@ class BrevoAPIProvider(MissiveProviderBase):
         sender = "+33614397083"
         text = kwargs.get("body_text", "")
 
+        if is_disable_send():
+            return self._disabled_send_response("send_whatsapp", external_id=kwargs.get("external_id"))
         request = SendWhatsappMessageRequestText(
             contact_numbers=recipients,
             sender_number=sender,

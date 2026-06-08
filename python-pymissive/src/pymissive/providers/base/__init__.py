@@ -1,3 +1,5 @@
+from datetime import datetime, timezone as dt_timezone
+
 from providerkit import ProviderBase
 import base64
 import mimetypes
@@ -77,3 +79,26 @@ class MissiveProviderBase(
         name = re.sub(r"\s+", "_", name)      # spaces -> _
         name = re.sub(r"[^\w\.-]", "", name)  # strip special characters
         return name
+
+    def _disabled_send_response(self, service_name: str, **extra: Any) -> dict[str, Any]:
+        """Response returned by a ``send_*`` service when sending is disabled.
+
+        Providers call this at the very end of their ``send_*`` method, after
+        every preparation/staging step, *instead* of the final confirmation
+        network call (``PYMISSIVE_DISABLE_SEND``). ``extra`` lets a provider
+        carry data already produced upstream (``external_id``, ``recipients``,
+        ``attachments``, ...).
+        """
+        external_id = extra.get("external_id") or extra.get("id")
+        response = {
+            "external_id": external_id,
+            "id": external_id,
+            "event": "disabled",
+            "code": 200,
+            "message": "Send disabled (PYMISSIVE_DISABLE_SEND)",
+            "disabled_send": True,
+            "event_date": datetime.now(dt_timezone.utc).isoformat(),
+            "service": service_name,
+        }
+        response.update(extra)
+        return response

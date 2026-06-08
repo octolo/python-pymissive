@@ -271,10 +271,9 @@ def get_progress_hooks():
 
 
 def is_dry_run() -> bool:
-    """Return True when provider calls must be skipped (test/staging dry-run mode).
+    """Return True when dry-run mode is enabled (test/staging).
 
-    Controlled by ``settings.PYMISSIVE_DRY_RUN`` (preferred), or the alias
-    ``settings.PYMISSIVE_DISABLE_SEND``. Defaults to False (real sends).
+    Controlled by ``settings.PYMISSIVE_DRY_RUN``. Defaults to False (real sends).
 
     When enabled, ``Missive.send_missive`` and ``Missive.prepare_missive``:
 
@@ -285,6 +284,18 @@ def is_dry_run() -> bool:
     - record a ``REQUEST`` event with ``trace={"dry_run": True, ...}`` so
       tests can assert the missive went through the pipeline.
     """
-    if getattr(settings, "PYMISSIVE_DRY_RUN", False):
-        return True
-    return bool(getattr(settings, "PYMISSIVE_DISABLE_SEND", False))
+    return bool(getattr(settings, "PYMISSIVE_DRY_RUN", False))
+
+
+def is_disable_send() -> bool:
+    """Return True when provider ``send`` calls must be skipped.
+
+    Delegates to :func:`pymissive.utils.is_disable_send` (Django setting or env).
+
+    Unlike dry-run mode, providers still run every preparation/staging step;
+    only the final confirmation network call is skipped. Django persists the
+    provider ``disabled_send`` response via ``Missive._disabled_send``.
+    """
+    from pymissive.utils import is_disable_send as _is_disable_send
+
+    return _is_disable_send()

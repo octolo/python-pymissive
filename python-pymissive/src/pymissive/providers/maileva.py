@@ -1,6 +1,7 @@
 import json
 import requests
 from django.utils import timezone
+from pymissive.utils import is_disable_send
 from .base import MissiveProviderBase
 from functools import cached_property
 from typing import Any
@@ -403,6 +404,13 @@ class MailevaProvider(MissiveProviderBase):
 
     def send_lre(self, **kwargs: Any) -> bool:
         external_id, recipients, attachments = self._stage_lre_before_submit(**kwargs)
+        if is_disable_send():
+            return self._disabled_send_response(
+                "send_lre",
+                external_id=external_id,
+                recipients=recipients,
+                attachments=attachments,
+            )
         url = self.get_endpoint('submit') % external_id
         response = requests.post(url, headers=self._get_headers(), timeout=30)
         response.raise_for_status()

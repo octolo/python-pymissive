@@ -6,8 +6,10 @@ from typing import Any, Dict
 
 import requests
 
-from .base import MissiveProviderBase
 from pymissive.config import ALL_EVENTS
+from pymissive.utils import is_disable_send
+
+from .base import MissiveProviderBase
 
 
 class PartnerProvider(MissiveProviderBase):
@@ -132,6 +134,8 @@ class PartnerProvider(MissiveProviderBase):
             "urlDlr": kwargs.get("webhook_url"),
             "urlResponse": kwargs.get("webhook_url"),
         }
+        if is_disable_send():
+            return self._disabled_send_response("send_sms", external_id=kwargs.get("external_id"))
         response = self._request(self._api_base_sms + "/send", "POST", data)
         response["occurred_at"] = datetime.now().timestamp()
         return response

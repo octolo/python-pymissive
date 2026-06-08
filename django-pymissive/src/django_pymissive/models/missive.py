@@ -1086,6 +1086,12 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         ``trace={"dry_run": True, ...}`` is recorded, and ``missive_post_send``
         is dispatched. Useful for Django tests asserting that campaigns and
         missives are generated correctly without hitting the provider.
+
+        When ``settings.PYMISSIVE_DISABLE_SEND`` is True (and dry-run is off)
+        the provider IS still called and runs every preparation/staging step
+        (sending creation, recipients, attachments); only the final confirmation
+        network call is skipped provider-side. The provider returns a response
+        flagged with ``disabled_send`` which is handled by ``_disabled_send``.
         """
         if not self.can_send():
             raise ValidationError(_("Missive cannot be sent"))
@@ -1098,6 +1104,9 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             return
         response = self.call_provider_service("send", **self.get_serialized_data())
         response["client_initiated"] = True
+        if response.get("disabled_send"):
+            self._disabled_send(response=response, occurred_at=occurred_at, old_missive=old_missive)
+            return
         if response.get("recipients"):
             self._update_recipients(response.get("recipients"))
         if response.get("attachments"):
@@ -1158,6 +1167,34 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                 "subject": self.subject_compiled,
                 "recipients": [str(r) for r in self.recipients],
             },
+            client_initiated=True,
+            occurred_at=occurred_at,
+        )
+        self.refresh_from_db()
+        missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
+
+    def _disabled_send(self, *, response, occurred_at, old_missive=None):
+        """Persist a provider response produced with ``PYMISSIVE_DISABLE_SEND``.
+
+        The provider ran the full pipeline (sending creation, recipients,
+        attachments) but skipped the final confirmation network call. We persist
+        whatever it produced (``external_id``, recipients, attachments), record a
+        ``REQUEST`` event flagged as a disabled send, and dispatch
+        ``missive_post_send`` like a real send would. No ``ERROR`` event is
+        recorded even when no ``external_id`` was produced.
+        """
+        if response.get("recipients"):
+            self._update_recipients(response.get("recipients"))
+        self._update_attachments(response.get("attachments", []))
+        external_id = response.get("external_id")
+        update_fields = ["status"]
+        if external_id:
+            self.external_id = external_id
+            update_fields.append("external_id")
+        self.save(update_fields=update_fields)
+        self.to_missiveevent.create(
+            event=MissiveEventType.REQUEST,
+            trace=response,
             client_initiated=True,
             occurred_at=occurred_at,
         )
