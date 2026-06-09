@@ -146,7 +146,7 @@ MISSIVE_QUALIFIED_ACKNOWLEDGEMENT = False
 # PYMISSIVE_SAVE_UNTREATED_EVENTS = True  # Save events that could not be processed (default: False)
 PYMISSIVE_ATTACHMENT_PATH_MAX_LENGTH = 4000
 # Dry-run: full local pipeline, no provider calls (prepare + send).
-PYMISSIVE_DRY_RUN = True
+# PYMISSIVE_DRY_RUN = True
 # Disable-send: prepare still calls provider create; send_missive skips provider send.
 # PYMISSIVE_DISABLE_SEND = True
 PYMISSIVE_DEFAULT_BODY_PROCESSORS = [

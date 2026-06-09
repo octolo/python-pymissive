@@ -392,16 +392,24 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                 names.append(field)
         return names + (["additional_context"] if self.campaign_id else [])
 
-    def get_locally_or_campaign_value(self, field, fallback=None):
-        """Local value if set, else campaign field (via ``_CAMPAIGN_FIELD_MAP``)."""
-        locally = getattr(self, field, None)
-        if locally:
-            return locally
+    def get_campaign_value(self, field, fallback=None):
+        """Campaign value mapped to a missive *field* (via ``_CAMPAIGN_FIELD_MAP``).
+
+        Falsy campaign values (``None``, ``""``, …) resolve to *fallback* so
+        the truthiness semantics match :meth:`get_locally_or_campaign_value`.
+        """
         if not self.campaign:
             return fallback
         support = (self.missive_support or "").lower()
         campaign_field = self._CAMPAIGN_FIELD_MAP.get(support, {}).get(field, field)
         return getattr(self.campaign, campaign_field, None) or fallback
+
+    def get_locally_or_campaign_value(self, field, fallback=None):
+        """Local value if set, else campaign field (via ``_CAMPAIGN_FIELD_MAP``)."""
+        locally = getattr(self, field, None)
+        if locally:
+            return locally
+        return self.get_campaign_value(field, fallback)
 
     def set_locally_ifnull(self):
         """Copy null missive fields from campaign (snapshot before send)."""
@@ -428,7 +436,14 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             self.save(update_fields=updates)
 
     def clear_campaign_sourced_fields(self, missive):
-        """Clear campaign-sourced fields on missive so they will be re-filled from campaign at send."""
+        """Clear campaign-sourced fields on missive so they will be re-filled from campaign at send.
+
+        No-op when *missive* has no campaign: without a campaign nothing would
+        refill the cleared fields at send time, so clearing would silently wipe
+        the missive's own content (subject, body, …).
+        """
+        if not missive.campaign_id:
+            return
         fields_to_clear = missive.campaign_sourced_field_names
         if not fields_to_clear:
             return
@@ -438,6 +453,37 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             empty = {} if attr == "additional_context" else None
             setattr(missive, attr, empty)
         missive.save(update_fields=fields_to_clear)
+
+    def apply_campaign_config(self, missive):
+        """Overwrite campaign-sourced fields on *missive* with the current campaign values.
+
+        Unlike :meth:`set_locally_ifnull` (which only fills *null* fields at
+        send time), this method overwrites every campaign-sourced field for
+        which the campaign currently holds a (truthy) value, discarding the
+        local override copied during duplication. Fields for which the campaign
+        has no value are left untouched, so the duplicated missive's own value
+        is preserved.
+
+        Does nothing when *missive* has no campaign attached.
+        """
+        if not missive.campaign_id:
+            return
+        support = (missive.missive_support or "").lower()
+        fields = self.get_campaign_sourced_fields(support)
+        updates = []
+        for field in fields:
+            if not hasattr(missive, field):
+                continue
+            val = missive.get_campaign_value(field)
+            if val is not None:
+                setattr(missive, field, val)
+                updates.append(field)
+        if missive.campaign.additional_context:
+            missive.additional_context = dict(missive.campaign.additional_context)
+            if "additional_context" not in updates:
+                updates.append("additional_context")
+        if updates:
+            missive.save(update_fields=updates)
 
     @property
     def sender(self):
@@ -946,13 +992,30 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     #########################################################
 
     @transaction.atomic
-    def resend_missive(self):
-        """Resend the missive: original becomes HISTORY, new duplicate is MISSIVE and gets sent."""
+    def resend_missive(self, *, sync_campaign: bool = False):
+        """Resend the missive: original becomes HISTORY, new duplicate is MISSIVE and gets sent.
+
+        Args:
+            sync_campaign: When ``True`` and a campaign is attached, overwrite
+                each campaign-sourced field that the campaign currently holds a
+                value for with that value (via :meth:`apply_campaign_config`),
+                discarding the corresponding local override.  Fields the
+                campaign has no value for keep the duplicated missive's value.
+                When ``False`` (default), campaign-sourced fields are cleared
+                and lazily re-filled from the campaign at send time via
+                :meth:`set_locally_ifnull`.  Has no effect when there is no
+                campaign.
+        """
         if not self.can_resend():
             raise ValidationError(_("Missive cannot be resend"))
         self.thread_type = MissiveThreadType.HISTORY
         self.save(update_fields=["thread_type"])
-        new_missive = self.duplicate_missive(thread_type=MissiveThreadType.MISSIVE, thread_id=self.thread_id, resend=True)
+        new_missive = self.duplicate_missive(
+            thread_type=MissiveThreadType.MISSIVE,
+            thread_id=self.thread_id,
+            resend=True,
+            sync_campaign=sync_campaign,
+        )
         new_missive.send_missive(old_missive=self)
         return new_missive
 
@@ -988,8 +1051,31 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             rel_obj.save()
 
     @transaction.atomic
-    def duplicate_missive(self, thread_type=MissiveThreadType.MISSIVE, thread_id=None, resend=False):
-        """Duplicate the missive with its attachments, recipients and related objects."""
+    def duplicate_missive(
+        self,
+        thread_type=MissiveThreadType.MISSIVE,
+        thread_id=None,
+        resend=False,
+        sync_campaign: bool = False,
+    ):
+        """Duplicate the missive with its attachments, recipients and related objects.
+
+        Args:
+            thread_type: Thread type for the new missive.
+            thread_id: Thread ID to reuse (new UUID generated when ``None``).
+            resend: Mark this duplication as a resend.  When ``True`` and
+                ``sync_campaign`` is ``False``, campaign-sourced fields are
+                cleared so they are lazily re-filled from the campaign at
+                send time (:meth:`set_locally_ifnull`).
+            sync_campaign: When ``True`` and a campaign is attached, overwrite
+                campaign-sourced fields on the new missive with the campaign's
+                **current** values immediately after duplication
+                (:meth:`apply_campaign_config`).  Only fields the campaign has a
+                value for are overwritten; the rest keep the duplicated value.
+                When there is no campaign, the duplicated missive fields are
+                kept as-is.  Takes precedence over the default ``resend``
+                clear-and-lazy-refill behaviour.
+        """
         # Preserve source before mutating (new_missive = self would overwrite self)
         ModelClass = type(self)
         source = ModelClass.objects.get(pk=self.pk)
@@ -1011,7 +1097,9 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         self.duplicate_attachments(new_missive, source)
         self.duplicate_recipients(new_missive, source)
         self.duplicate_related_objects(new_missive, source)
-        if resend:
+        if sync_campaign:
+            self.apply_campaign_config(new_missive)
+        elif resend:
             self.clear_campaign_sourced_fields(new_missive)
         missive_post_duplicate.send(
             sender=ModelClass,
