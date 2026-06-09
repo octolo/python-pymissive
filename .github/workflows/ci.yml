@@ -50,15 +50,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ "${{ matrix.package_name }}" = "django-pymissive" ]; then
+            # Install the local pymissive first so its (unreleased) version
+            # satisfies the django-pymissive "pymissive>=x.y.z" constraint and
+            # pip never tries to fetch it from PyPI.
+            python -m pip install -e ../python-pymissive
             python -m pip install -e ".[test]"
           else
             python -m pip install -e .
           fi
-
-      - name: Install local pymissive
-        if: ${{ matrix.package_name == 'django-pymissive' }}
-        working-directory: ${{ matrix.working_directory }}
-        run: python -m pip install -e ../python-pymissive
 
       - name: Install Django
         if: ${{ matrix.package_name == 'django-pymissive' }}
