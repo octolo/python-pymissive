@@ -47,7 +47,7 @@ class MailevaProvider(MissiveProviderBase):
         "POSTAGE_TYPE": "FAST",
         "BASE_URL_SANDBOX": "https://api.sandbox.maileva.net",
         "BASE_URL": "https://api.maileva.com",
-        "BASE_TOKEN_URL_SANDBOX": "https://connexion.sandbox.maileva.net/",
+        "BASE_TOKEN_URL_SANDBOX": "https://connexion.sandbox.maileva.net",
         "BASE_TOKEN_URL": "https://connexion.maileva.com",
     }
     endpoints = {
@@ -132,8 +132,10 @@ class MailevaProvider(MissiveProviderBase):
 
     def get_base_url(self, prefix: str = "api") -> str:
         if prefix == "connexion":
-            return self._get_config_or_env("BASE_TOKEN_URL_SANDBOX" if self.is_mode_sandbox() else "BASE_TOKEN_URL")
-        return self._get_config_or_env("BASE_URL_SANDBOX" if self.is_mode_sandbox() else "BASE_URL")
+            key = "BASE_TOKEN_URL_SANDBOX" if self.is_mode_sandbox() else "BASE_TOKEN_URL"
+        else:
+            key = "BASE_URL_SANDBOX" if self.is_mode_sandbox() else "BASE_URL"
+        return str(self._get_config_or_env(key)).rstrip("/")
 
     @cached_property
     def access_token(self) -> str:
@@ -222,16 +224,37 @@ class MailevaProvider(MissiveProviderBase):
         address = recipient.get("address")
         if not address:
             raise ValueError("LRE recipient requires address")
+        country_code = self._country_code_from_address(address)
+        if not country_code:
+            raise ValueError("LRE recipient address requires country_code (e.g. FR)")
+
+        organization = (address.get("organization") or "").strip()
+        name = (recipient.get("name") or "").strip()
+        if not organization and not name:
+            raise ValueError(
+                "LRE recipient requires an identity line: set the recipient name "
+                "(or an organization on the address). Maileva rejects sendings whose "
+                "recipient has no name/company."
+            )
+
+        line_6 = f"{address.get('postal_code', '')} {address.get('city', '')}".strip()
+        if address.get("sorting_code"):
+            line_6 = f"{line_6} {address.get('sorting_code')}".strip()
+        if not address.get("address_line1"):
+            raise ValueError("LRE recipient address requires a street (address_line1)")
+
         data = {
             "custom_id": recipient.get("id"),
-            "address_line_1": address.get("organization"),
-            "address_line_2": recipient.get("name"),
+            "address_line_1": organization,
+            "address_line_2": name,
             "address_line_3": address.get("address_line2"),
             "address_line_4": address.get("address_line1"),
             "address_line_5": address.get("locality") or address.get("po_box"),
-            "address_line_6": f"{address.get('postal_code')} {address.get('city')}",
-            "country_code": address.get("country_code"),
+            "address_line_6": line_6,
+            "country_code": country_code,
         }
+        # Maileva rejects null/empty optional lines: omit them entirely.
+        return {k: v for k, v in data.items() if v not in (None, "")}
         if address.get("sorting_code"):
             data["address_line_6"] += " " + address.get("sorting_code")
         return data
@@ -247,7 +270,7 @@ class MailevaProvider(MissiveProviderBase):
         url = self.get_endpoint('recipients') % external_id
         data = self.get_recipient_lre_data(recipient)
         response = requests.post(url, headers=self._get_headers(), json=data, timeout=30)
-        response.raise_for_status()
+        self._raise_for_response(response, f"Maileva add recipient failed ({url})")
         response = response.json()
         return {
             "internal_id": recipient.get("id"),
@@ -258,7 +281,7 @@ class MailevaProvider(MissiveProviderBase):
         url = self.get_endpoint('recipients') % external_id + "/" + recipient.get("external_id")
         data = self.get_recipient_lre_data(recipient)
         response = requests.patch(url, headers=self._get_headers(), json=data, timeout=30)
-        response.raise_for_status()
+        self._raise_for_response(response, f"Maileva update recipient failed ({url})")
         response = response.json()
         return {
             "internal_id": recipient.get("id"),
@@ -298,38 +321,43 @@ class MailevaProvider(MissiveProviderBase):
         return self.ack_level == "acknowledgement_of_receipt"
 
     def get_lre_data(self, **kwargs: Any) -> dict[str, Any]:
-        data = {
-            "name": kwargs.get("subject"),
+        data: dict[str, Any] = {
+            "name": (kwargs.get("subject") or "").strip() or "Missive",
             "custom_id": str(kwargs.get("id")),
             "color_printing": kwargs.get("color_printing", self._get_config_or_env("COLOR_PRINTING", False)),
             "duplex_printing": kwargs.get("duplex_printing", self._get_config_or_env("DUPLEX_PRINTING", True)),
-            "optional_address_sheet": kwargs.get("optional_address_sheet", self._get_config_or_env("OPTIONAL_ADDRESS_SHEET", False)),
-            "print_sender_address": kwargs.get("print_sender_address", self._get_config_or_env("PRINT_SENDER_ADDRESS", True)),
-            "archiving_duration": kwargs.get("archiving_duration", self._get_config_or_env("ARCHIVING_DURATION", 0)),
-            'envelope_windows_type': kwargs.get("envelope_windows_type", self._get_config_or_env("ENVELOPE_WINDOWS_TYPE", "DOUBLE")),
+            "optional_address_sheet": kwargs.get(
+                "optional_address_sheet", self._get_config_or_env("OPTIONAL_ADDRESS_SHEET", False)
+            ),
+            "archiving_duration": self._normalize_archiving_duration(kwargs.get("archiving_duration")),
         }
         sender = kwargs.get("sender", self._get_config_or_env("SENDER_ADDRESS", {}))
-        sender_name = sender.get("name")
-        sender_address = sender.get("address")
-        if sender_address:
-            data["sender_address_line_2"] = sender_name
-            data["sender_address_line_1"] = sender_address.get("organization")
-            data["sender_address_line_3"] = sender_address.get("address_line2")
-            data["sender_address_line_4"] = sender_address.get("address_line1")
-            data["sender_address_line_5"] = sender_address.get("locality") or sender_address.get("po_box")
-            data["sender_address_line_6"] = f"{sender_address.get('postal_code')} {sender_address.get('city')}"
-            data["sender_country_code"] = sender_address.get("country_code")
-            if sender_address.get("sorting_code"):
-                data["sender_address_line_6"] += " " + sender_address.get("sorting_code")
+        self._apply_sender_address(data, sender)
 
         if kwargs.get("notification_email"):
             data["notification_email"] = kwargs.get("notification_email", self._get_config_or_env("NOTIFICATION_EMAIL", ""))
             data["notification_types"] = self._get_config_or_env("NOTIFICATION_TYPES", ["ALL_MAILEVA", "ALL_LAPOSTE"])
+
         if self.is_acknowledgement_of_receipt():
-            data["returned_mail_scanning"] = kwargs.get("returned_mail_scanning", self._get_config_or_env("RETURNED_MAIL_SCANNING", False))
+            # registered_mail/v4 — do not send mail/v2-only fields (postage_type, envelope_windows_type, …)
             data["acknowledgement_of_receipt"] = True
+            if kwargs.get("returned_mail_scanning", self._get_config_or_env("RETURNED_MAIL_SCANNING", False)):
+                data["acknowledgement_of_receipt_scanning"] = True
+        else:
+            data["print_sender_address"] = kwargs.get(
+                "print_sender_address", self._get_config_or_env("PRINT_SENDER_ADDRESS", True)
+            )
+            data["envelope_windows_type"] = kwargs.get(
+                "envelope_windows_type", self._get_config_or_env("ENVELOPE_WINDOWS_TYPE", "DOUBLE")
+            )
             priority = kwargs.get("priority")
-            data["postage_type"] = "urgent" if (priority or "").lower() == "urgent" else self._get_config_or_env("POSTAGE_TYPE", "fast")
+            postage_type = (
+                "urgent"
+                if (priority or "").lower() == "urgent"
+                else str(self._get_config_or_env("POSTAGE_TYPE", "fast")).lower()
+            )
+            data["postage_type"] = postage_type
+
         if kwargs.get("custom_data") is not None:
             data["custom_data"] = kwargs["custom_data"]
         return data
@@ -346,7 +374,7 @@ class MailevaProvider(MissiveProviderBase):
         url = self.get_endpoint('sendings')
         data = self.get_lre_data(**kwargs)
         response = requests.post(url, headers=self._get_headers(), json=data, timeout=30)
-        response.raise_for_status()
+        self._raise_for_response(response, f"Maileva create sending failed ({url})")
         return response.json()
 
     def create_lre(self, **kwargs: Any) -> bool:
