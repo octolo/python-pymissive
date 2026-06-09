@@ -249,7 +249,7 @@ class MailevaProvider(MissiveProviderBase):
             "address_line_4": address.get("address_line1"),
             "address_line_5": address.get("locality") or address.get("po_box"),
             "address_line_6": f"{address.get('postal_code')} {address.get('city')}",
-            "country_code": address.get("country_code"),
+            "country_code": (address.get("country_code") or "").upper() or None,
         }
         if address.get("sorting_code"):
             data["address_line_6"] += " " + address.get("sorting_code")
@@ -337,7 +337,8 @@ class MailevaProvider(MissiveProviderBase):
             data["sender_address_line_4"] = sender_address.get("address_line1")
             data["sender_address_line_5"] = sender_address.get("locality") or sender_address.get("po_box")
             data["sender_address_line_6"] = f"{sender_address.get('postal_code')} {sender_address.get('city')}"
-            data["sender_country_code"] = sender_address.get("country_code")
+            code = sender_address.get("country_code")
+            data["sender_country_code"] = code.upper() if code else code
             if sender_address.get("sorting_code"):
                 data["sender_address_line_6"] += " " + sender_address.get("sorting_code")
 
@@ -475,6 +476,7 @@ class MailevaProvider(MissiveProviderBase):
         return external_ids
 
     def add_attachment_lre(self, **kwargs: Any) -> dict[str, Any]:
+        self.is_acknowledgement_of_receipt(**kwargs)
         attachment = kwargs.get("attachment", {})
         external_id = kwargs.get("external_id")
         priority = kwargs.get("priority", 1)
