@@ -40,7 +40,7 @@ class MailevaProvider(MissiveProviderBase):
     ]
     config_defaults = {
         "SANDBOX": False,
-        "ARCHIVING_DURATION": 0,
+        "ARCHIVING_DURATION": 3,
         "PRINT_SENDER_ADDRESS": True,
         "DUPLEX_PRINTING": True,
         "COLOR_PRINTING": False,
@@ -158,6 +158,23 @@ class MailevaProvider(MissiveProviderBase):
             'Content-Type': 'application/json',
         }
 
+    def _raise_for_response(self, response: requests.Response, context: str) -> None:
+        """Raise with Maileva response body so validation errors are visible."""
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            body = (response.text or "").strip()
+            detail = f" — {body}" if body else ""
+            raise requests.HTTPError(
+                f"{context}: {response.status_code} {response.reason}{detail}",
+                response=response,
+            ) from exc
+
+    def _normalize_archiving_duration(self, value: Any) -> int:
+        """Maileva accepts 3, 6 or 10 years; 0 is rejected by the API."""
+        duration = int(value if value is not None else self._get_config_or_env("ARCHIVING_DURATION", 3))
+        return duration if duration in (3, 6, 10) else 3
+
     def get_resource_types(self, resource_type: str) -> str:
         return [rt for rt, tp in self.resource_types.items() if tp == resource_type]
 
@@ -224,37 +241,16 @@ class MailevaProvider(MissiveProviderBase):
         address = recipient.get("address")
         if not address:
             raise ValueError("LRE recipient requires address")
-        country_code = self._country_code_from_address(address)
-        if not country_code:
-            raise ValueError("LRE recipient address requires country_code (e.g. FR)")
-
-        organization = (address.get("organization") or "").strip()
-        name = (recipient.get("name") or "").strip()
-        if not organization and not name:
-            raise ValueError(
-                "LRE recipient requires an identity line: set the recipient name "
-                "(or an organization on the address). Maileva rejects sendings whose "
-                "recipient has no name/company."
-            )
-
-        line_6 = f"{address.get('postal_code', '')} {address.get('city', '')}".strip()
-        if address.get("sorting_code"):
-            line_6 = f"{line_6} {address.get('sorting_code')}".strip()
-        if not address.get("address_line1"):
-            raise ValueError("LRE recipient address requires a street (address_line1)")
-
         data = {
             "custom_id": recipient.get("id"),
-            "address_line_1": organization,
-            "address_line_2": name,
+            "address_line_1": address.get("organization"),
+            "address_line_2": recipient.get("name"),
             "address_line_3": address.get("address_line2"),
             "address_line_4": address.get("address_line1"),
             "address_line_5": address.get("locality") or address.get("po_box"),
-            "address_line_6": line_6,
-            "country_code": country_code,
+            "address_line_6": f"{address.get('postal_code')} {address.get('city')}",
+            "country_code": address.get("country_code"),
         }
-        # Maileva rejects null/empty optional lines: omit them entirely.
-        return {k: v for k, v in data.items() if v not in (None, "")}
         if address.get("sorting_code"):
             data["address_line_6"] += " " + address.get("sorting_code")
         return data
@@ -332,7 +328,18 @@ class MailevaProvider(MissiveProviderBase):
             "archiving_duration": self._normalize_archiving_duration(kwargs.get("archiving_duration")),
         }
         sender = kwargs.get("sender", self._get_config_or_env("SENDER_ADDRESS", {}))
-        self._apply_sender_address(data, sender)
+        sender_name = sender.get("name")
+        sender_address = sender.get("address")
+        if sender_address:
+            data["sender_address_line_2"] = sender_name
+            data["sender_address_line_1"] = sender_address.get("organization")
+            data["sender_address_line_3"] = sender_address.get("address_line2")
+            data["sender_address_line_4"] = sender_address.get("address_line1")
+            data["sender_address_line_5"] = sender_address.get("locality") or sender_address.get("po_box")
+            data["sender_address_line_6"] = f"{sender_address.get('postal_code')} {sender_address.get('city')}"
+            data["sender_country_code"] = sender_address.get("country_code")
+            if sender_address.get("sorting_code"):
+                data["sender_address_line_6"] += " " + sender_address.get("sorting_code")
 
         if kwargs.get("notification_email"):
             data["notification_email"] = kwargs.get("notification_email", self._get_config_or_env("NOTIFICATION_EMAIL", ""))
