@@ -24,8 +24,8 @@
     <div class="a4-body">
         {% if missive.first_document_compiled %}
             {{ missive.first_document_compiled|safe }}
-        {% elif missive.body_html %}
-            {{ missive.body_html|safe }}
+        {% elif missive.body_rich %}
+            {{ missive.body_rich|safe }}
         {% elif missive.body_text %}
             <pre>{{ missive.body_text }}</pre>
         {% else %}

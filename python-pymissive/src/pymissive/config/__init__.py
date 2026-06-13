@@ -230,7 +230,7 @@ def get_missive_send_arg_config() -> dict:
     send_fields = {
         k: v
         for k, v in {**email.FIELDS, **phone.FIELDS, **address.FIELDS, **missive.FIELDS}.items()
-        if k in ("subject", "body_html", "body_text", "body", "recipients", "sender_name", "sender_email", "sender_phone", "sender_address", "reply_to_name", "reply_to_email")
+        if k in ("subject", "body_rich", "body_text", "body", "recipients", "sender_name", "sender_email", "sender_phone", "sender_address", "reply_to_name", "reply_to_email")
     }
     for k in ("name", "email", "phone", "address"):
         if k in recipient.RECIPIENT_FIELDS:

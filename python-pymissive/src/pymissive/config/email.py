@@ -30,14 +30,14 @@ FIELDS = {
         "description": "Subject",
         "format": "str",
     },
-    "body_html": {
-        "label": "Body HTML",
-        "description": "Body HTML",
+    "body_rich": {
+        "label": "Rich body",
+        "description": "Rich content body (HTML, RTF, …)",
         "format": "str",
     },
     "body_text": {
-        "label": "Body Text",
-        "description": "Body Text",
+        "label": "Plain text body",
+        "description": "Plain text body",
         "format": "str",
     },
 }

@@ -52,8 +52,8 @@ _PHONE_NUMBERS = [
     "+33667890123",
 ]
 
-# Minimal HTML/text bodies per type
-_BODY_HTML = {
+# Minimal rich/text bodies per type
+_BODY_RICH = {
     "email": "<p>Hello {name},</p><p>This is a test email. Reference: {ref}.</p>",
     "lre": "<p>Madame, Monsieur {name},</p><p>Courrier de test. Référence : {ref}.</p>",
 }
@@ -172,9 +172,9 @@ class Command(BaseCommand):
             subject = options["subject"] or f"Dataset {timezone.now().strftime('%Y-%m-%d %H:%M')}"
             campaign = MissiveCampaign.objects.create(
                 subject=subject,
-                body_html="<p>Dataset body</p>",
-                body_text="Dataset body",
-                body_sms="Dataset SMS body",
+                email_body_rich="<p>Dataset body</p>",
+                email_body_text="Dataset body",
+                phone_body_text="Dataset SMS body",
             )
             self.stdout.write(self.style.SUCCESS(f"Created campaign: {campaign.subject} ({campaign.pk})"))
         else:
@@ -213,14 +213,14 @@ class Command(BaseCommand):
                 name = _name(idx)
                 ref = _ref(idx)
 
-                body_html = _BODY_HTML.get(missive_type, "").format(name=name, ref=ref) or None
+                body_rich = _BODY_RICH.get(missive_type, "").format(name=name, ref=ref) or None
                 body_text = _BODY_TEXT.get(missive_type, "").format(name=name, ref=ref) or None
 
                 m = Missive(
                     **({} if campaign is None else {"campaign": campaign}),
                     missive_type=missive_type,
                     subject=f"[{missive_type.upper()}] Test {ref}",
-                    body_html=body_html,
+                    body_rich=body_rich,
                     body_text=body_text,
                     status=MissiveStatus.DRAFT,
                 )

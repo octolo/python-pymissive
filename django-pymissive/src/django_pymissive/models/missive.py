@@ -1,5 +1,6 @@
 """Main Missive model for multi-channel sending."""
 
+import traceback
 import uuid
 from django.db import transaction
 from django.utils import timezone
@@ -184,16 +185,16 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         null=True,
     )
 
-    body_html = RichTextField(
+    body_rich = RichTextField(
         blank=True,
         null=True,
-        verbose_name=_("Body HTML"),
-        help_text=_("HTML message body (email) or rich content (LRE)"),
+        verbose_name=_("Rich body"),
+        help_text=_("Rich content body (HTML, RTF, …) — email, LRE, etc."),
     )
     body_text = models.TextField(
         blank=True,
         null=True,
-        verbose_name=_("Body Text"),
+        verbose_name=_("Plain text body"),
         help_text=_("Plain text version of the message"),
     )
     # Sender
@@ -346,10 +347,12 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "sender_name":    "sender_email_name",
             "reply_to_name":  "reply_to_email_name",
             "acknowledgement": "acknowledgement_email",
+            "body_rich":      "email_body_rich",
+            "body_text":      "email_body_text",
         },
         "phone": {
             "sender_name":    "sender_phone_name",
-            "body_text":      "body_sms",
+            "body_text":      "phone_body_text",
         },
         "address": {
             "sender_name":    "sender_address_name",
@@ -357,13 +360,13 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "acknowledgement": "acknowledgement_lre",
             "delivery_mode":  "delivery_mode_lre",
             "priority":       "priority_lre",
-            "body_html":      "first_document",
+            "body_rich":      "first_document",
         },
     }
 
     _CAMPAIGN_SOURCED_FIELDS: dict[str, list[str]] = {
         "email": [
-            "subject", "body_html", "body_text",
+            "subject", "body_rich", "body_text",
             "acknowledgement",
             "sender_name", "sender_email",
             "reply_to_name", "reply_to_email",
@@ -373,7 +376,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "sender_name", "sender_phone",
         ],
         "address": [
-            "subject", "body_html", "body_text",
+            "subject", "body_rich", "body_text",
             "acknowledgement", "delivery_mode", "priority",
             "sender_name", "sender_address",
             "reply_to_name", "reply_to_address",
@@ -585,10 +588,16 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     #########################################################
 
     def can_send(self):
-        if self.has_service("send") and (not self.external_id or self.status == MissiveStatus.DRAFT):
-            service_method = f"check_{self.missive_type}"
-            return getattr(self, service_method)() if hasattr(self, service_method) else True
-        return False
+        if not self.has_service("send"):
+            return False
+        if self.status == MissiveStatus.ERROR:
+            sendable = True
+        elif not self.external_id or self.status == MissiveStatus.DRAFT:
+            sendable = True
+        else:
+            return False
+        service_method = f"check_{self.missive_type}"
+        return getattr(self, service_method)() if hasattr(self, service_method) else True
 
     def can_resend(self):
         if self.has_service("send"):
@@ -602,10 +611,10 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def check_email(self):
         if self.additional_config.get("use_provider_template", False):
             return self.check_recipients()
-        body_html = self.get_locally_or_campaign_value("body_html")
+        body_rich = self.get_locally_or_campaign_value("body_rich")
         body_text = self.get_locally_or_campaign_value("body_text")
         subject = self.get_locally_or_campaign_value("subject")
-        body = body_html or body_text
+        body = body_rich or body_text
         return self.check_recipients() and bool(body and body.strip()) and bool(subject and subject.strip())
 
     def check_sms(self):
@@ -613,7 +622,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         return self.check_recipients() and bool(body and body.strip())
 
     def check_lre(self):
-        body = self.get_locally_or_campaign_value("body_html")
+        body = self.get_locally_or_campaign_value("body_rich")
         return self.check_recipients() and bool(body and body.strip())
 
     def check_hand_delivery(self):
@@ -883,16 +892,16 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         )
 
     @property
-    def body_html_compiled(self):
+    def body_rich_compiled(self):
         return self._compiled_template_value(
-            self.get_locally_or_campaign_value("body_html"),
-            field_name="body_html",
+            self.get_locally_or_campaign_value("body_rich"),
+            field_name="body_rich",
         )
 
     @property
     def body_text_compiled(self):
         # SMS/RCS store their payload in body_text but must compile under
-        # field_name="body_sms" so channel-aware body processors (signature,
+        # field_name="phone_body_text" so channel-aware body processors (signature,
         # banner, …) pick the SMS variant instead of the email one.
         if (self.missive_type or "").lower() in ("sms", "rcs"):
             return self.body_sms_compiled
@@ -905,13 +914,13 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def body_sms_compiled(self):
         return self._compiled_template_value(
             self.get_locally_or_campaign_value("body_text") or "",
-            field_name="body_sms",
+            field_name="phone_body_text",
         )
 
     @property
     def first_document_compiled(self):
         return self._compiled_template_value(
-            self.get_locally_or_campaign_value("body_html") or "",
+            self.get_locally_or_campaign_value("body_rich") or "",
             field_name="first_document",
         )
 
@@ -1161,6 +1170,48 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         response["client_initiated"] = True
         self._update_recipients(response.get("recipients", []))
 
+    def _record_send_failure(
+        self,
+        exc=None,
+        *,
+        response=None,
+        occurred_at=None,
+        extra_trace=None,
+    ):
+        """Append a client-initiated ERROR event and move the missive to ERROR."""
+        occurred_at = occurred_at or timezone.now()
+        trace = dict(response or {})
+        if extra_trace:
+            trace.update(extra_trace)
+        reason = ""
+        if exc is not None:
+            trace.setdefault("error", str(exc))
+            trace.setdefault("error_type", type(exc).__name__)
+            trace.setdefault("traceback", traceback.format_exc())
+            reason = str(exc)
+        elif response:
+            reason = str(response.get("message") or response.get("error") or "")
+        config = dict(self.additional_config or {})
+        if reason:
+            config["last_error"] = reason
+        self.to_missiveevent.create(
+            event=MissiveEventType.ERROR,
+            reason=reason,
+            trace=trace,
+            client_initiated=True,
+            occurred_at=occurred_at,
+        )
+        self.status = MissiveStatus.ERROR
+        update_fields = ["status"]
+        if config != (self.additional_config or {}):
+            self.additional_config = config
+            update_fields.append("additional_config")
+        self.save(update_fields=update_fields)
+
+    def last_send_error(self) -> str:
+        """Return the last send failure message, if any."""
+        return (self.additional_config or {}).get("last_error") or ""
+
     def send_missive(self, *, old_missive=None):
         """Send the missive.
 
@@ -1190,7 +1241,13 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         if is_dry_run():
             self._dry_run_send(occurred_at=occurred_at, old_missive=old_missive)
             return
-        response = self.call_provider_service("send", **self.get_serialized_data())
+        try:
+            response = self.call_provider_service("send", **self.get_serialized_data())
+        except Exception as exc:
+            self._record_send_failure(exc, occurred_at=occurred_at)
+            self.refresh_from_db()
+            missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
+            return
         response["client_initiated"] = True
         if response.get("disabled_send"):
             self._disabled_send(response=response, occurred_at=occurred_at, old_missive=old_missive)
@@ -1214,12 +1271,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             if events:
                 self.handle_events(events)
         else:
-            self.to_missiveevent.create(
-                event=MissiveEventType.ERROR,
-                trace=response,
-                client_initiated=True,
-                occurred_at=occurred_at,
-            )
+            self._record_send_failure(response=response, occurred_at=occurred_at)
         self.refresh_from_db()
         missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
 
@@ -1233,16 +1285,14 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         try:
             self.get_serialized_data()
         except Exception as exc:  # surface generation errors in trace
-            self.to_missiveevent.create(
-                event=MissiveEventType.ERROR,
-                trace={"dry_run": True, "error": str(exc)},
-                client_initiated=True,
+            self._record_send_failure(
+                exc,
                 occurred_at=occurred_at,
+                extra_trace={"dry_run": True},
             )
-            self.save(update_fields=["status"])
             self.refresh_from_db()
             missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
-            raise
+            return
         self.external_id = f"dry-run:{self.thread_id}"
         self.save(update_fields=["external_id", "status"])
         self.to_missiveevent.create(
@@ -1425,7 +1475,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     _REQUIRED_FIELDS_BY_SUPPORT: dict[str, list] = {
         "email": [
             "subject",
-            ["body_html", "body_text"],
+            ["body_rich", "body_text"],
             "sender_email",
         ],
         "phone": [
@@ -1475,31 +1525,31 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """Clean the missive for email support."""
         if self.additional_config.get("use_provider_template", False):
             return True
-        has_body_missive = (self.body_html or self.body_text)
-        has_body_campaign = (self.campaign and (self.campaign.body_html or self.campaign.body_text))
+        has_body_missive = (self.body_rich or self.body_text)
+        has_body_campaign = (self.campaign and (self.campaign.email_body_rich or self.campaign.email_body_text))
         if not has_body_missive and not has_body_campaign:
             raise ValidationError({
-                "body_html": _("Body or body text is required (in missive or campaign)"),
-                "body_text": _("Body or body text is required (in missive or campaign)"),
+                "body_rich": _("Rich body or plain text body is required (in missive or campaign)"),
+                "body_text": _("Rich body or plain text body is required (in missive or campaign)"),
             })
 
     def clean_support_phone(self):
-        """Clean the missive for SMS support."""
+        """Clean the missive for SMS/phone support."""
         has_body_missive = self.body_text
-        has_body_campaign = (self.campaign and self.campaign.body_sms)
+        has_body_campaign = (self.campaign and self.campaign.phone_body_text)
         if not has_body_missive and not has_body_campaign:
             raise ValidationError({
-                "body_text": _("Body text is required (in missive or campaign)"),
+                "body_text": _("Plain text body is required (in missive or campaign)"),
             })
 
     def clean_support_address(self):
-        """Extra validation for address (LRE) missives: body_html or attachments."""
-        has_body = self.get_locally_or_campaign_value("body_html")
+        """Extra validation for address (LRE) missives: body_rich or attachments."""
+        has_body = self.get_locally_or_campaign_value("body_rich")
         has_attachments = self.pk and self.to_missiveattachment.all().exists()
         has_campaign_docs = self.campaign and self.campaign.to_campaigndocument.exists()
         if not has_body and not has_attachments and not has_campaign_docs:
             raise ValidationError({
-                "body_html": _("Body or attachments are required (set locally or via campaign)"),
+                "body_rich": _("Rich body or attachments are required (set locally or via campaign)"),
             })
 
 

@@ -22,7 +22,8 @@ from django.utils import timezone
 
 from django_pymissive.models.campaign import MissiveCampaign
 from django_pymissive.models.scheduler import MissiveScheduledCampaign
-from django_pymissive.models.choices import MissiveStatus, MissiveThreadType
+from django_pymissive.models.choices import MissiveEventType, MissiveStatus, MissiveThreadType
+from django_pymissive.models.event import MissiveEvent
 from django_pymissive.models.missive import Missive
 from tests.fakeapp.models import Contact
 
@@ -218,13 +219,17 @@ def test_process_missives_marks_failing_missive_error():
     m.refresh_from_db()
     assert m.status == MissiveStatus.ERROR
     assert "boom" in (m.additional_config or {}).get("last_error", "")
+    events = list(MissiveEvent.objects.filter(missive=m))
+    assert len(events) == 1
+    assert events[0].event == MissiveEventType.ERROR
+    assert events[0].trace.get("error") == "boom"
 
 
 def test_process_missives_default_send_fn_uses_send_missive():
     """Without a send_fn, process_missives calls missive.send_missive() on each claimed missive."""
     c = _campaign()
     sched = _scheduled(c)
-    m = _missive(c, body_html="<p>hi</p>", missive_type="email")
+    m = _missive(c, body_rich="<p>hi</p>", missive_type="email")
     called = []
 
     with patch.object(Missive, "send_missive", lambda self: called.append(self.pk)):
@@ -338,6 +343,25 @@ def test_run_campaign_external_task_backend(settings):
         sched.run_campaign()
 
     assert called_with == [sched.id]
+
+
+def test_run_with_tracking_retry_resets_send_error_in_place():
+    """retry_failed: send-time ERROR missives are reset to DRAFT on the same row."""
+    c = _campaign()
+    old_run = _scheduled(c)
+    failed = _missive(c, status=MissiveStatus.ERROR, missive_type="email")
+    failed.scheduler = old_run
+    failed.save(update_fields=["scheduler"])
+
+    sched = _scheduled(c, retry_failed=True)
+    with patch.object(MissiveScheduledCampaign, "run_campaign"):
+        sched.run_with_tracking()
+
+    failed.refresh_from_db()
+    assert failed.thread_type == MissiveThreadType.MISSIVE
+    assert failed.status == MissiveStatus.DRAFT
+    assert failed.scheduler_id == sched.id
+    assert Missive.objects.filter(campaign=c).count() == 1
 
 
 def test_run_with_tracking_retry_duplicates_error_missives_at_claim():

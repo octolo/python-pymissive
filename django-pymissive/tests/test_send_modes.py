@@ -36,7 +36,7 @@ def _email_missive() -> Missive:
 
 
 def _events(missive: Missive):
-    return list(MissiveEvent.objects.filter(missive=missive))
+    return list(MissiveEvent.objects.filter(missive=missive).order_by("pk"))
 
 
 def test_dry_run_skips_provider(settings):
@@ -142,3 +142,116 @@ def test_real_send_uses_provider_response(settings):
     assert events[0].event == MissiveEventType.REQUEST
     assert not events[0].trace.get("dry_run")
     assert not events[0].trace.get("disabled_send")
+
+
+def test_real_send_provider_exception_records_error_event(settings):
+    settings.PYMISSIVE_DRY_RUN = False
+    settings.PYMISSIVE_DISABLE_SEND = False
+    missive = _email_missive()
+
+    with patch.object(Missive, "can_send", return_value=True), patch.object(
+        Missive, "get_serialized_data", return_value={}
+    ), patch.object(
+        Missive,
+        "call_provider_service",
+        side_effect=RuntimeError("provider timeout"),
+    ):
+        missive.send_missive()
+
+    missive.refresh_from_db()
+    assert missive.status == MissiveStatus.ERROR
+    events = _events(missive)
+    assert len(events) == 1
+    assert events[0].event == MissiveEventType.ERROR
+    assert events[0].trace.get("error") == "provider timeout"
+    assert events[0].trace.get("error_type") == "RuntimeError"
+    assert "RuntimeError: provider timeout" in events[0].trace.get("traceback", "")
+    assert (missive.additional_config or {}).get("last_error") == "provider timeout"
+
+
+def test_real_send_without_external_id_records_error_event(settings):
+    settings.PYMISSIVE_DRY_RUN = False
+    settings.PYMISSIVE_DISABLE_SEND = False
+    missive = _email_missive()
+
+    response = {"message": "Invalid API key", "code": 401}
+
+    with patch.object(Missive, "can_send", return_value=True), patch.object(
+        Missive, "get_serialized_data", return_value={}
+    ), patch.object(Missive, "call_provider_service", return_value=dict(response)):
+        missive.send_missive()
+
+    missive.refresh_from_db()
+    assert missive.status == MissiveStatus.ERROR
+    events = _events(missive)
+    assert len(events) == 1
+    assert events[0].event == MissiveEventType.ERROR
+    assert events[0].reason == "Invalid API key"
+    assert events[0].trace.get("message") == "Invalid API key"
+
+
+def test_send_failure_event_survives_atomic_block(settings):
+    """ERROR event persists even when send_missive runs inside atomic()."""
+    from django.db import transaction
+
+    settings.PYMISSIVE_DRY_RUN = False
+    settings.PYMISSIVE_DISABLE_SEND = False
+    missive = _email_missive()
+
+    with patch.object(Missive, "can_send", return_value=True), patch.object(
+        Missive, "get_serialized_data", return_value={}
+    ), patch.object(
+        Missive,
+        "call_provider_service",
+        side_effect=RuntimeError("provider timeout"),
+    ):
+        with transaction.atomic():
+            missive.send_missive()
+
+    missive.refresh_from_db()
+    assert missive.status == MissiveStatus.ERROR
+    events = _events(missive)
+    assert len(events) == 1
+    assert events[0].event == MissiveEventType.ERROR
+
+
+def test_each_send_failure_appends_error_event(settings):
+    settings.PYMISSIVE_DRY_RUN = False
+    settings.PYMISSIVE_DISABLE_SEND = False
+    missive = _email_missive()
+
+    with patch.object(Missive, "can_send", return_value=True), patch.object(
+        Missive, "get_serialized_data", return_value={}
+    ), patch.object(
+        Missive,
+        "call_provider_service",
+        side_effect=RuntimeError("first failure"),
+    ):
+        missive.send_missive()
+
+    with patch.object(Missive, "can_send", return_value=True), patch.object(
+        Missive, "get_serialized_data", return_value={}
+    ), patch.object(
+        Missive,
+        "call_provider_service",
+        side_effect=RuntimeError("second failure"),
+    ):
+        missive.send_missive()
+
+    events = _events(missive)
+    assert len(events) == 2
+    assert all(e.event == MissiveEventType.ERROR for e in events)
+    assert events[0].trace.get("error") == "first failure"
+    assert events[1].trace.get("error") == "second failure"
+    assert missive.last_send_error() == "second failure"
+
+
+def test_can_send_allows_error_retry_without_resend():
+    missive = _email_missive()
+    missive.status = MissiveStatus.ERROR
+    missive.save(update_fields=["status"])
+
+    with patch.object(Missive, "has_service", return_value=True), patch.object(
+        missive, "check_email", return_value=True
+    ):
+        assert missive.can_send() is True

@@ -6,7 +6,7 @@ one-stop import for all body-processor symbols.
 
 from ._base import (
     DEFAULT_BODY_PROCESSORS,
-    EMAIL_BODY_HTML_FIELDS,
+    EMAIL_BODY_RICH_FIELDS,
     EMAIL_BODY_TEXT_FIELDS,
     EMAIL_MISSIVE_TYPES,
     MissiveBodyProcessor,
@@ -25,7 +25,7 @@ from .django_template import django_template_processor
 
 __all__ = [
     "DEFAULT_BODY_PROCESSORS",
-    "EMAIL_BODY_HTML_FIELDS",
+    "EMAIL_BODY_RICH_FIELDS",
     "EMAIL_BODY_TEXT_FIELDS",
     "EMAIL_MISSIVE_TYPES",
     "MissiveBodyProcessor",

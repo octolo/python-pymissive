@@ -1,7 +1,7 @@
 """Fake body processor for testing the hook/processor pipeline."""
 
-_HTML_FIELDS = frozenset({"body_html", "first_document"})
-_TEXT_FIELDS = frozenset({"body_text", "body_sms"})
+_HTML_FIELDS = frozenset({"body_rich", "first_document"})
+_TEXT_FIELDS = frozenset({"body_text", "phone_body_text"})
 
 MARKER_HTML = "<br><br><em>hook fakeapp added</em>"
 MARKER_TEXT = "\n\nhook fakeapp added"

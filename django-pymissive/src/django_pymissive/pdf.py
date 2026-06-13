@@ -105,11 +105,11 @@ def _postal_pdf_head_css() -> str:
 
 
 def _compile_body(missive) -> str:
-    """Compile first_document (campaign) or body_html when no campaign."""
+    """Compile first_document (campaign) or body_rich when no campaign."""
     context = missive.missive_context()
     tpl = (
         missive.get_locally_or_campaign_value("first_document")
-        or missive.get_locally_or_campaign_value("body_html")
+        or missive.get_locally_or_campaign_value("body_rich")
         or ""
     )
     return Template(str(tpl)).render(Context(context))

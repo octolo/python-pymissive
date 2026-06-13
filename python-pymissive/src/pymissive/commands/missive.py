@@ -118,7 +118,7 @@ def _missive_command(args: list[str]) -> bool:
         body_text = (parsed.get("body_text") or "") or (parsed.get("body") or "")
         payload = {
             "subject": parsed.get("subject", ""),
-            "body_html": parsed.get("body_html", ""),
+            "body_rich": parsed.get("body_rich", ""),
             "body_text": body_text,
             "recipients": recipients,
             "sender": sender,

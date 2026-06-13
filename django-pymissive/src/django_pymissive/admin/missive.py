@@ -414,7 +414,7 @@ class MissiveAdmin(AdminBoostModel):
         )
         self.add_to_fieldset(
             _("Content"),
-            ["subject", "body_html", "body_text"],
+            ["subject", "body_rich", "body_text"],
         )
         self.add_to_fieldset(
             _("Tracking"),
@@ -532,7 +532,12 @@ class MissiveAdmin(AdminBoostModel):
         messages.success(request, _("Missive prepared successfully."))
 
     def has_resend_missive_permission(self, request, obj=None):
-        return self.is_not_cancelled(obj) and obj.can_resend() and not self.is_draft(obj)
+        return (
+            self.is_not_cancelled(obj)
+            and obj.can_resend()
+            and not self.is_draft(obj)
+            and obj.status != MissiveStatus.ERROR
+        )
 
     @admin_boost_action("resend_missive", _("Resend"))
     def handle_resend_missive(self, request, object_id):
@@ -545,11 +550,20 @@ class MissiveAdmin(AdminBoostModel):
         if not confirmed:
             return {"confirm": _("Are you sure you want to resend this missive?")}
         new_missive = obj.resend_missive()
-        messages.success(request, _("Missive resent successfully."))
+        new_missive.refresh_from_db()
+        if new_missive.status == MissiveStatus.ERROR:
+            messages.error(
+                request,
+                new_missive.last_send_error() or _("Missive send failed."),
+            )
+        else:
+            messages.success(request, _("Missive resent successfully."))
         return redirect(reverse("admin:django_pymissive_missive_change", args=[new_missive.pk]))
 
     def has_send_missive_permission(self, request, obj=None):
-        return self.is_draft(obj) and obj.can_send()
+        if not obj or not obj.pk:
+            return False
+        return obj.status in (MissiveStatus.DRAFT, MissiveStatus.ERROR) and obj.can_send()
 
     @admin_boost_action("send_missive", _("Send"))
     def handle_send_missive(self, request, object_id):
@@ -562,7 +576,11 @@ class MissiveAdmin(AdminBoostModel):
         if not confirmed:
             return {"confirm": _("Are you sure you want to send this missive?")}
         obj.send_missive()
-        messages.success(request, _("Missive sent successfully."))
+        obj.refresh_from_db()
+        if obj.status == MissiveStatus.ERROR:
+            messages.error(request, obj.last_send_error() or _("Missive send failed."))
+        else:
+            messages.success(request, _("Missive sent successfully."))
         return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
 
     def has_cancel_missive_permission(self, request, obj=None):

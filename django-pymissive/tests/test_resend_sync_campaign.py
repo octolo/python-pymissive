@@ -40,7 +40,7 @@ def _email_missive(campaign=None, **kw) -> Missive:
 def test_sync_campaign_overwrites_local_overrides():
     campaign = _campaign(
         subject="Campaign subject",
-        body_text="Campaign body",
+        email_body_text="Campaign body",
         sender_email_name="Campaign Sender",
         sender_email="campaign@example.com",
     )

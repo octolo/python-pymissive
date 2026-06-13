@@ -72,7 +72,7 @@ def _make_lre_missive(**overrides) -> Missive:
     defaults = {
         "missive_type": "lre",
         "subject": "LRE",
-        "body_html": "<p>letter body</p>",
+        "body_rich": "<p>letter body</p>",
     }
     defaults.update(overrides)
     return Missive.objects.create(**defaults)
@@ -82,7 +82,7 @@ def _make_email_missive(**overrides) -> Missive:
     defaults = {
         "missive_type": "email",
         "subject": "Email",
-        "body_html": "<p>hi</p>",
+        "body_rich": "<p>hi</p>",
     }
     defaults.update(overrides)
     return Missive.objects.create(**defaults)
@@ -209,7 +209,7 @@ def test_first_document_compiled_reads_campaign_first_document(settings):
     campaign = MissiveCampaign.objects.create(
         subject="Camp",
         first_document="<p>campaign letter</p>",
-        body_html="<p>email body</p>",
+        email_body_rich="<p>email body</p>",
     )
     missive = missive_for_campaign_preview(campaign, "postal")
     assert "campaign letter" in missive.first_document_compiled

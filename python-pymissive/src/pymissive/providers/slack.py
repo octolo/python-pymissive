@@ -41,9 +41,9 @@ class SlackProvider(MissiveProviderBase):
     def send_branded(self, **kwargs: Any) -> dict[str, Any]:
         """Send a branded message to a Slack channel."""
         channel_id = self._resolve_channel_id(**kwargs)
-        text = kwargs.get("body_text") or kwargs.get("body_html") or kwargs.get("subject") or ""
+        text = kwargs.get("body_text") or kwargs.get("body_rich") or kwargs.get("subject") or ""
         if not text:
-            raise ValueError("Slack text is required (body_text, body_html, or subject)")
+            raise ValueError("Slack text is required (body_text, body_rich, or subject)")
 
         payload = json.dumps({"channel": channel_id, "text": str(text)}).encode("utf-8")
         request = Request(

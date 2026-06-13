@@ -57,10 +57,10 @@ class TeamsProvider(MissiveProviderBase):
         """Post a message to a Teams channel using an Incoming Webhook."""
         webhook_url = self._resolve_webhook_url(**kwargs)
         subject = (kwargs.get("subject") or "").strip()
-        text = kwargs.get("body_text") or kwargs.get("body_html") or kwargs.get("subject") or ""
+        text = kwargs.get("body_text") or kwargs.get("body_rich") or kwargs.get("subject") or ""
         text = str(text).strip()
         if not text:
-            raise ValueError("Teams message text is required (body_text, body_html, or subject)")
+            raise ValueError("Teams message text is required (body_text, body_rich, or subject)")
 
         # Simple text works on all Teams webhook versions; MessageCard adds a title when subject differs.
         if subject and subject != text:

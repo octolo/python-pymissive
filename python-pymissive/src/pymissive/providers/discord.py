@@ -44,9 +44,9 @@ class DiscordProvider(MissiveProviderBase):
     def send_branded(self, **kwargs: Any) -> dict[str, Any]:
         """Send a branded message to a Discord channel."""
         channel_id = self._resolve_channel_id(**kwargs)
-        content = kwargs.get("body_text") or kwargs.get("body_html") or kwargs.get("subject") or ""
+        content = kwargs.get("body_text") or kwargs.get("body_rich") or kwargs.get("subject") or ""
         if not content:
-            raise ValueError("Discord content is required (body_text, body_html, or subject)")
+            raise ValueError("Discord content is required (body_text, body_rich, or subject)")
 
         import discord
 

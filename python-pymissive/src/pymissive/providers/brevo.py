@@ -274,8 +274,8 @@ class BrevoAPIProvider(MissiveProviderBase):
                     for r in recipients
                 ],
             }
-            if kwargs.get('body_html'):
-                send_kwargs['html_content'] = kwargs['body_html']
+            if kwargs.get('body_rich'):
+                send_kwargs['html_content'] = kwargs['body_rich']
             if kwargs.get('body_text'):
                 send_kwargs['text_content'] = kwargs['body_text']
 

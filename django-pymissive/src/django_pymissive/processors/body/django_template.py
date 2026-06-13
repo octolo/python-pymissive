@@ -20,7 +20,7 @@ from django.template import Context, Template
 # Everything else (body_text, body_sms, subject, …) is plain text, so we turn
 # autoescape OFF, otherwise ``'`` becomes ``&#x27;``, ``&`` becomes ``&amp;``,
 # etc. in the rendered output.
-HTML_TEMPLATE_FIELDS = frozenset({"body_html", "first_document"})
+HTML_TEMPLATE_FIELDS = frozenset({"body_rich", "first_document"})
 
 
 def django_template_processor(

@@ -94,16 +94,17 @@ class MissiveCampaignAdmin(AdminBoostModel):
                 "acknowledgement_email",
                 "reply_to_email_name",
                 "reply_to_email",
-                "body_text",
-                "body_html",
+                "email_body_text",
+                "email_body_rich",
             ],
         )
         self.add_to_fieldset(
-            _("SMS"),
+            _("SMS / App"),
             [
                 "sender_phone_name",
                 "sender_phone",
-                "body_sms",
+                "phone_body_text",
+                "phone_body_rich",
             ],
         )
         self.add_to_fieldset(

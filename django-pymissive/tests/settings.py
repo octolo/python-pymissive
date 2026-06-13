@@ -156,7 +156,7 @@ PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
     "django_pymissive.processors.body.add_preview_browser.add_preview_browser",
     # 3. Append the list of linked attachments at the end of the email body
     "django_pymissive.processors.body.add_attachments_linked.add_attachments_linked",
-    # 4. Append the test signature (HTML for body_html, text for body_text)
+    # 4. Append the test signature (HTML for body_rich, text for body_text)
     "tests.processors.add_signature",
 ]
 

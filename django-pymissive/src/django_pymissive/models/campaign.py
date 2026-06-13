@@ -77,18 +77,18 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         verbose_name=_("Reply-To email"),
         help_text=_("Email address for replies"),
     )
-    body_html = RichTextField(
+    email_body_rich = RichTextField(
         blank=True,
-        verbose_name=_("Body HTML"),
-        help_text=_("Campaign email HTML body"),
+        verbose_name=_("Email rich body"),
+        help_text=_("Rich content body for email (HTML, RTF, …)"),
     )
-    body_text = models.TextField(
+    email_body_text = models.TextField(
         blank=True,
-        verbose_name=_("Body text"),
-        help_text=_("Campaign body text"),
+        verbose_name=_("Email plain text body"),
+        help_text=_("Plain text body for email"),
     )
 
-    # SMS
+    # SMS / App
     sender_phone_name = models.CharField(
         max_length=255,
         verbose_name=_("Sender phone name"),
@@ -102,10 +102,15 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         verbose_name=_("Sender phone"),
         help_text=_("Phone number of the sender (used for SMS)"),
     )
-    body_sms = models.TextField(
+    phone_body_text = models.TextField(
         blank=True,
-        verbose_name=_("Body SMS"),
-        help_text=_("Campaign body SMS"),
+        verbose_name=_("SMS / App plain text body"),
+        help_text=_("Plain text body for SMS, push and messaging apps"),
+    )
+    phone_body_rich = models.TextField(
+        blank=True,
+        verbose_name=_("SMS / App rich body"),
+        help_text=_("Rich body for rich SMS, WhatsApp, RCS, etc."),
     )
 
     # Address / LRE

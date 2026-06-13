@@ -53,7 +53,7 @@ def _make_missive(*, campaign=None, missive_type="email", **overrides) -> Missiv
     defaults = {
         "missive_type": missive_type,
         "subject": "Test subject",
-        "body_html": "<p>hi</p>",
+        "body_rich": "<p>hi</p>",
         "campaign": campaign,
     }
     defaults.update(overrides)
@@ -226,36 +226,36 @@ def _post_appender(missive, pdf_bytes, *, campaign=None, context=None, **kwargs)
 # ---------------------------------------------------------------------------
 
 
-def test_body_html_compiled_runs_default_chain(settings):
-    """``body_html_compiled`` runs the template processor first (renders
+def test_body_rich_compiled_runs_default_chain(settings):
+    """``body_rich_compiled`` runs the template processor first (renders
     ``{{ var }}``) and any subsequent processors in order."""
     settings.PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
         "django_pymissive.processors.body.django_template.django_template_processor",
         "tests.test_processor_integration._tag_appender",
     ]
     missive = _make_missive(
-        body_html="<p>Hello {{ name }}</p>",
+        body_rich="<p>Hello {{ name }}</p>",
         additional_context={"name": "Alice"},
     )
-    out = missive.body_html_compiled
+    out = missive.body_rich_compiled
     assert "Hello Alice" in out
     assert out.endswith("__TAG__")
 
 
-def test_body_html_compiled_uses_missive_processors_when_set(settings):
+def test_body_rich_compiled_uses_missive_processors_when_set(settings):
     """Missive-level chain wins over campaign and defaults."""
     settings.PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
         "django_pymissive.processors.body.django_template.django_template_processor",
     ]
     missive = _make_missive(
-        body_html="<p>Hello {{ name }}</p>",
+        body_rich="<p>Hello {{ name }}</p>",
         additional_context={"name": "Bob"},
         body_processors=[
             "django_pymissive.processors.body.django_template.django_template_processor",
             ["tests.test_processor_integration._tag_appender", {"tag": "MIS_ONLY"}],
         ],
     )
-    out = missive.body_html_compiled
+    out = missive.body_rich_compiled
     assert "Hello Bob" in out
     assert out.endswith("MIS_ONLY")
 
@@ -271,13 +271,13 @@ def test_subject_compiled_runs_chain(settings):
     assert missive.subject_compiled == "Hi Alice!"
 
 
-def test_body_html_compiled_returns_empty_on_processor_error(settings):
+def test_body_rich_compiled_returns_empty_on_processor_error(settings):
     """A buggy processor must not crash preview — falls back to ''. """
     settings.PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
         "tests.test_processor_integration._exploding_body_processor",
     ]
-    missive = _make_missive(body_html="<p>hi</p>")
-    assert missive.body_html_compiled == ""
+    missive = _make_missive(body_rich="<p>hi</p>")
+    assert missive.body_rich_compiled == ""
 
 
 def _tag_appender(content, *, missive=None, campaign=None, field_name=None, context=None, tag="__TAG__", **kwargs):

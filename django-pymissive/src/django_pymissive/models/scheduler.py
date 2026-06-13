@@ -377,12 +377,9 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
                 return
             self.send_date = now
 
-            # When retry_failed is set, duplicate the campaign's error missives
-            # into fresh DRAFTs at claim time — same transaction as the date
-            # claim, before attaching drafts to this run. The originals become
-            # HISTORY with their scheduler FK left untouched (we never re-point
-            # the run that already dispatched them); each duplicate is a brand
-            # new DRAFT attached to this run. Done here (not in run_campaign) so
+            # When retry_failed is set, re-queue error missives at claim time —
+            # send-time ERROR rows are reset to DRAFT in place; delivery failures
+            # are duplicated as fresh DRAFTs. Done here (not in run_campaign) so
             # retry works generically for every backend the task dispatches to.
             if self.retry_failed:
                 self._retry_error_missives()
@@ -471,22 +468,16 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
     @staticmethod
     def _mark_missive_error(missive, exc: Exception) -> None:
-        """Move a missive to ERROR and record the failure."""
-        config = dict(missive.additional_config or {})
-        config["last_error"] = str(exc)
-        type(missive).objects.filter(pk=missive.pk).update(
-            status=MissiveStatus.ERROR,
-            additional_config=config,
-        )
-        missive.status = MissiveStatus.ERROR
-        missive.additional_config = config
+        """Append an ERROR event for an unexpected send failure."""
+        missive._record_send_failure(exc)
 
     def process_missives(self, send_fn=None) -> list:
         """Claim and send each DRAFT missive best-effort.
 
-        ``send_fn(missive)`` defaults to ``missive.send_missive()``. A missive
-        whose send raises is moved to ``ERROR`` and the batch continues.
-        Returns a list of ``(missive_pk, error_message)`` for failed missives.
+        ``send_fn(missive)`` defaults to ``missive.send_missive()``. Failures
+        are recorded on the missive (``ERROR`` status + event); the batch
+        continues. Returns a list of ``(missive_pk, error_message)`` for failed
+        missives.
         """
         if send_fn is None:
             def send_fn(missive):
@@ -503,31 +494,36 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
                     missive.pk,
                     self.pk,
                 )
+                continue
+            missive.refresh_from_db()
+            if missive.status == MissiveStatus.ERROR:
+                failures.append((missive.pk, missive.last_send_error() or str(_("Send failed."))))
         return failures
 
     def _retry_error_missives(self) -> int:
-        """Duplicate the campaign's error missives as fresh DRAFTs for this run.
+        """Re-queue failed missives for another send attempt.
 
-        Called from :meth:`run_with_tracking` at claim time (before drafts are
-        attached). Each error missive is moved to HISTORY — its ``scheduler`` FK
-        is left untouched so the run that originally dispatched it keeps its
-        history — and replaced by a clean duplicate (status=DRAFT, no
-        external_id) attached to *this* scheduler. This mirrors
-        :meth:`~django_pymissive.models.missive.Missive.resend_missive` so that
-        campaign-sourced fields are re-resolved at send time and the provider
-        sees a brand-new submission. Returns the number of missives duplicated.
+        Send-time failures (``ERROR``) are retried on the same row — no HISTORY
+        duplicate. Delivery failures (``FAILED``, ``PARTIALLY_FAILED``) are
+        duplicated as fresh DRAFTs so the provider sees a new submission.
         """
-        qs = self.campaign.to_missive.filter(
-            status__in=ERROR_STATUSES,
-        ).exclude(
+        base_qs = self.campaign.to_missive.exclude(
             thread_type=MissiveThreadType.HISTORY,
         )
         if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
-            qs = qs.filter(missive_type=self.missive_type)
+            base_qs = base_qs.filter(missive_type=self.missive_type)
 
-        count = 0
+        send_error_count = base_qs.filter(status=MissiveStatus.ERROR).update(
+            status=MissiveStatus.DRAFT,
+            scheduler=self,
+        )
+
+        delivery_error_qs = base_qs.filter(
+            status__in=[MissiveStatus.FAILED, MissiveStatus.PARTIALLY_FAILED],
+        )
+        duplicate_count = 0
         with transaction.atomic():
-            for missive in qs:
+            for missive in delivery_error_qs:
                 missive.thread_type = MissiveThreadType.HISTORY
                 missive.save(update_fields=["thread_type"])
                 new_missive = missive.duplicate_missive(
@@ -537,9 +533,9 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
                 )
                 new_missive.scheduler = self
                 new_missive.save(update_fields=["scheduler"])
-                count += 1
+                duplicate_count += 1
 
-        return count
+        return send_error_count + duplicate_count
 
     def run_campaign(self):
         """Execute the campaign — task_object, external backend, or built-in loop."""

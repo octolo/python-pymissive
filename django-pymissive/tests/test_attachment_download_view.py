@@ -52,7 +52,7 @@ def _make_email_missive() -> Missive:
     return Missive.objects.create(
         missive_type="email",
         subject="Email",
-        body_html="<p>hi</p>",
+        body_rich="<p>hi</p>",
     )
 
 
@@ -60,7 +60,7 @@ def _make_lre_missive() -> Missive:
     return Missive.objects.create(
         missive_type="lre",
         subject="LRE",
-        body_html="<p>letter body</p>",
+        body_rich="<p>letter body</p>",
     )
 
 

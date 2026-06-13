@@ -225,8 +225,8 @@ class ScalewayProvider(MissiveProviderBase):
         }
 
     def _add_content(self, kwargs):
-        if kwargs.get("body_html"):
-            self._email_data["html"] = kwargs["body_html"]
+        if kwargs.get("body_rich"):
+            self._email_data["html"] = kwargs["body_rich"]
         if kwargs.get("body_text"):
             self._email_data["text"] = kwargs["body_text"]
         if "html" not in self._email_data and "text" not in self._email_data:

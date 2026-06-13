@@ -24,7 +24,7 @@ def _make_email_missive(**overrides) -> Missive:
     defaults = {
         "missive_type": "email",
         "subject": "ctx",
-        "body_html": "<p>hi</p>",
+        "body_rich": "<p>hi</p>",
     }
     defaults.update(overrides)
     return Missive.objects.create(**defaults)

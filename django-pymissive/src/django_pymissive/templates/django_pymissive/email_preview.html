@@ -44,10 +44,10 @@
         <p><strong>{% trans 'Subject' %}:</strong> {% if missive.subject_compiled %}{{ missive.subject_compiled }}{% else %}<span class="empty">{% trans "Not filled in" %}</span>{% endif %}</p>
     </div>
     <div class="email-body">
-        {% if missive.body_html_compiled %}
+        {% if missive.body_rich_compiled %}
             <fieldset class="email-html">
                 <legend>{% trans "HTML Content" %}</legend>
-                {{ missive.body_html_compiled|safe }}
+                {{ missive.body_rich_compiled|safe }}
             </fieldset>
         {% endif %}
 
@@ -75,7 +75,7 @@
             </details>
         {% endif %}
 
-        {% if not missive.body_html_compiled and not missive.body_text_compiled %}
+        {% if not missive.body_rich_compiled and not missive.body_text_compiled %}
             <p class="empty">{% trans 'No content' %}</p>
         {% endif %}
     </div>

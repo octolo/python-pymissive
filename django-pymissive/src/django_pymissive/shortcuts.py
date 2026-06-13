@@ -12,7 +12,7 @@ Usage::
         name="Alice Martin",
         email="alice@example.com",
         subject="Hello",
-        body_html="<p>Hi Alice!</p>",
+        body_rich="<p>Hi Alice!</p>",
         sender_name="Octolo",
         sender_email="hello@octolo.tech",
     )
@@ -29,7 +29,7 @@ Usage::
     missive = send_lre(
         name="Alice Martin",
         address=my_geo_address,
-        body_html="<p>Letter body</p>",
+        body_rich="<p>Letter body</p>",
         sender_name="Octolo",
         and_send=False,
     )
@@ -76,7 +76,7 @@ def send_missive(
     notification_id: str | None = None,
     # ── content ────────────────────────────────────────────────────────────
     subject: str | None = None,
-    body_html: str | None = None,
+    body_rich: str | None = None,
     body_text: str | None = None,
     # ── sender ─────────────────────────────────────────────────────────────
     sender_name: str | None = None,
@@ -112,7 +112,7 @@ def send_missive(
         notification_id: Device / channel token — used when *support* is
             ``application`` (types: ``push_notification``, ``branded``).
         subject: Message subject (email).
-        body_html: HTML body (email, lre, …).
+        body_rich: Rich body (HTML, RTF, …) for email, LRE, etc.
         body_text: Plain-text body (sms, email fallback, …).
         sender_name: Display name of the sender.
         sender_email: Sender e-mail address.
@@ -179,7 +179,7 @@ def send_missive(
     }
     for _field, _value in (
         ("subject", subject),
-        ("body_html", body_html),
+        ("body_rich", body_rich),
         ("body_text", body_text),
         ("sender_name", sender_name),
         ("sender_email", sender_email),

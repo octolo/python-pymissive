@@ -38,16 +38,16 @@ def add_signature(content, *, missive=None, campaign=None, field_name=None, cont
     """Append a signature to a missive body, picking the right format per field.
 
     Skips ``subject`` and SMS first_document; appends HTML markup for
-    ``body_html`` / ``first_document``, plain text for ``body_text``, and a
-    short suffix for ``body_sms``.
+    ``body_rich`` / ``first_document``, plain text for ``body_text``, and a
+    short suffix for ``phone_body_text``.
     """
     if not content:
         return content
-    if field_name in ("body_html", "first_document"):
+    if field_name in ("body_rich", "first_document"):
         return f"{content}{SIGNATURE_HTML}"
     if field_name == "body_text":
         return f"{content}{SIGNATURE_TEXT}"
-    if field_name == "body_sms":
+    if field_name == "phone_body_text":
         return f"{content}{SIGNATURE_SMS}"
     return content
 
@@ -65,7 +65,7 @@ class SignatureProcessor(MissiveBodyProcessor):
         if not content:
             return content
         team = team or "django-pymissive"
-        if field_name in ("body_html", "first_document"):
+        if field_name in ("body_rich", "first_document"):
             return (
                 f"{content}"
                 '<hr style="margin-top:24px"/>'
@@ -75,7 +75,7 @@ class SignatureProcessor(MissiveBodyProcessor):
             )
         if field_name == "body_text":
             return f"{content}\n\n--\n{team}"
-        if field_name == "body_sms":
+        if field_name == "phone_body_text":
             return f"{content} - {team}"
         return content
 
@@ -112,8 +112,8 @@ BANNER_DEFAULT_LABEL = "TEST BANNER — added by add_test_banner processor"
 def add_test_banner(content, *, missive=None, campaign=None, field_name=None, context=None, label=None, **kwargs):
     """Prepend a visible banner at the top of the body (opt-in, NOT a default).
 
-    Skips ``subject``. Adds an HTML banner for ``body_html`` /
-    ``first_document``, a bracketed prefix for ``body_text`` / ``body_sms``.
+    Skips ``subject``. Adds an HTML banner for ``body_rich`` /
+    ``first_document``, a bracketed prefix for ``body_text`` / ``phone_body_text``.
     Use this to verify that processors set on a single
     ``Missive.body_processors`` (or ``MissiveCampaign.body_processors``) run
     as expected, on top of the global defaults.
@@ -121,9 +121,9 @@ def add_test_banner(content, *, missive=None, campaign=None, field_name=None, co
     if not content:
         return content
     label = label or BANNER_DEFAULT_LABEL
-    if field_name in ("body_html", "first_document"):
+    if field_name in ("body_rich", "first_document"):
         return BANNER_HTML.format(label=label) + content
-    if field_name in ("body_text", "body_sms"):
+    if field_name in ("body_text", "phone_body_text"):
         return BANNER_TEXT.format(label=label) + content
     return content
 

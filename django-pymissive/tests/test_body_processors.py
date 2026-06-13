@@ -154,8 +154,8 @@ def test_django_template_processor_handles_empty():
 
 
 def test_django_template_processor_does_not_html_escape_plain_text_fields():
-    """``body_text`` / ``body_sms`` / ``subject`` must stay plain text — no ``&#x27;``."""
-    for fname in ("body_text", "body_sms", "subject", None):
+    """``body_text`` / ``phone_body_text`` / ``subject`` must stay plain text — no ``&#x27;``."""
+    for fname in ("body_text", "phone_body_text", "subject", None):
         out = django_template_processor(
             "It's a {{ thing }}",
             context={"thing": "test & sample"},
@@ -167,8 +167,8 @@ def test_django_template_processor_does_not_html_escape_plain_text_fields():
 
 
 def test_django_template_processor_html_escapes_html_fields():
-    """``body_html`` / ``first_document`` keep autoescape ON to avoid XSS."""
-    for fname in ("body_html", "first_document"):
+    """``body_rich`` / ``first_document`` keep autoescape ON to avoid XSS."""
+    for fname in ("body_rich", "first_document"):
         out = django_template_processor(
             "<p>{{ value }}</p>",
             context={"value": "<script>x</script>"},
@@ -192,9 +192,9 @@ def test_processor_receives_field_name():
     apply_body_processors(
         "x",
         [capture],
-        field_name="body_html",
+        field_name="body_rich",
     )
-    assert captured["field_name"] == "body_html"
+    assert captured["field_name"] == "body_rich"
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +218,7 @@ def test_add_preview_browser_appends_html_and_text():
     from django_pymissive.processors.body import add_preview_browser
 
     missive = _email_missive()
-    html = add_preview_browser("<p>body</p>", missive=missive, field_name="body_html")
+    html = add_preview_browser("<p>body</p>", missive=missive, field_name="body_rich")
     assert html.endswith("<p>PREVIEW_HTML</p>")
     text = add_preview_browser("Hello", missive=missive, field_name="body_text")
     assert text.endswith("PREVIEW_TEXT")
@@ -228,7 +228,7 @@ def test_add_attachments_linked_appends_html_and_text():
     from django_pymissive.processors.body import add_attachments_linked
 
     missive = _email_missive()
-    html = add_attachments_linked("<p>body</p>", missive=missive, field_name="body_html")
+    html = add_attachments_linked("<p>body</p>", missive=missive, field_name="body_rich")
     assert html.endswith("<p>ATTACH_HTML</p>")
     text = add_attachments_linked("Hello", missive=missive, field_name="body_text")
     assert text.endswith("ATTACH_TEXT")
@@ -238,9 +238,9 @@ def test_email_snippet_processors_skip_postal_and_subject():
     from django_pymissive.processors.body import add_attachments_linked, add_preview_browser
 
     missive = _email_missive(missive_type="lre")
-    assert add_preview_browser("<p>x</p>", missive=missive, field_name="body_html") == "<p>x</p>"
+    assert add_preview_browser("<p>x</p>", missive=missive, field_name="body_rich") == "<p>x</p>"
     assert add_preview_browser("subj", missive=missive, field_name="subject") == "subj"
-    assert add_attachments_linked("<p>x</p>", missive=missive, field_name="body_html") == "<p>x</p>"
+    assert add_attachments_linked("<p>x</p>", missive=missive, field_name="body_rich") == "<p>x</p>"
 
 
 def test_html_snippet_is_separated_from_body_by_a_br():
@@ -255,17 +255,17 @@ def test_html_snippet_is_separated_from_body_by_a_br():
 
     missive = _email_missive()
 
-    out = add_preview_browser("<p>body</p>", missive=missive, field_name="body_html")
+    out = add_preview_browser("<p>body</p>", missive=missive, field_name="body_rich")
     assert out == "<p>body</p><br><p>PREVIEW_HTML</p>"
 
-    out = add_attachments_linked("<p>body</p>", missive=missive, field_name="body_html")
+    out = add_attachments_linked("<p>body</p>", missive=missive, field_name="body_rich")
     assert out == "<p>body</p><br><p>ATTACH_HTML</p>"
 
     # Chained: both snippets appended sequentially, each preceded by its own <br>.
     chained = add_attachments_linked(
-        add_preview_browser("<p>body</p>", missive=missive, field_name="body_html"),
+        add_preview_browser("<p>body</p>", missive=missive, field_name="body_rich"),
         missive=missive,
-        field_name="body_html",
+        field_name="body_rich",
     )
     assert chained == (
         "<p>body</p><br><p>PREVIEW_HTML</p><br><p>ATTACH_HTML</p>"

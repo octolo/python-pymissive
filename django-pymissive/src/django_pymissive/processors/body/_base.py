@@ -21,7 +21,7 @@ DEFAULT_BODY_PROCESSORS: list[str] = [
 ]
 
 EMAIL_MISSIVE_TYPES = frozenset({"email", "email_marketing", "ere"})
-EMAIL_BODY_HTML_FIELDS = frozenset({"body_html"})
+EMAIL_BODY_RICH_FIELDS = frozenset({"body_rich"})
 EMAIL_BODY_TEXT_FIELDS = frozenset({"body_text"})
 
 
@@ -164,7 +164,7 @@ def apply_body_processors(
 # ---------------------------------------------------------------------------
 
 def _is_email_body_field(field_name: str | None) -> bool:
-    return field_name in EMAIL_BODY_HTML_FIELDS or field_name in EMAIL_BODY_TEXT_FIELDS
+    return field_name in EMAIL_BODY_RICH_FIELDS or field_name in EMAIL_BODY_TEXT_FIELDS
 
 
 def _is_email_missive(missive) -> bool:
@@ -195,7 +195,7 @@ def _append_email_snippet(
     owner = _email_body_owner(missive=missive, campaign=campaign)
     if owner is None:
         return content
-    if field_name in EMAIL_BODY_HTML_FIELDS:
+    if field_name in EMAIL_BODY_RICH_FIELDS:
         fragment = getattr(owner, html_attr, None) or ""
     else:
         fragment = getattr(owner, text_attr, None) or ""
