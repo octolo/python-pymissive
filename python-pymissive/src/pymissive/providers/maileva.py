@@ -695,3 +695,25 @@ class MailevaProvider(MissiveProviderBase):
         return self.events_association.get(
             data.get("event_type") or data.get("event"), "unknown"
         )
+
+    def get_normalize_recipient(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        """Attach the recipient for recipient-scoped LRE webhooks.
+
+        Maileva fires webhooks at two granularities:
+        - ``sendings``: the whole sending, with ``resource_custom_id`` set to the
+          *sending* custom_id (not a recipient). We return ``None`` so the Django
+          layer fans the lifecycle event out to every recipient.
+        - ``recipients``: a single recipient, with ``resource_custom_id`` equal to
+          the ``custom_id`` we sent when creating the recipient (the Django
+          ``MissiveRecipient`` id). We map it so the event is attached directly.
+        """
+        resource_name = data.get("resource_name") or ""
+        resource_type = data.get("resource_type") or ""
+        is_recipient_level = (
+            resource_name == "recipients" or resource_type.endswith("/recipients")
+        )
+        if is_recipient_level:
+            custom_id = data.get("resource_custom_id")
+            if custom_id:
+                return {"id": custom_id}
+        return None

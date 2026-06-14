@@ -44,32 +44,58 @@ def _save_untreated(event, provider):
     )
 
 
-def _process_event(event, missive):
-    occurred_at = _get_occurred_at(event.get("occurred_at"))
+# Sending-level lifecycle events that describe the whole missive rather than a
+# single recipient. Some providers (e.g. Maileva LRE) emit them without any
+# recipient attached; status is derived from the latest event of each
+# *recipient*, so a recipient-less event would be ignored and the missive would
+# stay ``DRAFT``. We fan these out to every recipient instead. Only early
+# lifecycle events are fanned out: terminal/per-recipient events (delivered,
+# undelivered, archived, proofs, ...) always carry their own recipient.
+FANOUT_EVENTS = {"request", "accepted", "processed", "queued", "processing"}
+
+
+def _upsert_event(event, missive, recipient, occurred_at, allow_pk=True):
     lookup = {
         "missive": missive,
         "event": event.get("event"),
         "occurred_at": occurred_at,
     }
+    if recipient is not None:
+        lookup["recipient"] = recipient
     defaults = {
         "reason": event.get("reason", "No reason provided"),
         "trace": event.get("raw") or {},
     }
-    recipient = None
-    if event.get("recipient"):
-        recipient = get_recipient(missive, event.get("recipient"))
-        lookup["recipient"] = recipient
-
     raw = event.get("raw") or {}
-    if "pk" in raw:
+    if allow_pk and "pk" in raw:
         defaults = {
             **defaults,
             **lookup,
         }
         lookup = {"pk": raw.get("pk")}
     MissiveEvent.objects.update_or_create(defaults=defaults, **lookup)
-    if recipient:
-        recipient.set_status()
+
+
+def _process_event(event, missive):
+    occurred_at = _get_occurred_at(event.get("occurred_at"))
+
+    if event.get("recipient"):
+        recipient = get_recipient(missive, event.get("recipient"))
+        _upsert_event(event, missive, recipient, occurred_at)
+        if recipient:
+            recipient.set_status()
+        missive.set_status()
+        return
+
+    fanout_recipients = (
+        list(missive.recipients) if event.get("event") in FANOUT_EVENTS else []
+    )
+    if fanout_recipients:
+        for recipient in fanout_recipients:
+            _upsert_event(event, missive, recipient, occurred_at, allow_pk=False)
+            recipient.set_status()
+    else:
+        _upsert_event(event, missive, None, occurred_at)
     missive.set_status()
 
 
