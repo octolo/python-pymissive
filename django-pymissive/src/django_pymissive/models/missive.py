@@ -547,16 +547,27 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                 and not field.many_to_many
                 and not field.name.startswith("_"))
 
-    def get_serialized_data(self, attachments=True):
-        """Serialize missive data to a dictionary for provider calls."""
+    def get_serialized_data(self, attachments=True, compiled=None):
+        """Serialize missive data to a dictionary for provider calls.
+
+        When ``attachments=False``, attachment bytes and ``first_document`` PDF
+        generation are skipped. When ``compiled`` is omitted, it follows
+        ``attachments``: lightweight provider calls (retrieve, cancel, delete,
+        billing, …) do not run body processors or compile subject/body fields.
+        Pass ``compiled=True`` explicitly to force compilation without attachments.
+        """
+        if compiled is None:
+            compiled = attachments
 
         missive_data = {}
         for field in self._meta.get_fields():
             if self.is_serializable_field(field):
                 if hasattr(self, f"get_{field.name}"):
                     missive_data[field.name] = getattr(self, f"get_{field.name}")()
-                elif hasattr(self, f"{field.name}_compiled"):
+                elif compiled and hasattr(self, f"{field.name}_compiled"):
                     missive_data[field.name] = getattr(self, f"{field.name}_compiled")
+                elif field.name in self.get_campaign_sourced_fields(self.missive_support):
+                    missive_data[field.name] = self.get_locally_or_campaign_value(field.name)
                 else:
                     missive_data[field.name] = getattr(self, field.name)
         missive_data["recipients"] = [

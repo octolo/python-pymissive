@@ -158,6 +158,7 @@ PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
     "django_pymissive.processors.body.add_attachments_linked.add_attachments_linked",
     # 4. Append the test signature (HTML for body_rich, text for body_text)
     "tests.processors.add_signature",
+    #["tests.fakeapp.hook.sleep_processor", {"seconds": 8}],
 ]
 
 # Default chain for the postal first_document PDF. The first entry renders

@@ -364,7 +364,7 @@ class MailevaProvider(MissiveProviderBase):
                 if (priority or "").lower() == "urgent"
                 else str(self._get_config_or_env("POSTAGE_TYPE", "fast")).lower()
             )
-            data["postage_type"] = postage_type
+            data["postage_type"] = postage_type.upper()
 
         if kwargs.get("custom_data") is not None:
             data["custom_data"] = kwargs["custom_data"]
