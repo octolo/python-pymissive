@@ -1,12 +1,16 @@
 """Admin for MissiveEvent model."""
 
 from django.contrib import admin
+from django.shortcuts import redirect
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
-from django_boosted import AdminBoostModel
+from django_boosted import AdminBoostModel, admin_boost_view
 from urllib.parse import unquote
 
 from django.contrib import messages
 
+from ..events import delay_retrieve_events, retrieve_events as do_retrieve_events
+from ..forms.event import RetrieveEventsForm
 from ..models.event import MissiveEvent
 
 class UntreatedListFilter(admin.SimpleListFilter):
@@ -142,3 +146,34 @@ class MissiveEventAdmin(AdminBoostModel):
         obj = self.get_object(request, obj)
         obj.replay()
         messages.success(request, _("Event replayed successfully."))
+
+    @admin_boost_view("adminform", _("Retrieve events"), requires_object=False)
+    def retrieve_events(self, request, form=None):
+        """Retrieve provider events between two dates, optionally as a task."""
+        if form is None:
+            return {
+                "form": RetrieveEventsForm(),
+                "save_label": _("Retrieve"),
+                "has_change_permission": True,
+            }
+        payload = {
+            "provider": form.cleaned_data["provider"],
+            "missive_type": form.cleaned_data["missive_type"],
+            "start_date": form.cleaned_data["start_date"],
+            "end_date": form.cleaned_data["end_date"],
+        }
+        try:
+            if form.cleaned_data.get("as_task"):
+                delay_retrieve_events(**payload)
+                messages.info(request, _("Event retrieval started."))
+            else:
+                do_retrieve_events(**payload)
+                messages.success(request, _("Events retrieved from provider."))
+        except Exception as exc:
+            messages.error(request, str(exc))
+            return {
+                "form": form,
+                "save_label": _("Retrieve"),
+                "has_change_permission": True,
+            }
+        return redirect(reverse("admin:django_pymissive_missiveevent_changelist"))

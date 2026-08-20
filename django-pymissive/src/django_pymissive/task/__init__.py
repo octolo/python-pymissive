@@ -1,7 +1,8 @@
 from django.conf import settings
 
 
-def get_campaign_backend():
+def get_task_backend():
+    """Return the backend selected by ``CAMPAIGN_TASK_BACKEND``."""
     backend = getattr(settings, "CAMPAIGN_TASK_BACKEND", "sync")
 
     if backend == "celery":
@@ -20,3 +21,6 @@ def get_campaign_backend():
         from .sync import SyncBackend
 
         return SyncBackend()
+
+
+get_campaign_backend = get_task_backend

@@ -4,12 +4,14 @@ Create, send, update, delete, or cancel missives via provider.
 
 `cancel` requests a provider **cancel** API (stop an in-flight sending). `delete missive` calls **`delete_*`** (remove sending on the provider, often broader than cancel). Some providers only implement one of the two (e.g. Maileva LRE: **delete** only).
 
+`retrieve events` calls **`events_*`** (bulk event listing via ``events(start_date, end_date)``). The parent provider implements the method as ``NotImplementedError``; providers override it. `retrieve` (`retrieve_email`, `retrieve_sms`, `retrieve_lre`, …) fetches missive information from partner ID (`external_id`) or internal ID.
+
 ## Subcommands
 
 | Subcommand | Description |
 |------------|-------------|
 | `send` | Send a missive (email, SMS, postal, etc.) |
-| `retrieve` | Retrieve data (webhooks, email, postal, sms) |
+| `retrieve` | Retrieve data (webhooks, email, postal, sms, events) |
 | `create` | Create webhook |
 | `update` | Update webhook |
 | `delete` | Delete webhook **or** delete a missive/sending (`delete missive`, provider `delete_*`) |
@@ -35,6 +37,9 @@ pymissive missive delete missive --provider <name> [--type lre] --external-id <i
 
 # Cancel missive (provider cancel_* ; not Maileva LRE)
 pymissive missive cancel --provider <name> [--type postal] --external-id <id>
+
+# Retrieve events in bulk (provider events_* ; start_date and end_date required)
+pymissive missive retrieve events --provider <name> --type <email|sms|lre> --start-date <iso> --end-date <iso>
 ```
 
 ## Common options
@@ -42,8 +47,11 @@ pymissive missive cancel --provider <name> [--type postal] --external-id <id>
 | Option | Description |
 |--------|-------------|
 | `--provider` | Provider name (e.g. brevo, scaleway, maileva) |
-| `--type` | Missive type for webhooks (email, sms, postal) |
+| `--type` | Missive type for webhooks and retrieve (email, sms, postal, lre) |
 | `--missive-type` | Missive type for send (email, sms, lre, etc.) |
+| `--external-id` | External ID (partner / provider identifier) |
+| `--start-date` | Start date for bulk event retrieval |
+| `--end-date` | End date for bulk event retrieval |
 | `--dir` | Provider config directory |
 | `--json` | Path to provider config JSON |
 
@@ -84,6 +92,10 @@ pymissive missive send --provider maileva --missive_type postal \
 
 # Retrieve webhooks
 pymissive missive retrieve webhooks --provider brevo
+
+# Retrieve events in bulk (when the provider implements events)
+pymissive missive retrieve events --provider brevo --type email \
+  --start-date 2026-01-01 --end-date 2026-01-31
 
 # Create webhook
 pymissive missive create webhook --provider brevo --type email --domain example.com

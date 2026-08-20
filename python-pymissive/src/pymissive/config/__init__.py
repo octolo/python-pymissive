@@ -62,6 +62,10 @@ INFO_EVENTS = {
     "pending": ("Pending", "Waiting to be processed for sending."),
     "processing": ("Processing", "Currently being processed by the system."),
     "queued": ("Queued", "Queued and waiting for delivery."),
+    "proxy": (
+        "Proxy",
+        "Intermediary progress (privacy proxy, in transit, or similar). Not a confirmed human action or final delivery.",
+    ),
     "request": ("Request", "A request to send the missive has been received."),
     "deferred": ("Deferred", "Temporary delivery failure, will retry later."),
     "scheduled": ("Scheduled", "Scheduled to be sent at a future time."),

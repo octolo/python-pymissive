@@ -25,8 +25,10 @@ def _get_occurred_at(occurred_at):
     if isinstance(occurred_at, str):
         occurred_at = parse_datetime(occurred_at.replace("Z", "+00:00"))
     if occurred_at is not None and timezone.is_naive(occurred_at):
-        return timezone.make_aware(occurred_at, dt_timezone.utc)
-    return occurred_at or timezone.now()
+        occurred_at = timezone.make_aware(occurred_at, dt_timezone.utc)
+    if occurred_at is not None:
+        return occurred_at.replace(microsecond=0)
+    return timezone.now().replace(microsecond=0)
 
 
 def _save_untreated(event, provider):
@@ -120,3 +122,37 @@ def handle_events(events, provider, missive_type: str) -> Missive | None:
         for event in events_normalized:
             handle_event(event, provider, missive_type)
     return None
+
+
+def retrieve_events(*, provider, missive_type, start_date, end_date):
+    """Fetch events from the provider between two dates, then handle them."""
+    from django.core.exceptions import ValidationError
+    from django.utils.translation import gettext_lazy as _
+
+    from .models.provider import MissiveProviderModel
+
+    provider_obj = MissiveProviderModel.objects.get(name=str(provider))
+    service = f"events_{missive_type}"
+    if not hasattr(provider_obj._provider, service):
+        raise ValidationError(
+            _("This provider does not support events for this missive type.")
+        )
+    raw = provider_obj._provider.call_service(
+        service, start_date=start_date, end_date=end_date
+    )
+    if isinstance(raw, dict):
+        raw = raw.get("events") or raw
+    handle_events(raw, provider_obj, missive_type)
+
+
+def delay_retrieve_events(*, provider, missive_type, start_date, end_date):
+    """Dispatch :func:`retrieve_events` via the configured task backend."""
+    from .task import get_task_backend
+
+    get_task_backend().enqueue(
+        retrieve_events,
+        provider=str(provider),
+        missive_type=missive_type,
+        start_date=start_date,
+        end_date=end_date,
+    )

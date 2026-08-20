@@ -20,6 +20,8 @@ from phonenumber_field.modelfields import PhoneNumberField
 from phonenumber_field.formfields import PhoneNumberField as PhoneNumberFormField
 from phonenumber_field.formfields import SplitPhoneNumberField
 from urllib.parse import urlencode
+from ..forms.missive import RetrieveMissiveForm
+from ..retrieve import get_or_retrieve_from_provider
 from ..models.missive import Missive
 from ..models.recipient import MissiveRecipient
 from .recipient import (
@@ -609,6 +611,35 @@ class MissiveAdmin(AdminBoostModel):
         obj.delete_missive()
         messages.success(request, _("Sending deleted on provider."))
         return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
+
+    @admin_boost_view("adminform", _("Retrieve from provider"), requires_object=False)
+    def retrieve_from_provider(self, request, form=None):
+        """Retrieve or open a missive from a provider partner ID or internal UID."""
+        if form is None:
+            return {
+                "form": RetrieveMissiveForm(),
+                "save_label": _("Retrieve"),
+                "has_change_permission": True,
+            }
+        try:
+            missive, created = get_or_retrieve_from_provider(
+                provider=form.cleaned_data["provider"],
+                missive_type=form.cleaned_data["missive_type"],
+                partner_id=form.cleaned_data.get("partner_id"),
+                uid=form.cleaned_data.get("uid"),
+            )
+        except Exception as exc:
+            messages.error(request, str(exc))
+            return {
+                "form": form,
+                "save_label": _("Retrieve"),
+                "has_change_permission": True,
+            }
+        if created:
+            messages.success(request, _("Missive retrieved from provider."))
+        else:
+            messages.info(request, _("Missive already exists."))
+        return redirect(reverse("admin:django_pymissive_missive_change", args=[missive.pk]))
 
     def has_retrieve_missive_permission(self, request, obj=None):
         return self.is_not_cancelled(obj) and self.provider_has_service(obj, "retrieve") and obj.external_id

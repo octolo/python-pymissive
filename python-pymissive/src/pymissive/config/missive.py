@@ -1,6 +1,7 @@
 SERVICES = {
     "create": "Create",
-    "retrieve": "Retrieve",
+    "retrieve": "Retrieve missive information from partner ID or internal ID",
+    "events": "Retrieve events in bulk",
     "update": "Update",
     "delete": "Delete",
     "cancel": "Cancel",
@@ -11,7 +12,7 @@ SERVICES = {
 FIELDS = {
     "external_id": {
         "label": "External ID",
-        "description": "External ID",
+        "description": "External ID (partner / provider identifier)",
         "format": "str",
     },
     "internal_id": {
@@ -33,5 +34,15 @@ FIELDS = {
         "label": "Events",
         "description": "Normalized events for handle_events()",
         "format": "list",
+    },
+    "start_date": {
+        "label": "Start date",
+        "description": "Start date for bulk event retrieval",
+        "format": "datetime",
+    },
+    "end_date": {
+        "label": "End date",
+        "description": "End date for bulk event retrieval",
+        "format": "datetime",
     },
 }

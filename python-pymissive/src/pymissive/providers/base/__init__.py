@@ -62,6 +62,24 @@ class MissiveProviderBase(
         """Return mapping of provider events to missive event."""
         return self.events_association or {}
 
+    def events(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
+        """Retrieve events in bulk between ``start_date`` and ``end_date``.
+
+        Typed services (``events_email``, ``events_sms``, …) delegate here.
+        Providers override this method; it is not implemented on current providers.
+
+        Args:
+            start_date: Inclusive start of the period.
+            end_date: Inclusive end of the period.
+
+        Returns:
+            A list of normalized events.
+
+        Raises:
+            NotImplementedError: Always, until a provider implements it.
+        """
+        raise NotImplementedError("events is not implemented")
+
     def get_normalize_event(self, data: dict[str, Any]) -> str:
         """Return the normalized event of webhook/email/SMS."""
         return self.events_association.get(data.get("event"), "unknown")
@@ -102,3 +120,17 @@ class MissiveProviderBase(
         }
         response.update(extra)
         return response
+
+
+def _events_for_type(missive_type: str):
+    def events_type(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
+        return self.events(start_date, end_date, missive_type=missive_type, **kwargs)
+
+    events_type.__name__ = f"events_{missive_type}"
+    events_type.__qualname__ = f"MissiveProviderBase.events_{missive_type}"
+    events_type.__doc__ = f"Retrieve {missive_type} events between start_date and end_date."
+    return events_type
+
+
+for _missive_type in config.MISSIVE_TYPES:
+    setattr(MissiveProviderBase, f"events_{_missive_type}", _events_for_type(_missive_type))

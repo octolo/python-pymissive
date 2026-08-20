@@ -4,4 +4,7 @@ from .campaign import run_campaign
 
 class SyncBackend(BaseCampaignBackend):
     def delay(self, campaign_id: int):
-        run_campaign(campaign_id)
+        self.enqueue(run_campaign, campaign_id)
+
+    def enqueue(self, func, *args, **kwargs):
+        func(*args, **kwargs)

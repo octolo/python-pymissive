@@ -20,6 +20,8 @@ _COMMAND_ARG_CONFIG = {
     "missive_type": {"type": str, "default": ""},
     "webhook_id": {"type": str, "default": ""},
     "external_id": {"type": str, "default": ""},
+    "start_date": {"type": str, "default": ""},
+    "end_date": {"type": str, "default": ""},
     "scheme": {"type": str, "default": "https"},
     "domain": {"type": str, "default": "localhost:8080"},
 }
@@ -253,8 +255,23 @@ def _missive_command(args: list[str]) -> bool:
                 return False
             provider.call_service("retrieve_sms")
             data = provider.get_service_normalize("retrieve_sms")
+        elif retrieve_resource == "events":
+            if not missive_type:
+                print("Error: --type required for retrieve events (e.g. email, sms, lre)", file=sys.stderr)
+                return False
+            start_date = parsed.get("start_date") or ""
+            end_date = parsed.get("end_date") or ""
+            if not start_date or not end_date:
+                print("Error: --start-date and --end-date required for retrieve events", file=sys.stderr)
+                return False
+            service = f"events_{missive_type}"
+            if not hasattr(provider, service):
+                print(f"Error: Provider does not support {service}", file=sys.stderr)
+                return False
+            provider.call_service(service, start_date=start_date, end_date=end_date)
+            data = provider.get_service_normalize(service)
         else:
-            print("Error: Use webhooks, email, lre, sms (e.g. missive retrieve webhooks --provider X)", file=sys.stderr)
+            print("Error: Use webhooks, email, lre, sms, events (e.g. missive retrieve webhooks --provider X)", file=sys.stderr)
             return False
         print_separator()
         print_header(f"{provider_name} - {retrieve_resource}")

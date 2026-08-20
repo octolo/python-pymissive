@@ -2,11 +2,20 @@
 
 import contextlib
 import json
+from datetime import datetime, timezone as dt_timezone
 from typing import Any
 
 from pymissive.utils import is_disable_send
 
 from .base import MissiveProviderBase
+
+
+def _utc_iso_from_timestamp(value) -> str:
+    """Convert a Unix timestamp (seconds or milliseconds) to a UTC ISO string."""
+    ts = float(value)
+    if ts > 1e11:
+        ts = ts / 1000.0
+    return datetime.fromtimestamp(ts, tz=dt_timezone.utc).replace(microsecond=0).isoformat()
 
 
 class BrevoAPIProvider(MissiveProviderBase):
@@ -56,7 +65,8 @@ class BrevoAPIProvider(MissiveProviderBase):
         "invalid": "invalid",
         "deferred": "deferred",
         "opened": "opened",
-        "loadedByProxy": "delivered",
+        "loadedByProxy": "proxy",
+        "proxy_open": "proxy",
     }
     events_exclude = [
         "requests",
@@ -163,6 +173,27 @@ class BrevoAPIProvider(MissiveProviderBase):
             "channel": getattr(webhook, "channel", ""),
             "events": getattr(webhook, "events", []),
         }
+
+    def get_normalize_occurred_at(self, data: dict[str, Any]) -> str | None:
+        """Return occurred_at in UTC.
+
+        Webhook ``date`` is the account timezone (CET/CEST, naive). Retrieve
+        ``date`` is UTC (``...Z``). ``ts_event`` / ``ts`` are UTC timestamps.
+        Prefer the UTC timestamp so webhook and retrieve upsert the same event.
+        """
+        nested = data.get("trace") if isinstance(data.get("trace"), dict) else {}
+        for source in (data, nested):
+            ts = source.get("ts_event")
+            if ts is None:
+                ts = source.get("ts")
+            if ts is not None:
+                return _utc_iso_from_timestamp(ts)
+        for source in (data, nested):
+            for key in ("occurred_at", "_date", "date"):
+                value = source.get(key)
+                if value:
+                    return value
+        return None
 
     def _event_to_payload(self, event: Any) -> dict[str, Any]:
         """Convert event object to dict (Brevo v4 returns Pydantic models)."""
