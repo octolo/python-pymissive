@@ -1,5 +1,6 @@
 """Brevo webhook vs retrieve timestamps must normalize to the same UTC instant."""
 
+import json
 from datetime import datetime, timezone as dt_timezone
 from unittest.mock import MagicMock
 
@@ -39,6 +40,24 @@ def test_brevo_retrieve_utc_date_matches_webhook_timestamp():
         {"date": "2024-08-22T14:03:29.000Z"},
     )
     assert _get_occurred_at(webhook) == _get_occurred_at(retrieve)
+
+
+def test_send_email_normalize_does_not_insert_events_method():
+    """send_email shares MISSIVE_FIELDS, including the ``events`` list field.
+
+    Bulk retrieve lives on ``retrieve_events`` so getattr(provider, "events")
+    must not yield a callable that ends up in the JSON trace.
+    """
+    provider = BrevoAPIProvider()
+    provider._service_results_cache = {
+        "send_email": {
+            "result": {"message_id": "abc-123", "external_id": "abc-123"},
+            "hash": "x",
+        }
+    }
+    normalized = provider.get_service_normalize("send_email")
+    assert not callable(normalized.get("events"))
+    json.dumps(normalized)
 
 
 def test_get_occurred_at_strips_microseconds():

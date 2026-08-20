@@ -4,6 +4,9 @@ import contextlib
 import json
 from datetime import datetime, timezone as dt_timezone
 from typing import Any
+from urllib.error import HTTPError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from pymissive.utils import is_disable_send
 
@@ -43,7 +46,7 @@ class BrevoAPIProvider(MissiveProviderBase):
         "updated_at": "updatedAt",
         "occurred_at": ["occurred_at", "_date", "date", "trace._date"],
         "event": ["event", "trace.event"],
-        "external_id": ["message_id", "_message_id", "message-id"],
+        "external_id": ["message_id", "messageId", "_message_id", "message-id"],
         "email": ["email", "trace.email"],
         "sender_email": ["_from", "trace._from", "sender_email"],
     }
@@ -51,10 +54,12 @@ class BrevoAPIProvider(MissiveProviderBase):
         "request": "request",
         "requests": "request",
         "sent": "sent",
+        "accepted": "accepted",
         "hardBounce": "hard_bounce",
         "softBounce": "soft_bounce",
         "hardBounces": "hard_bounce",
         "softBounces": "soft_bounce",
+        "bounces": "hard_bounce",
         "hard_bounce": "hard_bounce",
         "soft_bounce": "soft_bounce",
         "blocked": "blocked",
@@ -67,6 +72,11 @@ class BrevoAPIProvider(MissiveProviderBase):
         "opened": "opened",
         "loadedByProxy": "proxy",
         "proxy_open": "proxy",
+        "error": "error",
+        "unsubscribed": "unsubscribe",
+        "unsubscription": "unsubscribe",
+        "rejected": "rejected",
+        "skipped": "dropped",
     }
     events_exclude = [
         "requests",
@@ -198,12 +208,36 @@ class BrevoAPIProvider(MissiveProviderBase):
     def _event_to_payload(self, event: Any) -> dict[str, Any]:
         """Convert event object to dict (Brevo v4 returns Pydantic models)."""
         if isinstance(event, dict):
-            return event
-        if hasattr(event, "model_dump"):
-            return event.model_dump()
-        if hasattr(event, "dict"):
-            return event.dict()
-        return {k: v for k, v in vars(event).items() if not k.startswith("_")}
+            data = dict(event)
+        elif hasattr(event, "model_dump"):
+            data = event.model_dump()
+        elif hasattr(event, "dict"):
+            data = event.dict()
+        else:
+            data = {k: v for k, v in vars(event).items() if not k.startswith("_")}
+        message_id = data.get("message_id") or data.get("messageId")
+        if message_id:
+            data["message_id"] = message_id
+        phone = data.get("phone") or data.get("phoneNumber")
+        if phone:
+            data["phone"] = phone
+        return data
+
+    def _as_report_date(self, value) -> str:
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y-%m-%d")
+        return str(value)[:10]
+
+    def _report_date_range(self, start_date, end_date) -> tuple[str, str]:
+        start = self._as_report_date(start_date)
+        end = self._as_report_date(end_date)
+        start_d = datetime.strptime(start, "%Y-%m-%d").date()
+        end_d = datetime.strptime(end, "%Y-%m-%d").date()
+        if end_d < start_d:
+            raise ValueError("end_date must be on or after start_date")
+        if (end_d - start_d).days > 90:
+            raise ValueError("Brevo event reports cannot exceed 90 days")
+        return start, end
 
     def _response_to_dict(self, response) -> dict[str, Any]:
         """Convert v4 Pydantic response to dict."""
@@ -338,6 +372,79 @@ class BrevoAPIProvider(MissiveProviderBase):
         events = getattr(response, "events", []) or []
         events = [self._event_to_payload(event) for event in events]
         return {"message_id": external_id, "events": events}
+
+    def retrieve_events(self, start_date, end_date, **kwargs) -> dict[str, Any]:
+        """Unaggregated events for a date range (max 90 days).
+
+        Email: GET /v3/smtp/statistics/events (pages of 2500).
+        SMS: GET /v3/transactionalSMS/statistics/events (pages of 100).
+        Downstream ``handle_events`` update-or-creates each row against the
+        matching missive (``message_id`` → ``external_id``).
+        """
+        missive_type = str(kwargs.get("missive_type") or "email").lower()
+        start, end = self._report_date_range(start_date, end_date)
+        if missive_type in ("sms", "rcs"):
+            events = self._retrieve_sms_event_report(start, end)
+        elif missive_type in ("email", "email_marketing", "ere"):
+            events = self._retrieve_email_event_report(start, end)
+        else:
+            raise NotImplementedError(
+                f"retrieve_events is not implemented for {missive_type}"
+            )
+        return {"events": events}
+
+    def _retrieve_email_event_report(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
+        client = self._get_email_client()
+        limit = 2500
+        offset = 0
+        events: list[dict[str, Any]] = []
+        while True:
+            response = client.transactional_emails.get_email_event_report(
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+                offset=offset,
+                sort="desc",
+            )
+            page = getattr(response, "events", None)
+            if page is None and isinstance(response, dict):
+                page = response.get("events")
+            page = page or []
+            events.extend(self._event_to_payload(event) for event in page)
+            if len(page) < limit:
+                break
+            offset += limit
+        return events
+
+    def _retrieve_sms_event_report(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
+        limit = 100
+        offset = 0
+        events: list[dict[str, Any]] = []
+        while True:
+            params = urlencode({
+                "startDate": start_date,
+                "endDate": end_date,
+                "limit": limit,
+                "offset": offset,
+                "sort": "desc",
+            })
+            req = Request(
+                f"https://api.brevo.com/v3/transactionalSMS/statistics/events?{params}",
+                headers={"api-key": self._sms_api_key, "Accept": "application/json"},
+                method="GET",
+            )
+            try:
+                with urlopen(req) as resp:
+                    payload = json.loads(resp.read().decode())
+            except HTTPError as e:
+                body = e.read().decode() if e.fp else ""
+                raise RuntimeError(f"Brevo SMS API error {e.code}: {body}") from e
+            page = payload.get("events") or []
+            events.extend(self._event_to_payload(event) for event in page)
+            if len(page) < limit:
+                break
+            offset += limit
+        return events
 
     #########################################################
     # Email - Webhooks
@@ -486,7 +593,10 @@ class BrevoAPIProvider(MissiveProviderBase):
         """Handle a Brevo webhook and normalize event type."""
         if isinstance(payload, (bytes, bytearray)):
             payload = payload.decode("utf-8")
-        return json.loads(payload)
+            payload = json.loads(payload)
+        elif isinstance(payload, str):
+            payload = json.loads(payload)
+        return payload
 
     #########################################################
     # WhatsApp - Send

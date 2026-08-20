@@ -1,7 +1,7 @@
 SERVICES = {
     "create": "Create",
     "retrieve": "Retrieve missive information from partner ID or internal ID",
-    "events": "Retrieve events in bulk",
+    "retrieve_events": "Retrieve events in bulk",
     "update": "Update",
     "delete": "Delete",
     "cancel": "Cancel",

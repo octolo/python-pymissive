@@ -67,7 +67,7 @@ def test_retrieve_events_calls_provider_and_handles():
             end_date=date(2026, 1, 31),
         )
     provider._provider.call_service.assert_called_once_with(
-        "events_email",
+        "retrieve_events_email",
         start_date=date(2026, 1, 1),
         end_date=date(2026, 1, 31),
     )

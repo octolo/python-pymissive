@@ -62,10 +62,13 @@ class MissiveProviderBase(
         """Return mapping of provider events to missive event."""
         return self.events_association or {}
 
-    def events(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
+    def retrieve_events(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
         """Retrieve events in bulk between ``start_date`` and ``end_date``.
 
-        Typed services (``events_email``, ``events_sms``, …) delegate here.
+        Typed services (``retrieve_events_email``, ``retrieve_events_sms``, …)
+        delegate here. Named ``retrieve_events`` so it does not collide with the
+        response field ``events`` during providerkit normalization.
+
         Providers override this method; it is not implemented on current providers.
 
         Args:
@@ -78,7 +81,7 @@ class MissiveProviderBase(
         Raises:
             NotImplementedError: Always, until a provider implements it.
         """
-        raise NotImplementedError("events is not implemented")
+        raise NotImplementedError("retrieve_events is not implemented")
 
     def get_normalize_event(self, data: dict[str, Any]) -> str:
         """Return the normalized event of webhook/email/SMS."""
@@ -122,15 +125,19 @@ class MissiveProviderBase(
         return response
 
 
-def _events_for_type(missive_type: str):
-    def events_type(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
-        return self.events(start_date, end_date, missive_type=missive_type, **kwargs)
+def _retrieve_events_for_type(missive_type: str):
+    def retrieve_events_type(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
+        return self.retrieve_events(start_date, end_date, missive_type=missive_type, **kwargs)
 
-    events_type.__name__ = f"events_{missive_type}"
-    events_type.__qualname__ = f"MissiveProviderBase.events_{missive_type}"
-    events_type.__doc__ = f"Retrieve {missive_type} events between start_date and end_date."
-    return events_type
+    retrieve_events_type.__name__ = f"retrieve_events_{missive_type}"
+    retrieve_events_type.__qualname__ = f"MissiveProviderBase.retrieve_events_{missive_type}"
+    retrieve_events_type.__doc__ = f"Retrieve {missive_type} events between start_date and end_date."
+    return retrieve_events_type
 
 
 for _missive_type in config.MISSIVE_TYPES:
-    setattr(MissiveProviderBase, f"events_{_missive_type}", _events_for_type(_missive_type))
+    setattr(
+        MissiveProviderBase,
+        f"retrieve_events_{_missive_type}",
+        _retrieve_events_for_type(_missive_type),
+    )

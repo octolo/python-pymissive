@@ -132,7 +132,7 @@ def retrieve_events(*, provider, missive_type, start_date, end_date):
     from .models.provider import MissiveProviderModel
 
     provider_obj = MissiveProviderModel.objects.get(name=str(provider))
-    service = f"events_{missive_type}"
+    service = f"retrieve_events_{missive_type}"
     if not hasattr(provider_obj._provider, service):
         raise ValidationError(
             _("This provider does not support events for this missive type.")

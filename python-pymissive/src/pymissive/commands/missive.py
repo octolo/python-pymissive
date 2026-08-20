@@ -264,7 +264,7 @@ def _missive_command(args: list[str]) -> bool:
             if not start_date or not end_date:
                 print("Error: --start-date and --end-date required for retrieve events", file=sys.stderr)
                 return False
-            service = f"events_{missive_type}"
+            service = f"retrieve_events_{missive_type}"
             if not hasattr(provider, service):
                 print(f"Error: Provider does not support {service}", file=sys.stderr)
                 return False

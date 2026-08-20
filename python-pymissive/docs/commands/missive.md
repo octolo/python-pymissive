@@ -4,7 +4,7 @@ Create, send, update, delete, or cancel missives via provider.
 
 `cancel` requests a provider **cancel** API (stop an in-flight sending). `delete missive` calls **`delete_*`** (remove sending on the provider, often broader than cancel). Some providers only implement one of the two (e.g. Maileva LRE: **delete** only).
 
-`retrieve events` calls **`events_*`** (bulk event listing via ``events(start_date, end_date)``). The parent provider implements the method as ``NotImplementedError``; providers override it. `retrieve` (`retrieve_email`, `retrieve_sms`, `retrieve_lre`, …) fetches missive information from partner ID (`external_id`) or internal ID.
+`retrieve events` calls **`retrieve_events_*`** (bulk event listing via ``retrieve_events(start_date, end_date)``). The parent provider implements the method as ``NotImplementedError``; providers override it. `retrieve` (`retrieve_email`, `retrieve_sms`, `retrieve_lre`, …) fetches missive information from partner ID (`external_id`) or internal ID.
 
 ## Subcommands
 
@@ -38,7 +38,7 @@ pymissive missive delete missive --provider <name> [--type lre] --external-id <i
 # Cancel missive (provider cancel_* ; not Maileva LRE)
 pymissive missive cancel --provider <name> [--type postal] --external-id <id>
 
-# Retrieve events in bulk (provider events_* ; start_date and end_date required)
+# Retrieve events in bulk (provider retrieve_events_* ; start_date and end_date required)
 pymissive missive retrieve events --provider <name> --type <email|sms|lre> --start-date <iso> --end-date <iso>
 ```
 
@@ -93,7 +93,7 @@ pymissive missive send --provider maileva --missive_type postal \
 # Retrieve webhooks
 pymissive missive retrieve webhooks --provider brevo
 
-# Retrieve events in bulk (when the provider implements events)
+# Retrieve events in bulk (when the provider implements retrieve_events)
 pymissive missive retrieve events --provider brevo --type email \
   --start-date 2026-01-01 --end-date 2026-01-31
 
