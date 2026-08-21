@@ -1,6 +1,6 @@
 """Brevo bulk retrieve_events over a date range."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -51,6 +51,67 @@ def test_retrieve_events_email_paginates_and_normalizes_message_id():
     assert (
         client.transactional_emails.get_email_event_report.call_args_list[1].kwargs["offset"]
         == 2500
+    )
+
+
+def test_retrieve_email_chunks_from_created_at_and_filters_message_id():
+    provider = BrevoAPIProvider()
+    client = MagicMock()
+    client.transactional_emails.get_email_event_report.side_effect = [
+        SimpleNamespace(
+            events=[
+                {
+                    "messageId": "<202605210817.1@x>",
+                    "event": "delivered",
+                    "date": "2026-05-21T08:17:00Z",
+                }
+            ]
+        ),
+        SimpleNamespace(
+            events=[
+                {
+                    "messageId": "<202605210817.1@x>",
+                    "event": "clicks",
+                    "date": "2026-08-10T12:00:00Z",
+                }
+            ]
+        ),
+    ]
+    provider._get_email_client = MagicMock(return_value=client)
+
+    result = provider.retrieve_email(
+        external_id="<202605210817.1@x>",
+        created_at=datetime(2026, 5, 21, 8, 17, tzinfo=timezone.utc),
+        end_date=date(2026, 8, 21),
+    )
+
+    assert [event["event"] for event in result["events"]] == ["delivered", "clicks"]
+    calls = client.transactional_emails.get_email_event_report.call_args_list
+    assert len(calls) == 2
+    assert calls[0].kwargs["message_id"] == "<202605210817.1@x>"
+    assert calls[0].kwargs["start_date"] == "2026-05-21"
+    assert calls[0].kwargs["end_date"] == "2026-08-19"
+    assert calls[1].kwargs["start_date"] == "2026-08-20"
+    assert calls[1].kwargs["end_date"] == "2026-08-21"
+
+
+def test_retrieve_email_parses_date_from_brevo_message_id():
+    provider = BrevoAPIProvider()
+    client = MagicMock()
+    client.transactional_emails.get_email_event_report.return_value = SimpleNamespace(
+        events=[]
+    )
+    provider._get_email_client = MagicMock(return_value=client)
+
+    provider.retrieve_email(
+        external_id="<202605210817.30264662035@smtp-relay.mailin.fr>",
+        end_date=date(2026, 8, 21),
+    )
+
+    first = client.transactional_emails.get_email_event_report.call_args_list[0].kwargs
+    assert first["start_date"] == "2026-05-21"
+    assert first["message_id"] == (
+        "<202605210817.30264662035@smtp-relay.mailin.fr>"
     )
 
 

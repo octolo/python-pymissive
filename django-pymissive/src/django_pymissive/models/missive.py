@@ -1379,7 +1379,10 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         response = self.call_provider_service("retrieve", **self.get_serialized_data(attachments=False))
         events = response.get("events")
         if events:
-            self.handle_events(events)
+            from ..signals import suppress_event_billings
+
+            with suppress_event_billings():
+                self.handle_events(events)
         for recipient in self.recipients.all():
             recipient.set_status()
         self.set_status()

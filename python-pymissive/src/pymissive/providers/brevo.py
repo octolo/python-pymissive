@@ -2,7 +2,7 @@
 
 import contextlib
 import json
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -239,6 +239,29 @@ class BrevoAPIProvider(MissiveProviderBase):
             raise ValueError("Brevo event reports cannot exceed 90 days")
         return start, end
 
+    def _event_report_date_chunks(self, start_date, end_date, *, max_days=90):
+        start = datetime.strptime(self._as_report_date(start_date), "%Y-%m-%d").date()
+        end = datetime.strptime(self._as_report_date(end_date), "%Y-%m-%d").date()
+        if end < start:
+            start, end = end, start
+        current = start
+        while current <= end:
+            chunk_end = min(current + timedelta(days=max_days), end)
+            yield current, chunk_end
+            current = chunk_end + timedelta(days=1)
+
+    def _date_from_brevo_message_id(self, external_id):
+        """Best-effort date from ids like ``<202605210817.id@smtp-relay.mailin.fr>``."""
+        if not external_id:
+            return None
+        text = str(external_id).lstrip("<")
+        if len(text) >= 8 and text[:8].isdigit():
+            try:
+                return datetime.strptime(text[:8], "%Y%m%d").date()
+            except ValueError:
+                return None
+        return None
+
     def _response_to_dict(self, response) -> dict[str, Any]:
         """Convert v4 Pydantic response to dict."""
         if isinstance(response, dict):
@@ -365,12 +388,29 @@ class BrevoAPIProvider(MissiveProviderBase):
     #########################################################
 
     def retrieve_email(self, **kwargs):
-        """Get the status of an email via Brevo API v4."""
+        """Get events for one email via Brevo API v4.
+
+        Without a date window Brevo defaults to the last 30 days, so older
+        ``sent`` / ``delivered`` events disappear while a recent ``click``
+        still shows. Walk from ``created_at`` (or the message-id date) to
+        today in 90-day chunks, filtered by ``message_id``.
+        """
         external_id = kwargs.get("external_id")
-        client = self._get_email_client()
-        response = client.transactional_emails.get_email_event_report(message_id=external_id)
-        events = getattr(response, "events", []) or []
-        events = [self._event_to_payload(event) for event in events]
+        start = kwargs.get("created_at") or kwargs.get("start_date")
+        if start is None:
+            start = self._date_from_brevo_message_id(external_id)
+        end = kwargs.get("end_date") or datetime.now(dt_timezone.utc).date()
+        if start is None:
+            start = end - timedelta(days=90)
+        events: list[dict[str, Any]] = []
+        for chunk_start, chunk_end in self._event_report_date_chunks(start, end):
+            events.extend(
+                self._retrieve_email_event_report(
+                    self._as_report_date(chunk_start),
+                    self._as_report_date(chunk_end),
+                    message_id=external_id,
+                )
+            )
         return {"message_id": external_id, "events": events}
 
     def retrieve_events(self, start_date, end_date, **kwargs) -> dict[str, Any]:
@@ -393,19 +433,27 @@ class BrevoAPIProvider(MissiveProviderBase):
             )
         return {"events": events}
 
-    def _retrieve_email_event_report(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
+    def _retrieve_email_event_report(
+        self,
+        start_date: str,
+        end_date: str,
+        message_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         client = self._get_email_client()
         limit = 2500
         offset = 0
         events: list[dict[str, Any]] = []
         while True:
-            response = client.transactional_emails.get_email_event_report(
-                start_date=start_date,
-                end_date=end_date,
-                limit=limit,
-                offset=offset,
-                sort="desc",
-            )
+            params: dict[str, Any] = {
+                "start_date": start_date,
+                "end_date": end_date,
+                "limit": limit,
+                "offset": offset,
+                "sort": "desc",
+            }
+            if message_id:
+                params["message_id"] = message_id
+            response = client.transactional_emails.get_email_event_report(**params)
             page = getattr(response, "events", None)
             if page is None and isinstance(response, dict):
                 page = response.get("events")
@@ -505,18 +553,23 @@ class BrevoAPIProvider(MissiveProviderBase):
 
     def get_billings_email(self, **kwargs: Any) -> dict | list:
         external_id = kwargs.get("external_id")
-        response = self.retrieve_email(external_id=external_id)
-        recipients = list(set([event["email"] for event in response.get("events", []) if event.get("email")]))
+        emails = []
+        for recipient in kwargs.get("recipients") or []:
+            email = recipient.get("email") if isinstance(recipient, dict) else None
+            if email:
+                emails.append(email)
+        emails = list(dict.fromkeys(emails))
         return [
             {
                 "message_id": external_id,
-                "email": recipient,
+                "email": email,
+                "recipient": {"email": email},
                 "billing_amount": 0.0025,
                 "estimate_amount": 0.0025,
                 "currency": "EUR",
                 "invoice": "Email: 1",
             }
-            for recipient in recipients
+            for email in emails
         ]
 
     #########################################################

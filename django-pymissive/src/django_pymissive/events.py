@@ -120,7 +120,15 @@ def handle_events(events, provider, missive_type: str) -> Missive | None:
         if isinstance(events_normalized, dict):
             events_normalized = [events_normalized]
         for event in events_normalized:
-            handle_event(event, provider, missive_type)
+            try:
+                handle_event(event, provider, missive_type)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "handle_events: failed for external_id=%s event=%s",
+                    event.get("external_id") if isinstance(event, dict) else None,
+                    event.get("event") if isinstance(event, dict) else None,
+                )
     return None
 
 
@@ -142,7 +150,10 @@ def retrieve_events(*, provider, missive_type, start_date, end_date):
     )
     if isinstance(raw, dict):
         raw = raw.get("events") or raw
-    handle_events(raw, provider_obj, missive_type)
+    from .signals import suppress_event_billings
+
+    with suppress_event_billings():
+        handle_events(raw, provider_obj, missive_type)
 
 
 def delay_retrieve_events(*, provider, missive_type, start_date, end_date):
