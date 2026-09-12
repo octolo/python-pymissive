@@ -551,7 +551,14 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         scheme = get_default_scheme()
         domain = get_default_domain()
         base = f"{scheme}://{(domain or '').strip().lstrip('/')}"
-        return build_webhook_url(base, self.provider._provider.name, self.missive_type)
+        provider = self.provider
+        inner = getattr(provider, "_provider", None)
+        provider_name = getattr(inner, "name", None) or getattr(provider, "name", None)
+        if not provider_name:
+            provider_name = provider if isinstance(provider, str) else ""
+        if not provider_name:
+            return ""
+        return build_webhook_url(base, provider_name, self.missive_type)
 
     def is_serializable_field(self, field):
         return (not field.is_relation
@@ -1427,7 +1434,9 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     #########################################################
 
     def can_tracking_numbers(self):
-        return self.has_service("tracking_number") and self.external_id and not is_dry_run()
+        return bool(
+            self.has_service("tracking_number") and self.external_id and not is_dry_run()
+        )
 
     def retrieve_tracking_numbers(self):
         """Fetch carrier tracking numbers from the provider and persist them on recipients."""
@@ -1449,7 +1458,9 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     #########################################################
 
     def can_billings(self):
-        return self.has_service("get_billings") and self.external_id and not is_dry_run()
+        return bool(
+            self.has_service("get_billings") and self.external_id and not is_dry_run()
+        )
 
     def get_billings(self):
         """Get the billings of the missive."""
