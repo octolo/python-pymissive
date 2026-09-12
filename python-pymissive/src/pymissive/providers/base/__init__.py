@@ -83,6 +83,25 @@ class MissiveProviderBase(
         """
         raise NotImplementedError("retrieve_events is not implemented")
 
+    def retrieve_billings(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
+        """Retrieve billings in bulk between ``start_date`` and ``end_date``.
+
+        Typed services (``retrieve_billings_lre``, ``retrieve_billings_email``, …)
+        delegate here. Named ``retrieve_billings`` so it does not collide with
+        ``get_billings`` (per-missive) during providerkit service dispatch.
+
+        Args:
+            start_date: Inclusive start of the period.
+            end_date: Inclusive end of the period.
+
+        Returns:
+            A list of normalized billing records.
+
+        Raises:
+            NotImplementedError: Always, until a provider implements it.
+        """
+        raise NotImplementedError("retrieve_billings is not implemented")
+
     def get_normalize_event(self, data: dict[str, Any]) -> str:
         """Return the normalized event of webhook/email/SMS."""
         return self.events_association.get(data.get("event"), "unknown")
@@ -135,9 +154,24 @@ def _retrieve_events_for_type(missive_type: str):
     return retrieve_events_type
 
 
+def _retrieve_billings_for_type(missive_type: str):
+    def retrieve_billings_type(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
+        return self.retrieve_billings(start_date, end_date, missive_type=missive_type, **kwargs)
+
+    retrieve_billings_type.__name__ = f"retrieve_billings_{missive_type}"
+    retrieve_billings_type.__qualname__ = f"MissiveProviderBase.retrieve_billings_{missive_type}"
+    retrieve_billings_type.__doc__ = f"Retrieve {missive_type} billings between start_date and end_date."
+    return retrieve_billings_type
+
+
 for _missive_type in config.MISSIVE_TYPES:
     setattr(
         MissiveProviderBase,
         f"retrieve_events_{_missive_type}",
         _retrieve_events_for_type(_missive_type),
+    )
+    setattr(
+        MissiveProviderBase,
+        f"retrieve_billings_{_missive_type}",
+        _retrieve_billings_for_type(_missive_type),
     )

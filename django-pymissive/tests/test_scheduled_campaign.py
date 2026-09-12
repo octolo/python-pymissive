@@ -9,6 +9,8 @@ Covers:
 - run_campaign dispatch: built-in / task_object / external_task_backend
 - clean() validation: backend allowlist, private run_method, kwargs not a dict
 - fakeapp runner (hook injected via external_task_backend)
+- with_counts: per-status and per-type live annotations
+- duplicate_missive does not copy the scheduler FK
 """
 
 from __future__ import annotations
@@ -540,3 +542,64 @@ def test_clean_passes_with_valid_kwargs():
         task_object_arguments={"run_method": "run_campaign", "kwargs": {"key": "val"}},
     )
     sched.clean()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# with_counts / duplicate scheduler
+# ---------------------------------------------------------------------------
+
+
+def test_with_counts_by_status_and_type():
+    c = _campaign()
+    sched = _scheduled(c)
+    _missive(c, missive_type="email", status=MissiveStatus.SUCCESS, scheduler=sched)
+    _missive(c, missive_type="email", status=MissiveStatus.DRAFT, scheduler=sched)
+    _missive(c, missive_type="sms", status=MissiveStatus.FAILED, scheduler=sched)
+    _missive(c, missive_type="sms", status=MissiveStatus.ERROR, scheduler=sched)
+    other = _scheduled(c)
+    _missive(c, missive_type="email", status=MissiveStatus.SUCCESS, scheduler=other)
+    _missive(c, missive_type="email", status=MissiveStatus.SUCCESS)
+
+    annotated = MissiveScheduledCampaign.objects.with_counts().get(pk=sched.pk)
+    assert annotated.count_total == 4
+    assert annotated.count_sent == 3
+    assert annotated.count_error == 2
+    assert annotated.count_missive_success == 1
+    assert annotated.count_missive_draft == 1
+    assert annotated.count_missive_failed == 1
+    assert annotated.count_missive_error == 1
+    assert annotated.count_total_email == 2
+    assert annotated.count_sent_email == 1
+    assert annotated.count_error_email == 0
+    assert annotated.count_total_sms == 2
+    assert annotated.count_error_sms == 2
+
+    counts = sched.counts_by_type(only_active=True)
+    assert set(counts) == {"email", "sms"}
+    assert counts["sms"]["error"] == 2
+    assert sched.counts_by_status(only_active=True) == {
+        MissiveStatus.SUCCESS: 1,
+        MissiveStatus.DRAFT: 1,
+        MissiveStatus.FAILED: 1,
+        MissiveStatus.ERROR: 1,
+    }
+
+    payload = sched.progress_payload()
+    assert payload["by_status"][MissiveStatus.SUCCESS]["count"] == 1
+    assert "label" in payload["by_status"][MissiveStatus.SUCCESS]
+    assert payload["by_type"]["email"]["by_status"][MissiveStatus.SUCCESS] == 1
+    assert payload["by_type"]["sms"]["by_status"][MissiveStatus.FAILED] == 1
+
+
+def test_duplicate_missive_clears_scheduler():
+    c = _campaign()
+    sched = _scheduled(c)
+    source = _missive(c, status=MissiveStatus.SUCCESS, scheduler=sched)
+
+    dup = source.duplicate_missive()
+
+    assert dup.scheduler_id is None
+    source.refresh_from_db()
+    assert source.scheduler_id == sched.id
+    assert MissiveScheduledCampaign.objects.with_counts().get(pk=sched.pk).count_total == 1
+

@@ -105,15 +105,33 @@ class MissiveEvent(CommentTimestampedModel):
         return (self.missive_id and not self.client_initiated)
 
     def replay(self):
-        """Replay the event. Uses trace["raw"] (normalized event) stored at creation."""
+        """Replay the event against this row's missive.
+
+        Uses ``trace["raw"]`` when present, otherwise the trace itself.
+        Re-normalizes via the provider, then processes on ``self.missive``
+        (do not re-lookup by ``external_id``: retrieve can create duplicates,
+        and ``handle_events`` would swallow the error).
+        """
         if not self.missive_id:
             raise ValueError("Cannot replay event without associated missive")
-
-
+        from ..events import _process_event
 
         event = self.trace.get("raw") or self.trace
         if not isinstance(event, dict):
             raise ValueError("No replayable event in trace")
         event = dict(event)
         event["pk"] = self.pk
-        self.missive.handle_events([event])
+        provider = self.missive.provider
+        backend = getattr(provider, "_provider", None)
+        if backend is None:
+            raise ValueError("Cannot replay event without a provider backend")
+        events_normalized = backend.call_service_formatted(
+            f"handle_webhook_{self.missive.missive_type}", payload=[event]
+        )
+        if isinstance(events_normalized, dict):
+            events_normalized = [events_normalized]
+        if not events_normalized:
+            raise ValueError("Provider did not return a replayable event")
+        for normalized in events_normalized:
+            if isinstance(normalized, dict):
+                _process_event(normalized, self.missive)

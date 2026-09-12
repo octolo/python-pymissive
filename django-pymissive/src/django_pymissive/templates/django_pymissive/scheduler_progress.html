@@ -72,6 +72,20 @@
             </ul>
         </section>
 
+        <section class="scheduler-statuses card">
+            <h2>{% trans "By status" %}</h2>
+            <ul class="status-list" id="scheduler-status-list">
+                {% for status_key, status_data in progress.by_status.items %}
+                <li class="status-chip" data-status="{{ status_key }}">
+                    <span class="status-chip-count">{{ status_data.count }}</span>
+                    <span class="status-chip-label">{{ status_data.label }}</span>
+                </li>
+                {% empty %}
+                <li class="type-empty">{% trans "No missives attached to this run yet." %}</li>
+                {% endfor %}
+            </ul>
+        </section>
+
         <details class="json-debug card">
             <summary>{% trans "JSON payload" %}</summary>
             <pre id="scheduler-json-pre" class="json-pre">…</pre>

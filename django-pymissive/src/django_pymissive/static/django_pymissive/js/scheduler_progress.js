@@ -16,6 +16,7 @@
         overallBar: document.getElementById("scheduler-overall-bar"),
         overallErrors: document.getElementById("scheduler-overall-errors"),
         typeList: document.getElementById("scheduler-type-list"),
+        statusList: document.getElementById("scheduler-status-list"),
         jsonPre: document.getElementById("scheduler-json-pre"),
     };
 
@@ -68,6 +69,29 @@
             .join("");
     }
 
+    function renderStatusList(byStatus) {
+        if (!els.statusList) {
+            return;
+        }
+        const entries = Object.entries(byStatus || {});
+        if (!entries.length) {
+            els.statusList.innerHTML =
+                '<li class="type-empty">No missives attached to this run yet.</li>';
+            return;
+        }
+
+        els.statusList.innerHTML = entries
+            .map(function ([statusKey, data]) {
+                return (
+                    '<li class="status-chip" data-status="' + escapeHtml(statusKey) + '">' +
+                    '<span class="status-chip-count">' + data.count + "</span>" +
+                    '<span class="status-chip-label">' + escapeHtml(data.label) + "</span>" +
+                    "</li>"
+                );
+            })
+            .join("");
+    }
+
     function escapeHtml(text) {
         return String(text)
             .replace(/&/g, "&amp;")
@@ -103,6 +127,7 @@
             }
         }
         renderTypeList(data.by_type);
+        renderStatusList(data.by_status);
         if (els.jsonPre) {
             els.jsonPre.textContent = JSON.stringify(data, null, 2);
         }

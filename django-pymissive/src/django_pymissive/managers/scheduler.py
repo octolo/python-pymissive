@@ -28,6 +28,11 @@ def error_annotation_name(missive_type: str) -> str:
     return f"count_error_{missive_type}"
 
 
+def status_annotation_name(status: str) -> str:
+    """Overall count for one ``MissiveStatus`` (e.g. ``count_missive_success``)."""
+    return f"count_missive_{status}"
+
+
 class MissiveScheduledCampaignQuerySet(models.QuerySet):
     """QuerySet exposing the run counters as opt-in annotations.
 
@@ -35,7 +40,8 @@ class MissiveScheduledCampaignQuerySet(models.QuerySet):
     they never drift from the actual missive statuses.
 
     Two layers of annotations are applied:
-    1. Per-type ``Count`` filters (one JOIN, multiple conditional counts).
+    1. Per-type total/sent/error ``Count`` filters, plus overall per-status
+       ``count_missive_*`` (one JOIN, multiple conditional counts).
     2. A second ``annotate`` that sums the per-type results into
        ``count_total``, ``count_sent`` and ``count_error`` — no extra JOIN.
 
@@ -47,22 +53,28 @@ class MissiveScheduledCampaignQuerySet(models.QuerySet):
         # Annotation names are deliberately distinct from the model properties
         # (total_count / sent_count / error_count) to avoid clashing with them.
         types = list(MISSIVE_TYPES)
-        per_type = {}
+        counts = {}
         for missive_type in types:
             type_q = Q(to_missive__missive_type=missive_type)
-            per_type[total_annotation_name(missive_type)] = Count(
+            counts[total_annotation_name(missive_type)] = Count(
                 "to_missive",
                 filter=type_q,
                 distinct=True,
             )
-            per_type[sent_annotation_name(missive_type)] = Count(
+            counts[sent_annotation_name(missive_type)] = Count(
                 "to_missive",
                 filter=type_q & ~Q(to_missive__status=MissiveStatus.DRAFT),
                 distinct=True,
             )
-            per_type[error_annotation_name(missive_type)] = Count(
+            counts[error_annotation_name(missive_type)] = Count(
                 "to_missive",
                 filter=type_q & Q(to_missive__status__in=ERROR_STATUSES),
+                distinct=True,
+            )
+        for status in MissiveStatus:
+            counts[status_annotation_name(status)] = Count(
+                "to_missive",
+                filter=Q(to_missive__status=status),
                 distinct=True,
             )
 
@@ -72,7 +84,7 @@ class MissiveScheduledCampaignQuerySet(models.QuerySet):
             "count_sent": reduce(operator.add, [F(sent_annotation_name(t)) for t in types]),
             "count_error": reduce(operator.add, [F(error_annotation_name(t)) for t in types]),
         }
-        return self.annotate(**per_type).annotate(**totals)
+        return self.annotate(**counts).annotate(**totals)
 
 
 class MissiveScheduledCampaignManager(

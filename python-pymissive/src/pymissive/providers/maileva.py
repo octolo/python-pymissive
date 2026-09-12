@@ -1,10 +1,14 @@
 import json
-import requests
-from django.utils import timezone
-from pymissive.utils import is_disable_send
-from .base import MissiveProviderBase
+import re
+import zlib
 from functools import cached_property
 from typing import Any
+
+import requests
+from django.utils import timezone
+
+from pymissive.utils import _truthy, is_disable_send
+from .base import MissiveProviderBase
 
 
 _ADDRESS_OFFSET_LRE_ACK = {
@@ -18,6 +22,229 @@ _ADDRESS_OFFSET_LRE_NO_ACK = {
     "width": "70mm",
     "height": "30mm",
 }
+
+# International registered mail (UPU S10), e.g. RW799210633FR.
+_UPU_S10_RE = re.compile(r"\b[A-Z]{2}\d{9}[A-Z]{2}\b")
+# Domestic La Poste LR number printed under "Numéro de la LR" (13 or 15 digits).
+_FR_LR_RE = re.compile(r"(?<!\d)(\d{15}|\d{13})(?!\d)")
+
+
+_MAILEVA_PO_BOX_RE = re.compile(
+    r"^(?:BP|CS|TSA|B\.?\s*P\.?|BO[IÎ]TE\s*POSTALE)\b",
+    re.IGNORECASE,
+)
+
+
+def _provider_custom_id(data: dict[str, Any] | None) -> str | None:
+    """Maileva ``custom_id`` is the client substitute_id, else the local id."""
+    if not data:
+        return None
+    value = data.get("substitute_id") or data.get("id")
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
+def _is_maileva_country_prefix(token: str) -> bool:
+    return bool(token) and token.isalpha() and 1 <= len(token) <= 3
+
+
+def _geoaddress_from_maileva_line_5(line: str) -> dict[str, str]:
+    """Line 5 is extra address info (``address_line3``), plus po_box or locality."""
+    line = (line or "").strip()
+    if not line:
+        return {}
+    extra = {"address_line3": line}
+    if _MAILEVA_PO_BOX_RE.match(line):
+        extra["po_box"] = line
+    else:
+        extra["locality"] = line
+    return extra
+
+
+def _parse_maileva_address_line_6(line: str) -> dict[str, str]:
+    """Split Maileva ``address_line_6`` into geoaddress city / postal / state.
+
+    Domestic: ``75000 Paris``. International: ``I 39044 EGNA BZ ITALIE``.
+    ``country_code`` comes from the Maileva payload, not from this line.
+    """
+    tokens = (line or "").split()
+    if not tokens:
+        return {}
+    result: dict[str, str] = {}
+    international = False
+    i = 0
+    if len(tokens) >= 2 and _is_maileva_country_prefix(tokens[0]) and any(
+        c.isdigit() for c in tokens[1]
+    ):
+        international = True
+        i = 1
+    if i < len(tokens) and any(c.isdigit() for c in tokens[i]):
+        result["postal_code"] = tokens[i]
+        i += 1
+    rest = tokens[i:]
+    if (
+        len(rest) >= 2
+        and _is_maileva_country_prefix(rest[0])
+        and rest[1] == result.get("postal_code")
+    ):
+        international = True
+        rest = rest[2:]
+    if international and rest and rest[-1].isalpha() and len(rest[-1]) > 2:
+        rest = rest[:-1]
+    if rest and len(rest[-1]) == 2 and rest[-1].isalpha():
+        result["state_code"] = rest[-1].upper()
+        rest = rest[:-1]
+    cedex_at = next(
+        (idx for idx, token in enumerate(rest) if token.upper() == "CEDEX"),
+        None,
+    )
+    if cedex_at is not None:
+        result["sorting_code"] = " ".join(rest[cedex_at:])
+        rest = rest[:cedex_at]
+    if rest:
+        result["city"] = " ".join(rest)
+    return result
+
+
+def _address_from_maileva_lines(
+    payload: dict[str, Any],
+    *,
+    prefix: str = "",
+    country_key: str = "country_code",
+) -> dict[str, str] | None:
+    """Reverse Maileva recipient/sender lines into a geoaddress dict.
+
+    ``address_line_1`` organization, ``_2`` name (caller), ``_3`` address_line2,
+    ``_4`` address_line1, ``_5`` po_box/locality, ``_6`` postal_code + city.
+    ``country_code`` is a dedicated Maileva field.
+    """
+
+    def line(n: int) -> str:
+        return (payload.get(f"{prefix}address_line_{n}") or "").strip()
+
+    address = {
+        "organization": line(1) or None,
+        "address_line2": line(3) or None,
+        "address_line1": line(4) or None,
+        "country_code": (payload.get(country_key) or "").strip().upper() or None,
+    }
+    address.update(_geoaddress_from_maileva_line_5(line(5)))
+    address.update(_parse_maileva_address_line_6(line(6)))
+    return {key: value for key, value in address.items() if value} or None
+
+
+def _inflate_pdf_stream(raw: bytes) -> bytes | None:
+    for wbits in (zlib.MAX_WBITS, -zlib.MAX_WBITS):
+        try:
+            return zlib.decompress(raw, wbits)
+        except zlib.error:
+            continue
+    return None
+
+
+def _iter_pdf_streams(pdf_bytes: bytes):
+    for match in re.finditer(rb"stream\r?\n", pdf_bytes):
+        start = match.end()
+        end = pdf_bytes.find(b"endstream", start)
+        if end < 0:
+            continue
+        raw = pdf_bytes[start:end].rstrip(b"\r\n")
+        inflated = _inflate_pdf_stream(raw)
+        yield inflated if inflated is not None else raw
+
+
+def _pdf_tounicode_map(streams) -> dict[int, str]:
+    mapping: dict[int, str] = {}
+    for stream in streams:
+        if b"beginbfrange" not in stream and b"beginbfchar" not in stream:
+            continue
+        for lo, hi, dst in re.findall(
+            rb"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>",
+            stream,
+        ):
+            lo_i, hi_i, dst_i = int(lo, 16), int(hi, 16), int(dst, 16)
+            for offset, code in enumerate(range(lo_i, hi_i + 1)):
+                mapping[code] = chr(dst_i + offset)
+        for block in re.findall(rb"beginbfchar(.*?)endbfchar", stream, flags=re.DOTALL):
+            for src, dst in re.findall(rb"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", block):
+                mapping[int(src, 16)] = chr(int(dst, 16))
+    return mapping
+
+
+def _pdf_unescape_literal(raw: bytes) -> str:
+    out = bytearray()
+    i = 0
+    while i < len(raw):
+        if raw[i] != 0x5C or i + 1 >= len(raw):
+            out.append(raw[i])
+            i += 1
+            continue
+        nxt = raw[i + 1]
+        simple = {0x6E: 10, 0x72: 13, 0x74: 9, 0x62: 8, 0x66: 12}
+        if nxt in simple:
+            out.append(simple[nxt])
+            i += 2
+        elif 0x30 <= nxt <= 0x37:
+            j = i + 1
+            octal = b""
+            while j < len(raw) and len(octal) < 3 and 0x30 <= raw[j] <= 0x37:
+                octal += bytes([raw[j]])
+                j += 1
+            out.append(int(octal, 8))
+            i = j
+        else:
+            out.append(nxt)
+            i += 2
+    return out.decode("latin-1", "replace")
+
+
+def _pdf_decode_hex_tj(hexstr: str, mapping: dict[int, str]) -> str:
+    if len(hexstr) % 2:
+        return ""
+    width = 4 if mapping and max(mapping, default=0) > 255 else 2
+    if len(hexstr) % width:
+        width = 2 if width == 4 else 4
+        if len(hexstr) % width:
+            return ""
+    chars = []
+    for i in range(0, len(hexstr), width):
+        code = int(hexstr[i:i + width], 16)
+        chars.append(mapping.get(code, chr(code) if code < 256 else ""))
+    return "".join(chars)
+
+
+def _extract_deposit_proof_text(pdf_bytes: bytes) -> str:
+    streams = list(_iter_pdf_streams(pdf_bytes))
+    mapping = _pdf_tounicode_map(streams)
+    parts: list[str] = []
+    for stream in streams:
+        for match in re.finditer(rb"\((?:\\.|[^\\)])*\)\s*Tj", stream):
+            inner = match.group(0)
+            inner = inner[1:inner.rfind(b")")]
+            parts.append(_pdf_unescape_literal(inner))
+        for match in re.finditer(rb"<([0-9A-Fa-f]+)>\s*Tj", stream):
+            decoded = _pdf_decode_hex_tj(match.group(1).decode("ascii"), mapping)
+            if decoded:
+                parts.append(decoded)
+    return "\n".join(parts)
+
+
+def extract_tracking_number_from_deposit_proof(pdf_bytes: bytes) -> str | None:
+    """Read the carrier tracking number printed on a Maileva deposit-proof PDF.
+
+    International proofs expose UPU S10 under ``NUMERO DE RECOMMANDE``
+    (e.g. ``RW799210633FR``). Domestic French LR proofs print a 13- or
+    15-digit number under ``Numéro de la LR``.
+    """
+    text = _extract_deposit_proof_text(pdf_bytes)
+    upu = _UPU_S10_RE.findall(text.upper())
+    if upu:
+        return upu[0]
+    for number in _FR_LR_RE.findall(text):
+        return number
+    return None
+
 
 class MailevaProvider(MissiveProviderBase):
     """Maileva LRE provider (electronic registered letter, registered mail)."""
@@ -60,7 +287,7 @@ class MailevaProvider(MissiveProviderBase):
         'prooflist': '{base_url}/{postal_mode}/{version}/global_deposit_proofs?sending_id=%s',
         'proof': '{base_url}/{postal_mode}/{version}/global_deposit_proofs/%s',
         'proofdownload': '{base_url}/{postal_mode}/{version}%s',
-        'invoice': '{base_url}/billing/v1/recipient_items?user_reference=%s',
+        'invoice': '{base_url}/billing/v1/recipient_items',
         'subscriptions': '{base_url}/notification_center/v2/subscriptions',
     }
     events_association = {
@@ -82,11 +309,16 @@ class MailevaProvider(MissiveProviderBase):
         "PENDING": "queued",
         "ACCEPTED": "accepted",
         "PREPARING": "processing",
+        "PROCESSED": "processed",
+        "PROCESSED_WITH_ERRORS": "error",
+        "REJECTED": "rejected",
+        "ARCHIVED": "archived",
     }
     fields_associations = {
         "webhook_id": "id",
         "internal_id": ("custom_id", "resource_custom_id"),
-        "external_id": ("id", "resource_id",),
+        "substitute_id": "custom_id",
+        "external_id": ("sending_id", "resource_id"),
         "id": ("id", "resource_id"),
         "url": ["url", "callback_url"],
         "type": "resource_type",
@@ -121,7 +353,7 @@ class MailevaProvider(MissiveProviderBase):
         return "v4" if self.is_acknowledgement_of_receipt() else "v2"
 
     def is_mode_sandbox(self) -> bool:
-        return self._get_config_or_env("SANDBOX", False)
+        return _truthy(self._get_config_or_env("SANDBOX", False))
 
     def get_endpoint(self, endpoint: str, prefix: str = "api") -> str:
         return self.endpoints[endpoint].format(
@@ -242,17 +474,57 @@ class MailevaProvider(MissiveProviderBase):
         if not address:
             raise ValueError("LRE recipient requires address")
         data = {
-            "custom_id": recipient.get("id"),
             "address_line_1": address.get("organization"),
             "address_line_2": recipient.get("name"),
             "address_line_3": address.get("address_line2"),
             "address_line_4": address.get("address_line1"),
-            "address_line_5": address.get("locality") or address.get("po_box"),
+            "address_line_5": (
+                address.get("locality")
+                or address.get("po_box")
+                or address.get("address_line3")
+            ),
             "address_line_6": f"{address.get('postal_code')} {address.get('city')}",
             "country_code": (address.get("country_code") or "").upper() or None,
         }
+        custom_id = _provider_custom_id(recipient)
+        if custom_id:
+            data["custom_id"] = custom_id
         if address.get("sorting_code"):
             data["address_line_6"] += " " + address.get("sorting_code")
+        return data
+
+    def _recipient_tracking_number(self, payload: dict[str, Any]) -> str | None:
+        """Public carrier reference (La Poste, etc.), not Maileva's recipient id."""
+        for key in ("tracking_number", "registered_number", "tracking_id"):
+            value = payload.get(key)
+            if value:
+                return str(value)
+        return None
+
+    def _serialize_recipient_ref(
+        self, recipient: dict[str, Any], payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        local_id = recipient.get("id")
+        custom_id = (
+            recipient.get("substitute_id")
+            or payload.get("custom_id")
+            or local_id
+        )
+        data = {
+            "internal_id": local_id or payload.get("custom_id"),
+            "external_id": payload.get("id"),
+        }
+        if custom_id:
+            data["substitute_id"] = str(custom_id)
+        name = recipient.get("name") or payload.get("address_line_2")
+        if name:
+            data["name"] = name
+        address = _address_from_maileva_lines(payload) or recipient.get("address")
+        if address:
+            data["address"] = address
+        tracking_number = self._recipient_tracking_number(payload)
+        if tracking_number:
+            data["tracking_number"] = tracking_number
         return data
 
     def _detail_recipients_lre(self, external_id: str) -> bool:
@@ -267,22 +539,14 @@ class MailevaProvider(MissiveProviderBase):
         data = self.get_recipient_lre_data(recipient)
         response = requests.post(url, headers=self._get_headers(), json=data, timeout=30)
         self._raise_for_response(response, f"Maileva add recipient failed ({url})")
-        response = response.json()
-        return {
-            "internal_id": recipient.get("id"),
-            "external_id": response.get("id"),
-        }
+        return self._serialize_recipient_ref(recipient, response.json())
 
     def update_recipient_lre(self, recipient: dict[str, Any], external_id: str) -> bool:
         url = self.get_endpoint('recipients') % external_id + "/" + recipient.get("external_id")
         data = self.get_recipient_lre_data(recipient)
         response = requests.patch(url, headers=self._get_headers(), json=data, timeout=30)
         self._raise_for_response(response, f"Maileva update recipient failed ({url})")
-        response = response.json()
-        return {
-            "internal_id": recipient.get("id"),
-            "external_id": response.get("id"),
-        }
+        return self._serialize_recipient_ref(recipient, response.json())
 
     def _add_recipients_lre(self, recipients: list[dict[str, Any]], external_id: str) -> bool:
         external_ids = []
@@ -319,14 +583,18 @@ class MailevaProvider(MissiveProviderBase):
     def get_lre_data(self, **kwargs: Any) -> dict[str, Any]:
         data: dict[str, Any] = {
             "name": (kwargs.get("subject") or "").strip() or "Missive",
-            "custom_id": str(kwargs.get("id")),
+        }
+        custom_id = _provider_custom_id(kwargs)
+        if custom_id:
+            data["custom_id"] = custom_id
+        data.update({
             "color_printing": kwargs.get("color_printing", self._get_config_or_env("COLOR_PRINTING", False)),
             "duplex_printing": kwargs.get("duplex_printing", self._get_config_or_env("DUPLEX_PRINTING", True)),
             "optional_address_sheet": kwargs.get(
                 "optional_address_sheet", self._get_config_or_env("OPTIONAL_ADDRESS_SHEET", False)
             ),
             "archiving_duration": self._normalize_archiving_duration(kwargs.get("archiving_duration")),
-        }
+        })
         sender = kwargs.get("sender", self._get_config_or_env("SENDER_ADDRESS", {}))
         sender_name = sender.get("name")
         sender_address = sender.get("address")
@@ -335,7 +603,11 @@ class MailevaProvider(MissiveProviderBase):
             data["sender_address_line_1"] = sender_address.get("organization")
             data["sender_address_line_3"] = sender_address.get("address_line2")
             data["sender_address_line_4"] = sender_address.get("address_line1")
-            data["sender_address_line_5"] = sender_address.get("locality") or sender_address.get("po_box")
+            data["sender_address_line_5"] = (
+                sender_address.get("locality")
+                or sender_address.get("po_box")
+                or sender_address.get("address_line3")
+            )
             data["sender_address_line_6"] = f"{sender_address.get('postal_code')} {sender_address.get('city')}"
             code = sender_address.get("country_code")
             data["sender_country_code"] = code.upper() if code else code
@@ -579,21 +851,70 @@ class MailevaProvider(MissiveProviderBase):
             return data.get("events")
         return None
 
+    def get_normalize_sender_name(self, data: dict[str, Any]) -> str | None:
+        name = (data.get("sender_name") or data.get("sender_address_line_2") or "").strip()
+        return name or None
+
+    def get_normalize_sender_address(self, data: dict[str, Any]) -> dict[str, str] | None:
+        existing = data.get("sender_address")
+        if isinstance(existing, dict) and any(
+            existing.get(key)
+            for key in ("address_line1", "city", "organization", "postal_code")
+        ):
+            return existing
+        return _address_from_maileva_lines(
+            data, prefix="sender_", country_key="sender_country_code"
+        )
+
+    def get_normalize_recipients(self, data: dict[str, Any]) -> list | None:
+        recipients = data.get("recipients")
+        if not isinstance(recipients, list):
+            return None
+        return [
+            self._serialize_recipient_ref(
+                {
+                    "id": rec.get("internal_id") or rec.get("custom_id") or rec.get("id"),
+                    "name": rec.get("name"),
+                    "address": rec.get("address") if isinstance(rec.get("address"), dict) else None,
+                },
+                rec,
+            )
+            if isinstance(rec, dict)
+            else rec
+            for rec in recipients
+        ]
+
+    def _recipient_event_ref(self, recipient: dict[str, Any]) -> dict[str, Any]:
+        """Keys Django ``get_recipient`` can match on a retrieved sending.
+
+        Missive identity is the sending ``resource_id``. Do not put Maileva's
+        recipient UUID in ``external_id``: that value is not the missive id
+        and would steal event-level ``external_id`` if copied upward.
+        """
+        ref: dict[str, Any] = {}
+        if recipient.get("custom_id"):
+            ref["id"] = recipient["custom_id"]
+            ref["substitute_id"] = recipient["custom_id"]
+        name = (recipient.get("address_line_2") or recipient.get("name") or "").strip()
+        if name:
+            ref["name"] = name
+        return ref
+
     def _serialize_events_lre(self, recipients, detail_lre):
-        print("detail_lre", detail_lre)
         events = []
         for recipient in recipients:
+            recipient_ref = self._recipient_event_ref(recipient)
             if "statuses" in recipient:
                 for status in recipient.get("statuses", []):
                     events.append({
                         "resource_id": detail_lre.get("id"),
                         "event": status.get("code"),
                         "event_date": status.get("date"),
-                        "recipient": {"id": recipient.get("custom_id")},
+                        "recipient": recipient_ref,
                     })
             elif "status" in recipient:
                 events.append({
-                    "recipient": {"id": recipient.get("custom_id")},
+                    "recipient": recipient_ref,
                     "resource_id": detail_lre.get("id"),
                     "event": recipient.get("status"),
                     "event_date": detail_lre.get("submission_date"),
@@ -605,51 +926,166 @@ class MailevaProvider(MissiveProviderBase):
         external_id = kwargs.get("external_id")
         detail_lre = self._detail_lre(external_id)
         recipients_lre = self._detail_recipients_lre(external_id)
-        return {
+        result = {
             **detail_lre,
             "events": self._serialize_events_lre(recipients_lre, detail_lre),
+            "recipients": [
+                self._serialize_recipient_ref({"id": recipient.get("custom_id")}, recipient)
+                for recipient in recipients_lre
+            ],
         }
+        if not result.get("subject") and detail_lre.get("name"):
+            result["subject"] = detail_lre["name"]
+        sender_name = (detail_lre.get("sender_address_line_2") or "").strip()
+        if sender_name and not result.get("sender_name"):
+            result["sender_name"] = sender_name
+        sender_address = _address_from_maileva_lines(
+            detail_lre, prefix="sender_", country_key="sender_country_code"
+        )
+        if sender_address:
+            result["sender_address"] = sender_address
+        return result
+
+    def tracking_number_lre(self, **kwargs: Any) -> list[dict[str, Any]]:
+        """Return carrier tracking numbers for each recipient of a sending.
+
+        Maileva prints the public tracking reference on the deposit-proof PDF
+        (domestic: number under ``Numéro de la LR``; international: UPU S10
+        under ``NUMERO DE RECOMMANDE``). The recipient API fields are only a
+        fallback when no proof is available yet.
+        """
+        self.is_acknowledgement_of_receipt(**kwargs)
+        recipients_lre = self._detail_recipients_lre(kwargs.get("external_id"))
+        results = []
+        for recipient in recipients_lre:
+            ref = self._serialize_recipient_ref({"id": recipient.get("custom_id")}, recipient)
+            proof_url = recipient.get("deposit_proof_url")
+            if proof_url:
+                try:
+                    pdf_bytes = self._download_proof_bytes(proof_url)
+                    tracking_number = extract_tracking_number_from_deposit_proof(pdf_bytes)
+                except Exception:
+                    tracking_number = None
+                if tracking_number:
+                    ref["tracking_number"] = tracking_number
+            results.append(ref)
+        return results
 
     #########################################################
     # LRE - Billings
     #########################################################
 
+    @staticmethod
+    def _as_billing_date(value: Any) -> str | None:
+        if value in (None, ""):
+            return None
+        if hasattr(value, "isoformat"):
+            return value.isoformat()[:10]
+        return str(value)[:10]
+
+    def _recipient_item_pages(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Paginate ``GET /billing/v1/recipient_items`` (start_index / count)."""
+        url = self.get_endpoint("invoice")
+        items: list[dict[str, Any]] = []
+        start_index = 1
+        count = 100
+        while True:
+            page_params = {
+                **params,
+                "start_index": start_index,
+                "count": count,
+            }
+            page_params = {
+                key: value
+                for key, value in page_params.items()
+                if value not in (None, "")
+            }
+            response = requests.get(
+                url, headers=self._get_headers(), timeout=30, params=page_params
+            )
+            self._raise_for_response(response, f"Maileva billing failed ({url})")
+            data = response.json()
+            inv = data.get("invoice")
+            page = (
+                (inv.get("items") if isinstance(inv, dict) else None)
+                or data.get("items")
+                or []
+            )
+            items.extend(page)
+            paging = data.get("paging") or {}
+            total = paging.get("total_results")
+            if not page or len(page) < count:
+                break
+            if total is not None and len(items) >= int(total):
+                break
+            start_index += count
+        return items
+
+    def _serialize_billing_item(
+        self, item: dict[str, Any], *, external_id: Any = None
+    ) -> dict[str, Any]:
+        user_reference = item.get("user_reference")
+        sending_id = item.get("sending_id") or external_id
+        recipient_id = item.get("recipient_id")
+        recipient_custom_id = item.get("recipient_custom_id")
+        recipient = None
+        if recipient_id or recipient_custom_id:
+            recipient = {}
+            if recipient_custom_id:
+                recipient["id"] = recipient_custom_id
+                recipient["substitute_id"] = recipient_custom_id
+            if recipient_id:
+                recipient["external_id"] = recipient_id
+                recipient.setdefault("id", recipient_id)
+        return {
+            "external_id": sending_id,
+            "substitute_id": user_reference,
+            "billing_amount": float(item.get("amount", 0)),
+            "estimate_amount": float(item.get("amount", 0)),
+            "currency": item.get("currency") or "EUR",
+            "invoice": item.get("label", ""),
+            "recipient": recipient,
+            "raw": item,
+        }
+
     def get_billings_lre(self, **kwargs: Any) -> list[dict[str, Any]]:
-        """Fetch invoice from Maileva billing API (user_reference = custom_id from sending)."""
+        """Fetch invoiced lines from ``/billing/v1/recipient_items``.
+
+        ``user_reference`` is the sending ``custom_id``: ``substitute_id`` when
+        set, otherwise the local missive pk. Empty until Maileva invoices.
+        """
         if self.is_mode_sandbox():
             return []
-        self.is_acknowledgement_of_receipt(**kwargs)
+        user_reference = _provider_custom_id(kwargs)
+        if not user_reference:
+            return []
+        items = self._recipient_item_pages({"user_reference": user_reference})
         external_id = kwargs.get("external_id")
-        detail = self._detail_lre(external_id)
-        user_reference = detail.get("custom_id") or external_id
-        url = self.get_endpoint("invoice") % user_reference
-        response = requests.get(url, headers=self._get_headers(), timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        inv = data.get("invoice")
-        items = (inv.get("items") if isinstance(inv, dict) else None) or data.get("items") or []
-        billings = []
-        for item in items:
-            amount = float(item.get("amount", 0))
-            billings.append({
-                "external_id": external_id,
-                "billing_amount": amount,
-                "estimate_amount": amount,
-                "currency": "EUR",
-                "invoice": item.get("label", ""),
-                "recipient": {"id": item.get("recipient_id")} if item.get("recipient_id") else None,
-                "raw": item,
-            })
-        if not billings:
-            billings.append({
-                "external_id": external_id,
-                "billing_amount": None,
-                "estimate_amount": None,
-                "currency": "EUR",
-                "invoice": str(data),
-                "raw": data,
-            })
-        return billings
+        return [
+            self._serialize_billing_item(item, external_id=external_id)
+            for item in items
+        ]
+
+    def retrieve_billings(self, start_date, end_date, **kwargs: Any) -> dict[str, Any]:
+        """Invoiced recipient lines for a date range via ``recipient_items``.
+
+        Maileva rejects ``start_date`` / ``end_date`` on this resource. The
+        documented window is ``start_invoice_date`` / ``end_invoice_date``.
+        Downstream ``retrieve_billings`` update-or-creates each row against the
+        matching missive (``sending_id`` → ``external_id``, ``user_reference``
+        → ``substitute_id``).
+        """
+        if self.is_mode_sandbox():
+            return {"billings": []}
+        items = self._recipient_item_pages(
+            {
+                "start_invoice_date": self._as_billing_date(start_date),
+                "end_invoice_date": self._as_billing_date(end_date),
+            }
+        )
+        return {
+            "billings": [self._serialize_billing_item(item) for item in items]
+        }
 
     #########################################################
     # LRE - Proofs
@@ -671,14 +1107,17 @@ class MailevaProvider(MissiveProviderBase):
                     })
         return documents
 
-    def download_proof_lre(self, **kwargs: Any) -> bool:
-        self.is_acknowledgement_of_receipt(**kwargs.get("data", {}))
-        filename = kwargs.get("filename")
-        url = kwargs.get("url")
-        url = self.get_endpoint('proofdownload') % url
-        response = requests.get(url, stream=True, headers=self._get_headers(), timeout=30)
+    def _download_proof_bytes(self, url: str) -> bytes:
+        download_url = self.get_endpoint("proofdownload") % url
+        response = requests.get(
+            download_url, stream=True, headers=self._get_headers(), timeout=30
+        )
         response.raise_for_status()
         return response.content
+
+    def download_proof_lre(self, **kwargs: Any) -> bool:
+        self.is_acknowledgement_of_receipt(**kwargs.get("data", {}))
+        return self._download_proof_bytes(kwargs.get("url"))
 
     #########################################################
     # LRE - Webhook handling
@@ -691,13 +1130,35 @@ class MailevaProvider(MissiveProviderBase):
         return payload
 
     def get_normalize_event(self, data: dict[str, Any]) -> str:
-        """Map Maileva event_type to normalized event."""
+        """Map Maileva event_type / retrieve status code to a normalized event."""
         return self.events_association.get(
             data.get("event_type") or data.get("event"), "unknown"
         )
 
+    def get_normalize_external_id(self, data: dict[str, Any]) -> str | None:
+        """Missive ``external_id`` is the sending id, never the recipient UUID.
+
+        Retrieve events set ``resource_id`` to the sending. Sending-level
+        webhooks do the same. Recipient-level webhooks put the recipient
+        UUID in ``resource_id``; prefer ``sending_id`` when present.
+        """
+        detail = data.get("event_detail") if isinstance(data.get("event_detail"), dict) else {}
+        sending_id = data.get("sending_id") or detail.get("sending_id")
+        if sending_id:
+            return str(sending_id)
+        resource_name = data.get("resource_name") or ""
+        resource_type = data.get("resource_type") or ""
+        is_recipient_level = (
+            resource_name == "recipients" or str(resource_type).endswith("/recipients")
+        )
+        if is_recipient_level:
+            return None
+        if data.get("resource_id"):
+            return str(data["resource_id"])
+        return None
+
     def get_normalize_recipient(self, data: dict[str, Any]) -> dict[str, Any] | None:
-        """Attach the recipient for recipient-scoped LRE webhooks.
+        """Attach the recipient for recipient-scoped LRE events.
 
         Maileva fires webhooks at two granularities:
         - ``sendings``: the whole sending, with ``resource_custom_id`` set to the
@@ -705,8 +1166,27 @@ class MailevaProvider(MissiveProviderBase):
           layer fans the lifecycle event out to every recipient.
         - ``recipients``: a single recipient, with ``resource_custom_id`` equal to
           the ``custom_id`` we sent when creating the recipient (the Django
-          ``MissiveRecipient`` id). We map it so the event is attached directly.
+          ``MissiveRecipient.substitute_id``). We map it so the event is attached
+          directly.
+
+        Retrieve serializes recipient statuses already keyed by that custom_id
+        (``recipient.id`` / ``substitute_id``). Keep it, otherwise providerkit
+        would overwrite the field with ``None`` and the event would stay
+        recipient-less.
         """
+        existing = data.get("recipient")
+        if isinstance(existing, dict) and (
+            existing.get("id") or existing.get("name") or existing.get("external_id")
+        ):
+            ref: dict[str, Any] = {}
+            if existing.get("id"):
+                ref["id"] = existing["id"]
+            substitute_id = existing.get("substitute_id") or existing.get("id")
+            if substitute_id:
+                ref["substitute_id"] = substitute_id
+            if existing.get("name"):
+                ref["name"] = existing["name"]
+            return ref
         resource_name = data.get("resource_name") or ""
         resource_type = data.get("resource_type") or ""
         is_recipient_level = (
@@ -715,5 +1195,5 @@ class MailevaProvider(MissiveProviderBase):
         if is_recipient_level:
             custom_id = data.get("resource_custom_id")
             if custom_id:
-                return {"id": custom_id}
+                return {"id": custom_id, "substitute_id": custom_id}
         return None

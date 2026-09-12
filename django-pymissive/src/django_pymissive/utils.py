@@ -5,11 +5,12 @@ import os
 from urllib.parse import urlparse
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import FieldError, ValidationError
 from django.urls import reverse
 from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
+from .models.choices import MissiveRecipientType
 from .models.recipient import MissiveRecipient
 
 logger = logging.getLogger(__name__)
@@ -112,14 +113,66 @@ def build_webhook_url(domain: str, provider_name: str, missive_type: str) -> str
     return f"{domain}{path}"
 
 
+def _recipient_lookup(qs, **kwargs):
+    """Return a single recipient or None. Never raise on bad pk types."""
+    try:
+        return qs.get(**kwargs)
+    except (
+        MissiveRecipient.DoesNotExist,
+        MissiveRecipient.MultipleObjectsReturned,
+        ValueError,
+        TypeError,
+        ValidationError,
+        FieldError,
+    ):
+        return None
+
+
 def get_recipient(missive, recipient_data):
-    """Resolve recipient from missive and recipient_data dict."""
+    """Resolve recipient from missive and recipient_data dict.
+
+    Do not pass the whole dict to ``.get(**data)``: Maileva retrieve events
+    carry ``custom_id`` (often a UUID from another system) as ``id``, while
+    the local pk may be an integer. Combining keys, or querying an integer
+    pk with a UUID, raises ``ValueError`` and used to abort event handling.
+    Match ``substitute_id`` first so imported history still resolves.
+    """
     if not isinstance(recipient_data, dict):
         return None
-    try:
-        return MissiveRecipient.objects.get(missive=missive, **recipient_data)
-    except MissiveRecipient.DoesNotExist:
-        return None
+    qs = MissiveRecipient.objects.filter(missive=missive)
+    internal_id = recipient_data.get("id") or recipient_data.get("internal_id")
+    substitute_id = recipient_data.get("substitute_id") or internal_id
+    if substitute_id not in (None, ""):
+        found = _recipient_lookup(qs, substitute_id=str(substitute_id))
+        if found:
+            return found
+    if internal_id not in (None, ""):
+        found = _recipient_lookup(qs, pk=internal_id)
+        if found:
+            return found
+    name = (recipient_data.get("name") or "").strip()
+    if name:
+        found = _recipient_lookup(qs, name=name)
+        if found:
+            return found
+    external_id = recipient_data.get("external_id")
+    if external_id not in (None, ""):
+        found = _recipient_lookup(qs, external_id=external_id)
+        if found:
+            return found
+    email = recipient_data.get("email")
+    if email:
+        found = _recipient_lookup(qs, email=email)
+        if found:
+            return found
+    phone = recipient_data.get("phone")
+    if phone:
+        found = _recipient_lookup(qs, phone=phone)
+        if found:
+            return found
+    if internal_id or external_id or name:
+        return _recipient_lookup(qs, recipient_type=MissiveRecipientType.RECIPIENT)
+    return None
 
 
 def _normalize_extension(ext: str) -> str:

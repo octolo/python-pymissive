@@ -91,12 +91,33 @@ class PdfDocument(models.Model):
         }
 
 
+class Category(models.Model):
+    """Test contact category (``contact.category.name`` in billing CSV export)."""
+
+    name = models.CharField(max_length=120, unique=True)
+
+    class Meta:
+        app_label = "fakeapp"
+        verbose_name = "Category (test fixture)"
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class Contact(models.Model):
     """Test contact (``./manage.py seed_fake_contacts``)."""
 
     last_name = models.CharField(max_length=120)
     first_name = models.CharField(max_length=120)
     email = models.EmailField(unique=True)
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="contacts",
+    )
 
     class Meta:
         app_label = "fakeapp"

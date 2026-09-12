@@ -20,6 +20,11 @@ FIELDS = {
         "description": "Internal ID",
         "format": "str",
     },
+    "substitute_id": {
+        "label": "Substitute ID",
+        "description": "Provider custom_id from another internal reference. When empty, the local id is used.",
+        "format": "str",
+    },
     "recipients": {
         "label": "Recipients",
         "description": "Recipients",

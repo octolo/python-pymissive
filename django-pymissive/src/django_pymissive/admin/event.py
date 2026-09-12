@@ -3,8 +3,10 @@
 from django.contrib import admin
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.utils.formats import date_format
+from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
-from django_boosted import AdminBoostModel, admin_boost_view
+from django_boosted import AdminBoostFormat, AdminBoostModel, admin_boost_view
 from urllib.parse import unquote
 
 from django.contrib import messages
@@ -30,29 +32,53 @@ class UntreatedListFilter(admin.SimpleListFilter):
         return queryset
 
 
-class MissiveEventInline(admin.TabularInline):
+class MissiveEventInline(admin.TabularInline, AdminBoostFormat):
     """Inline for missive events (read-only)."""
 
     model = MissiveEvent
     extra = 0
     readonly_fields = [
-        "missive",
-        "recipient",
-        "event",
-        "reason",
-        "occurred_at",
-        "client_initiated",
+        "event_display",
+        "recipient_display",
     ]
     fields = [
-        "missive",
-        "recipient",
-        "event",
-        "reason",
-        "occurred_at",
-        "client_initiated",
+        "event_display",
+        "recipient_display",
     ]
-    show_change_link = True
+    show_change_link = False
     can_delete = False
+
+    def event_display(self, obj):
+        if not obj or not obj.pk:
+            return "-"
+        url = reverse("admin:django_pymissive_missiveevent_change", args=[obj.pk])
+        label = obj.get_event_display() or obj.event or "-"
+        event_html = format_html('<a href="{}">{}</a>', url, label)
+        reason = (obj.reason or obj.get_reason() or "").strip()
+        return self.format_with_help_text(event_html, reason or None)
+
+    event_display.short_description = _("Event")
+
+    def recipient_display(self, obj):
+        if not obj:
+            return "-"
+        recipient = obj.recipient
+        if recipient and recipient.pk:
+            url = reverse(
+                "admin:django_pymissive_missiverecipient_change",
+                args=[recipient.pk],
+            )
+            name = format_html(
+                '<a href="{}">{}</a>',
+                url,
+                recipient.name or str(recipient),
+            )
+        else:
+            name = "—"
+        when = date_format(obj.occurred_at, "DATETIME_FORMAT") if obj.occurred_at else None
+        return self.format_with_help_text(name, when)
+
+    recipient_display.short_description = _("Recipient")
 
     def has_add_permission(self, request, obj=None):
         return False

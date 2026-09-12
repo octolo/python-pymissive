@@ -2,10 +2,13 @@
 
 Retrieve billing/usage data from provider.
 
+`retrieve` with `--start-date` and `--end-date` calls **`retrieve_billings_*`** (bulk listing via ``retrieve_billings(start_date, end_date)``). With `--external-id` it calls **`get_billings_*`** for a single missive.
+
 ## Synopsis
 
 ```
-pymissive billing retrieve --provider <name> [--external-id ID]
+pymissive billing retrieve --provider <name> --start-date <iso> --end-date <iso> [--type lre]
+pymissive billing retrieve --provider <name> [--type lre] [--external-id ID]
 ```
 
 ## Required options
@@ -18,14 +21,19 @@ pymissive billing retrieve --provider <name> [--external-id ID]
 
 | Option | Description |
 |--------|-------------|
-| `--type` | Missive type (default: postal) |
-| `--external-id` | External ID for provider-specific billing |
+| `--type` | Missive type (default: lre) |
+| `--external-id` | External ID for per-missive billing |
+| `--start-date` | Start date for bulk billing retrieval |
+| `--end-date` | End date for bulk billing retrieval |
 | `--dir` | Provider config directory |
 | `--json` | Path to provider config JSON |
 
 ## Examples
 
 ```bash
-pymissive billing retrieve --provider maileva
+# Bulk retrieve (provider retrieve_billings_* ; start_date and end_date required)
+pymissive billing retrieve --provider maileva --type lre \
+  --start-date 2026-08-01 --end-date 2026-08-31
+
 pymissive billing retrieve --provider maileva --external-id MY_ID
 ```

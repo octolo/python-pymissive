@@ -99,7 +99,7 @@ class BaseMissiveManager(models.Manager):
         :meth:`with_related` when you genuinely need them prefetched.
         """
         qs = super().get_queryset()
-        qs = qs.select_related("campaign")
+        qs = qs.select_related("campaign", "scheduler")
         qs = qs.prefetch_related(self.first_recipients_prefetch())
         qs = qs.annotate(
             last_campaign_send_date=self.last_scheduled_subquery("send_date"),

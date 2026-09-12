@@ -2,6 +2,7 @@ SERVICES = {
     "add_recipient": "Add Recipient",
     "update_recipient": "Update Recipient",
     "delete_recipient": "Delete Recipient",
+    "tracking_number": "Retrieve carrier tracking numbers",
 }
 
 SENDER_FIELDS = {
@@ -86,9 +87,19 @@ RECIPIENT_FIELDS = {
         "description": "External ID",
         "format": "str",
     },
+    "tracking_number": {
+        "label": "Tracking number",
+        "description": "Carrier tracking reference for public tracking sites (e.g. La Poste)",
+        "format": "str",
+    },
     "internal_id": {
         "label": "Internal ID",
         "description": "Internal ID",
+        "format": "str",
+    },
+    "substitute_id": {
+        "label": "Substitute ID",
+        "description": "Provider custom_id from another internal reference. When empty, the local id is used.",
         "format": "str",
     },
     "sent_at": {
