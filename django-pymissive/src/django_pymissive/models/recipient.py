@@ -33,8 +33,6 @@ class MissiveRecipient(CommentTimestampedModel):
     recipient_support = models.CharField(
         max_length=255,
         choices=MissiveSupport.choices,
-        blank=True,
-        null=True,
         verbose_name=_("Recipient Model"),
         help_text=_("Model of recipient"),
     )
@@ -93,6 +91,28 @@ class MissiveRecipient(CommentTimestampedModel):
         verbose_name=_("External ID"),
         help_text=_("External identifier from the provider"),
     )
+    substitute_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Substitute ID"),
+        help_text=_(
+            "Provider custom_id from another internal reference. "
+            "When empty, the recipient pk is used."
+        ),
+    )
+
+    tracking_number = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name=_("Tracking number"),
+        help_text=_(
+            "Carrier tracking reference for public tracking sites "
+            "(e.g. La Poste). Distinct from provider external_id."
+        ),
+    )
 
     sent_at = models.DateTimeField(
         null=True,
@@ -120,6 +140,21 @@ class MissiveRecipient(CommentTimestampedModel):
     def target(self):
         return self.email or self.phone or self.address
 
+    def _address_country_code(self) -> str | None:
+        address = self.address
+        if not address or not hasattr(address, "get"):
+            return None
+        code = address.get("country_code")
+        if not code:
+            return None
+        return str(code).strip().upper() or None
+
+    @property
+    def tracking_url(self) -> str | None:
+        from pymissive.postal_tracking import get_tracking_url
+
+        return get_tracking_url(self._address_country_code(), self.tracking_number)
+
     def get_serialized_data(self):
         return {
             "id": str(self.id),
@@ -129,11 +164,32 @@ class MissiveRecipient(CommentTimestampedModel):
             "address": self.address,
             "notification_id": self.notification_id,
             "external_id": self.external_id,
+            "substitute_id": self.substitute_id,
+            "tracking_number": self.tracking_number,
         }
 
     @property
     def can_be_modified(self):
         return self.missive.can_be_modified
+
+    def _infer_recipient_support(self) -> str:
+        if self.address:
+            return MissiveSupport.ADDRESS
+        if self.email:
+            return MissiveSupport.EMAIL
+        if self.phone:
+            return MissiveSupport.PHONE
+        if self.notification_id:
+            return MissiveSupport.APPLICATION
+        missive = getattr(self, "missive", None)
+        if missive is None:
+            return ""
+        return missive.missive_support or ""
+
+    def save(self, *args, **kwargs):
+        if not self.recipient_support:
+            self.recipient_support = self._infer_recipient_support()
+        super().save(*args, **kwargs)
 
     def set_status(self):
         from ..models.event import MissiveEvent

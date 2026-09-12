@@ -270,8 +270,37 @@ def _missive_command(args: list[str]) -> bool:
                 return False
             provider.call_service(service, start_date=start_date, end_date=end_date)
             data = provider.get_service_normalize(service)
+        elif retrieve_resource in ("billings", "billing"):
+            if not missive_type:
+                print("Error: --type required for retrieve billings (e.g. lre, email)", file=sys.stderr)
+                return False
+            start_date = parsed.get("start_date") or ""
+            end_date = parsed.get("end_date") or ""
+            if not start_date or not end_date:
+                print("Error: --start-date and --end-date required for retrieve billings", file=sys.stderr)
+                return False
+            service = f"retrieve_billings_{missive_type}"
+            if not hasattr(provider, service):
+                print(f"Error: Provider does not support {service}", file=sys.stderr)
+                return False
+            provider.call_service(service, start_date=start_date, end_date=end_date)
+            data = provider.get_service_normalize(service)
+        elif retrieve_resource == "tracking_number":
+            if not missive_type:
+                print("Error: --type required for retrieve tracking_number (e.g. lre)", file=sys.stderr)
+                return False
+            external_id = parsed.get("external_id", "")
+            if not external_id:
+                print("Error: --external-id required for retrieve tracking_number", file=sys.stderr)
+                return False
+            service = f"tracking_number_{missive_type}"
+            if not hasattr(provider, service):
+                print(f"Error: Provider does not support {service}", file=sys.stderr)
+                return False
+            provider.call_service(service, external_id=external_id)
+            data = provider.get_service_normalize(service)
         else:
-            print("Error: Use webhooks, email, lre, sms, events (e.g. missive retrieve webhooks --provider X)", file=sys.stderr)
+            print("Error: Use webhooks, email, lre, sms, events, billings, tracking_number (e.g. missive retrieve webhooks --provider X)", file=sys.stderr)
             return False
         print_separator()
         print_header(f"{provider_name} - {retrieve_resource}")

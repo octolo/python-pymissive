@@ -27,10 +27,8 @@ msgstr "Commentaire/Horodatages"
 msgid "Configs"
 msgstr "Configurations"
 
-#, fuzzy
-#| msgid "Mark as paid"
 msgid "Mark as billed"
-msgstr "Marquer comme payé"
+msgstr "Marquer comme facturé"
 
 #, python-brace-format
 msgid "{updated} record(s) marked as billed."
@@ -201,6 +199,29 @@ msgstr "Expéditeur"
 msgid "External ID"
 msgstr "ID externe"
 
+msgid "Substitute ID"
+msgstr "ID de substitution"
+
+msgid ""
+"Provider custom_id from another internal reference. "
+"When empty, the missive UUID pk is used."
+msgstr ""
+"custom_id du fournisseur issu d'une autre référence interne. "
+"S'il est vide, l'UUID (pk) de la missive est utilisé."
+
+msgid ""
+"Provider custom_id from another internal reference. "
+"When empty, the recipient pk is used."
+msgstr ""
+"custom_id du fournisseur issu d'une autre référence interne. "
+"S'il est vide, l'identifiant (pk) du destinataire est utilisé."
+
+msgid ""
+"Internal missive UUID, or substitute/custom ID from another system"
+msgstr ""
+"UUID interne de la missive, ou identifiant de substitution/custom_id "
+"d'un autre système"
+
 msgid "Provider"
 msgstr "Fournisseur"
 
@@ -285,6 +306,21 @@ msgstr "Supprimer cet envoi chez le fournisseur ? Cette action est irréversible
 msgid "Sending deleted on provider."
 msgstr "Envoi supprimé chez le fournisseur."
 
+msgid "Retrieve from provider"
+msgstr "Récupérer depuis le fournisseur"
+
+msgid "Retrieve this missive from the provider and replace local data (subject, body, sender, recipients, events)? The missive external ID is kept."
+msgstr "Récupérer cette missive chez le fournisseur et remplacer les données locales (objet, corps, expéditeur, destinataires, événements) ? L'identifiant externe de la missive est conservé."
+
+msgid "Missive updated from provider."
+msgstr "Missive mise à jour depuis le fournisseur."
+
+msgid "Missive retrieved from provider."
+msgstr "Missive récupérée depuis le fournisseur."
+
+msgid "Missive already exists."
+msgstr "La missive existe déjà."
+
 msgid "Status"
 msgstr "Statut"
 
@@ -338,6 +374,78 @@ msgstr "Facturation"
 #| msgid "Missive prepared successfully."
 msgid "Billings retrieved successfully."
 msgstr "Missive préparée avec succès."
+
+msgid "Retrieve billings"
+msgstr "Récupérer les facturations"
+
+msgid "Export CSV"
+msgstr "Exporter CSV"
+
+msgid "Export"
+msgstr "Exporter"
+
+msgid "Billings retrieved from provider."
+msgstr "Facturations récupérées depuis le fournisseur."
+
+msgid "Billing retrieval started."
+msgstr "Récupération des facturations lancée."
+
+msgid "This provider does not support billings for this missive type."
+msgstr "Ce fournisseur ne gère pas la facturation pour ce type de missive."
+
+msgid "Retrieve events"
+msgstr "Récupérer les événements"
+
+msgid "Events retrieved from provider."
+msgstr "Événements récupérés depuis le fournisseur."
+
+msgid "Event retrieval started."
+msgstr "Récupération des événements lancée."
+
+msgid "This provider does not support events for this missive type."
+msgstr "Ce fournisseur ne gère pas les événements pour ce type de missive."
+
+msgid "Start date"
+msgstr "Date de début"
+
+msgid "End date"
+msgstr "Date de fin"
+
+msgid "Run as task"
+msgstr "Exécuter en tâche"
+
+msgid "Launch via the configured task backend"
+msgstr "Lancer via le backend de tâches configuré"
+
+msgid "End date must be on or after start date."
+msgstr "La date de fin doit être postérieure ou égale à la date de début."
+
+msgid "Fields"
+msgstr "Champs"
+
+msgid "Dotted paths on missive related objects, e.g. [\"contact.last_name\", \"contact.category.name\"]. Multiple related objects become columns path.1, path.2, …."
+msgstr "Chemins pointés sur les objets liés de la missive, par ex. [\"contact.last_name\", \"contact.category.name\"]. Plusieurs objets liés deviennent des colonnes chemin.1, chemin.2, …."
+
+msgid "Fields must be a JSON list of dotted paths (e.g. contact.last_name)."
+msgstr "Les champs doivent être une liste JSON de chemins pointés (par ex. contact.last_name)."
+
+msgid "Invalid related-object path: %(path)s"
+msgstr "Chemin d'objet lié invalide : %(path)s"
+
+msgid "One row per missive"
+msgstr "Une ligne par missive"
+
+msgid "Turn billing labels into columns; the cell value is the billed amount."
+msgstr "Transformer les intitulés de facturation en colonnes ; la valeur est le montant facturé."
+
+msgid "Untitled"
+msgstr "Sans intitulé"
+
+msgid "Admin"
+msgstr "Admin"
+
+msgid "Retrieve"
+msgstr "Récupérer"
 
 msgid "Target"
 msgstr "Cible"
@@ -1007,6 +1115,19 @@ msgstr "Adresse"
 
 msgid "Notification ID"
 msgstr "ID de notification"
+
+msgid "Tracking number"
+msgstr "Numéro de suivi"
+
+msgid "Tracking numbers updated successfully."
+msgstr "Numéros de suivi mis à jour."
+
+msgid ""
+"Carrier tracking reference for public tracking sites "
+"(e.g. La Poste). Distinct from provider external_id."
+msgstr ""
+"Référence transporteur pour les sites de suivi publics "
+"(ex. La Poste). Distinct de l'identifiant externe du fournisseur."
 
 msgid "Sent At"
 msgstr "Envoyé le"

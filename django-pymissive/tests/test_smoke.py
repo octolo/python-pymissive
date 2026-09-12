@@ -50,3 +50,29 @@ def test_minimal_email_missive_flow():
     assert event.reason
     assert refreshed.last_event == MissiveEventType.SENT
     assert refreshed.count_recipient == 1
+
+
+@pytest.mark.django_db
+def test_recipient_save_infers_support_from_email_and_missive_type():
+    from django_pymissive.models import Missive, MissiveRecipient, MissiveType
+    from django_pymissive.models.choices import MissiveStatus
+
+    email_missive = Missive.objects.create(
+        missive_type=MissiveType.EMAIL,
+        subject="Hello",
+        body_text="Body",
+        sender_email="hello@example.com",
+        status=MissiveStatus.DRAFT,
+    )
+    by_email = MissiveRecipient.objects.create(
+        missive=email_missive, name="Alice", email="alice@example.com"
+    )
+    assert by_email.recipient_support == "email"
+
+    lre_missive = Missive.objects.create(
+        missive_type=MissiveType.LRE,
+        status=MissiveStatus.DRAFT,
+    )
+    by_missive = MissiveRecipient.objects.create(missive=lre_missive, name="Jean")
+    assert lre_missive.missive_support == "address"
+    assert by_missive.recipient_support == "address"

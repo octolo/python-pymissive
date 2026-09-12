@@ -20,6 +20,7 @@ from ..managers.scheduler import (
     MissiveScheduledCampaignManager,
     error_annotation_name,
     sent_annotation_name,
+    status_annotation_name,
     total_annotation_name,
 )
 from ..models.choices import MissiveStatus, MissiveThreadType, MissiveType
@@ -202,6 +203,8 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
     def _count_fields(cls):
         """All annotation names produced by ``with_counts`` (overall + per type)."""
         fields = ["count_total", "count_sent", "count_error"]
+        for status in MissiveStatus:
+            fields.append(status_annotation_name(status))
         for missive_type in MISSIVE_TYPES:
             fields.append(total_annotation_name(missive_type))
             fields.append(sent_annotation_name(missive_type))
@@ -257,6 +260,29 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             }
         return result
 
+    def _status_counts_by_type(self):
+        """``{missive_type: {status: count}}`` from a single grouped query."""
+        from django.db.models import Count
+
+        rows = self.to_missive.values("missive_type", "status").annotate(n=Count("id"))
+        result = {}
+        for row in rows:
+            result.setdefault(row["missive_type"], {})[row["status"]] = row["n"]
+        return result
+
+    def counts_by_status(self, *, only_active=False):
+        """Overall status breakdown: ``{status: count}``.
+
+        With ``only_active=True`` statuses with ``count == 0`` are omitted.
+        """
+        result = {}
+        for status in MissiveStatus:
+            count = self._count(status_annotation_name(status))
+            if only_active and not count:
+                continue
+            result[status] = count
+        return result
+
     @property
     def total_count(self):
         """Total missives attached to this run (any status)."""
@@ -292,10 +318,18 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
     def progress_payload(self):
         """JSON-serializable progress snapshot for the scheduler front page."""
         by_type = {}
+        status_by_type = self._status_counts_by_type()
         for missive_type, counts in self.counts_by_type(only_active=True).items():
             by_type[missive_type] = {
                 "label": MISSIVE_TYPES.get(missive_type, missive_type),
                 **counts,
+                "by_status": status_by_type.get(missive_type, {}),
+            }
+        by_status = {}
+        for status, count in self.counts_by_status(only_active=True).items():
+            by_status[status] = {
+                "label": str(MissiveStatus(status).label),
+                "count": count,
             }
         return {
             "id": str(self.pk),
@@ -314,6 +348,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             "total_error_count": self.total_error_count,
             "progress": self.progress,
             "by_type": by_type,
+            "by_status": by_status,
         }
 
     # ------------------------------------------------------------------

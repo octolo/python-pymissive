@@ -1,8 +1,19 @@
 SERVICES = {
     "get_billings": "Get Billings",
+    "retrieve_billings": "Retrieve billings in bulk",
 }
 
 FIELDS = {
+    "start_date": {
+        "label": "Start date",
+        "description": "Start date for bulk billing retrieval",
+        "format": "datetime",
+    },
+    "end_date": {
+        "label": "End date",
+        "description": "End date for bulk billing retrieval",
+        "format": "datetime",
+    },
     "billing_amount": {
         "label": "Billing Amount",
         "description": "Billing Amount",
@@ -37,5 +48,10 @@ FIELDS = {
         "label": "Recipient",
         "description": "Recipient",
         "format": "dict",
+    },
+    "substitute_id": {
+        "label": "Substitute ID",
+        "description": "Provider custom_id / user_reference used to match a missive",
+        "format": "str",
     },
 }

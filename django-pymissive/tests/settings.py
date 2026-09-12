@@ -226,7 +226,12 @@ PROVIDERKIT_PROVIDERS_CONFIG = {
         "PASSWORD": os.getenv("MAILEVA_PASSWORD"),
         "CLIENTID": os.getenv("MAILEVA_CLIENTID"),
         "SECRET": os.getenv("MAILEVA_SECRET"),
-        "SANDBOX": os.getenv("MAILEVA_SANDBOX", True),
+        # os.getenv default True is a test safety net. Env strings like "0"/"False"
+        # must be parsed: a non-empty string is otherwise always truthy.
+        "SANDBOX": (
+            os.getenv("MAILEVA_SANDBOX", "true").strip().lower()
+            in ("1", "true", "yes", "on")
+        ),
     },
     "partner": {
         "SMS_API_KEY": os.getenv("PARTNER_SMS_API_KEY"),

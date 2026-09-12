@@ -1,0 +1,222 @@
+{
+    "AD": {
+      "name": "Correos / Andorra Post",
+      "carrier": "Correos",
+      "tracking_url": "https://www.correos.es/es/es/herramientas/localizador/envios/detalle?tracking-number={tracking}"
+    },
+    "AE": {
+      "name": "Emirates Post",
+      "carrier": "Emirates Post",
+      "tracking_url": "https://www.emiratespost.ae/track-your-shipment?trackingNumber={tracking}"
+    },
+    "AT": {
+      "name": "Austrian Post",
+      "carrier": "Österreichische Post",
+      "tracking_url": "https://www.post.at/s/sendungsdetails?snr={tracking}"
+    },
+    "AU": {
+      "name": "Australia Post",
+      "carrier": "Australia Post",
+      "tracking_url": "https://auspost.com.au/mypost/track/#/details/{tracking}"
+    },
+    "BE": {
+      "name": "bpost",
+      "carrier": "bpost",
+      "tracking_url": "https://track.bpost.cloud/btr/web/#/search?itemCode={tracking}"
+    },
+    "BG": {
+      "name": "Bulgarian Posts",
+      "carrier": "Bulgarian Posts",
+      "tracking_url": "https://www.bgpost.bg/en/500"
+    },
+    "BR": {
+      "name": "Correios",
+      "carrier": "Correios",
+      "tracking_url": "https://rastreamento.correios.com.br/app/index.php?objeto={tracking}"
+    },
+    "CA": {
+      "name": "Canada Post",
+      "carrier": "Canada Post",
+      "tracking_url": "https://www.canadapost-postescanada.ca/track-reperage/en#/details/{tracking}"
+    },
+    "CH": {
+      "name": "Swiss Post",
+      "carrier": "Swiss Post",
+      "tracking_url": "https://www.post.ch/en/sending-parcels/track-consignments?formattedParcelCode={tracking}"
+    },
+    "CN": {
+      "name": "China Post",
+      "carrier": "China Post",
+      "tracking_url": "https://www.ems.com.cn/queryList?mailNum={tracking}"
+    },
+    "CZ": {
+      "name": "Česká pošta",
+      "carrier": "Česká pošta",
+      "tracking_url": "https://www.postaonline.cz/trackandtrace/-/zasilka/{tracking}"
+    },
+    "DE": {
+      "name": "Deutsche Post / DHL",
+      "carrier": "Deutsche Post",
+      "tracking_url": "https://www.deutschepost.de/de/s/sendungen.html?piececode={tracking}"
+    },
+    "DK": {
+      "name": "PostNord Denmark",
+      "carrier": "PostNord",
+      "tracking_url": "https://www.postnord.dk/en/track-and-trace?shipmentId={tracking}"
+    },
+    "EE": {
+      "name": "Omniva",
+      "carrier": "Omniva",
+      "tracking_url": "https://www.omniva.ee/track/{tracking}"
+    },
+    "ES": {
+      "name": "Correos",
+      "carrier": "Correos",
+      "tracking_url": "https://www.correos.es/es/es/herramientas/localizador/envios/detalle?tracking-number={tracking}"
+    },
+    "FI": {
+      "name": "Posti",
+      "carrier": "Posti",
+      "tracking_url": "https://www.posti.fi/en/track-and-trace?search={tracking}"
+    },
+    "FR": {
+      "name": "La Poste",
+      "carrier": "La Poste",
+      "tracking_url": "https://www.laposte.fr/outils/suivre-vos-envois?code={tracking}"
+    },
+    "GB": {
+      "name": "Royal Mail",
+      "carrier": "Royal Mail",
+      "tracking_url": "https://www.royalmail.com/track-your-item#/tracking-results/{tracking}"
+    },
+    "GR": {
+      "name": "ELTA",
+      "carrier": "Hellenic Post",
+      "tracking_url": "https://itemsearch.elta.gr/en-GB/Query/Direct/{tracking}"
+    },
+    "HR": {
+      "name": "Hrvatska pošta",
+      "carrier": "Hrvatska pošta",
+      "tracking_url": "https://posiljka.posta.hr/en/track/{tracking}"
+    },
+    "HU": {
+      "name": "Magyar Posta",
+      "carrier": "Magyar Posta",
+      "tracking_url": "https://www.posta.hu/nyomkovetes/nyitooldal?searchvalue={tracking}"
+    },
+    "IE": {
+      "name": "An Post",
+      "carrier": "An Post",
+      "tracking_url": "https://www.anpost.com/Post-Parcels/Track/Search?item={tracking}"
+    },
+    "IS": {
+      "name": "Iceland Post",
+      "carrier": "Íslandspóstur",
+      "tracking_url": "https://postur.is/en/track-and-trace/?q={tracking}"
+    },
+    "IT": {
+      "name": "Poste Italiane",
+      "carrier": "Poste Italiane",
+      "tracking_url": "https://www.poste.it/cerca/index.html#/risultati-spedizioni/{tracking}"
+    },
+    "JP": {
+      "name": "Japan Post",
+      "carrier": "Japan Post",
+      "tracking_url": "https://trackings.post.japanpost.jp/services/sp/srv/search/direct?locale=en&reqCodeNo1={tracking}"
+    },
+    "KR": {
+      "name": "Korea Post",
+      "carrier": "Korea Post",
+      "tracking_url": "https://service.epost.go.kr/trace.RetrieveEmsTraceListList.comm?sid1={tracking}"
+    },
+    "LT": {
+      "name": "Lietuvos paštas",
+      "carrier": "Lithuania Post",
+      "tracking_url": "https://www.post.lt/en/help/parcel-search?item={tracking}"
+    },
+    "LU": {
+      "name": "POST Luxembourg",
+      "carrier": "POST Luxembourg",
+      "tracking_url": "https://www.post.lu/en/particuliers/colis-courrier/suivre-un-envoi?code={tracking}"
+    },
+    "LV": {
+      "name": "Latvijas Pasts",
+      "carrier": "Latvia Post",
+      "tracking_url": "https://manspasts.lv/en/track?code={tracking}"
+    },
+    "MT": {
+      "name": "MaltaPost",
+      "carrier": "MaltaPost",
+      "tracking_url": "https://www.maltapost.com/track-a-mail?item={tracking}"
+    },
+    "MX": {
+      "name": "Correos de México",
+      "carrier": "Correos de México",
+      "tracking_url": "https://www.correosdemexico.gob.mx/SSLServicios/SeguimientoEnvio/Seguimiento.aspx?tracking={tracking}"
+    },
+    "NL": {
+      "name": "PostNL",
+      "carrier": "PostNL",
+      "tracking_url": "https://jouw.postnl.nl/track-and-trace/{tracking}-NL"
+    },
+    "NO": {
+      "name": "Posten Norge",
+      "carrier": "Posten",
+      "tracking_url": "https://sporing.posten.no/sporing/{tracking}"
+    },
+    "NZ": {
+      "name": "NZ Post",
+      "carrier": "NZ Post",
+      "tracking_url": "https://www.nzpost.co.nz/tools/tracking?trackid={tracking}"
+    },
+    "PL": {
+      "name": "Poczta Polska",
+      "carrier": "Poczta Polska",
+      "tracking_url": "https://emonitoring.poczta-polska.pl/?lang=en&numer={tracking}"
+    },
+    "PT": {
+      "name": "CTT",
+      "carrier": "CTT",
+      "tracking_url": "https://www.ctt.pt/feapl_2/app/open/objectSearch/objectSearch.jspx?objects={tracking}"
+    },
+    "RO": {
+      "name": "Poșta Română",
+      "carrier": "Poșta Română",
+      "tracking_url": "https://www.posta-romana.ro/track-trace.html?awb={tracking}"
+    },
+    "SE": {
+      "name": "PostNord Sweden",
+      "carrier": "PostNord",
+      "tracking_url": "https://www.postnord.se/en/tools/track/track-your-parcel/?id={tracking}"
+    },
+    "SI": {
+      "name": "Pošta Slovenije",
+      "carrier": "Pošta Slovenije",
+      "tracking_url": "https://en.posta.si/track-and-trace?barcode={tracking}"
+    },
+    "SK": {
+      "name": "Slovenská pošta",
+      "carrier": "Slovenská pošta",
+      "tracking_url": "https://tandt.posta.sk/en/track/{tracking}"
+    },
+    "TR": {
+      "name": "PTT",
+      "carrier": "PTT",
+      "tracking_url": "https://gonderitakip.ptt.gov.tr/Track/Verify?q={tracking}"
+    },
+    "UA": {
+      "name": "Ukrposhta",
+      "carrier": "Ukrposhta",
+      "tracking_url": "https://track.ukrposhta.ua/tracking_EN.html?barcode={tracking}"
+    },
+    "US": {
+      "name": "USPS",
+      "carrier": "USPS",
+      "tracking_url": "https://tools.usps.com/go/TrackConfirmAction?tRef=fullpage&tLc=2&text={tracking}"
+    },
+    "ZA": {
+      "name": "South African Post Office",
+      "carrier": "SAPO",
+      "tracking_url": "https://www.postoffice.co.za/tracktrace/tracktrace.html?trackingNumber={tracking}"
+    }
+}

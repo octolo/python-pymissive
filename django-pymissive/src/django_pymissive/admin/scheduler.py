@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django.contrib import messages
 from django.shortcuts import redirect
@@ -11,6 +12,7 @@ from django_boosted import AdminBoostModel
 from django_boosted.decorators import admin_boost_view, admin_boost_action
 from pymissive.config import MISSIVE_TYPES
 
+from ..models.choices import MissiveStatus, get_missive_style
 from ..models.scheduler import MissiveScheduledCampaign
 
 
@@ -70,6 +72,7 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
         "ended_at",
         "progress_display",
         "by_type_display",
+        "by_status_display",
         "task_object_display",
         "comment",
     ]
@@ -80,6 +83,7 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
         "ended_at",
         "progress_display",
         "by_type_display",
+        "by_status_display",
         "created_at",
         "updated_at",
     ]
@@ -116,7 +120,7 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
     def change_fieldsets(self):
         self.add_to_fieldset(
             _("Progress"),
-            ["progress_display", "by_type_display"],
+            ["progress_display", "by_type_display", "by_status_display"],
         )
         self.add_to_fieldset(
             _("External task object"),
@@ -267,6 +271,19 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
                 f"({counts['progress']}%) / {counts['error']} err"
             )
         return " | ".join(parts) or "-"
+
+    @admin.display(description=_("By status"))
+    def by_status_display(self, obj):
+        labels = []
+        for status, count in obj.counts_by_status(only_active=True).items():
+            labels.append(
+                self.format_label(
+                    f"{count} {MissiveStatus(status).label}",
+                    size="small",
+                    label_type=get_missive_style(status),
+                )
+            )
+        return mark_safe(" ".join(str(label) for label in labels)) if labels else "-"
 
     def task_object_display(self, obj):
         if obj.task_content_type_id and obj.task_object_id:

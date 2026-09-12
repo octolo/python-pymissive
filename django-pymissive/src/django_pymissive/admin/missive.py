@@ -20,8 +20,9 @@ from phonenumber_field.modelfields import PhoneNumberField
 from phonenumber_field.formfields import PhoneNumberField as PhoneNumberFormField
 from phonenumber_field.formfields import SplitPhoneNumberField
 from urllib.parse import urlencode
+from django_geoaddress.fields import GeoaddressField
 from ..forms.missive import RetrieveMissiveForm
-from ..retrieve import get_or_retrieve_from_provider
+from ..retrieve import retrieve_from_provider as do_retrieve_from_provider
 from ..models.missive import Missive
 from ..models.recipient import MissiveRecipient
 from .recipient import (
@@ -29,6 +30,8 @@ from .recipient import (
     MissiveRecipientPhoneInline,
     MissiveRecipientAddressInline,
     MissiveRecipientApplicationInline,
+    lock_geoaddress_formfield,
+    missive_admin_locked,
 )
 from .attachment import (
     MissiveAttachmentBaseInline,
@@ -127,6 +130,7 @@ class MissiveAdmin(AdminBoostModel):
         "sender_display",
         "provider_display",
         "campaign_display",
+        "scheduler_display",
         "status_display",
         "event_display",
         "thread_display",
@@ -149,6 +153,9 @@ class MissiveAdmin(AdminBoostModel):
         "to_missiverecipient__phone",
         "to_missiverecipient__address",
         "external_id",
+        "to_missiverecipient__external_id",
+        "to_missiverecipient__substitute_id",
+        "substitute_id",
     ]
     readonly_fields = [
         "missive_support",
@@ -156,6 +163,7 @@ class MissiveAdmin(AdminBoostModel):
         "updated_at",
         "external_id",
         "external_id_display",
+        "substitute_id",
         "total_billed_amount_display",
         "total_billing_amount_display",
         "total_estimate_amount_display",
@@ -191,20 +199,27 @@ class MissiveAdmin(AdminBoostModel):
         """Recalculate attachment priorities after inline save (admin bypasses model save logic)."""
         recalculate_attachment_priorities(missive_id=parent.pk if parent else None)
 
+    def get_form(self, request, obj=None, change=False, **kwargs):
+        self._lock_obj = obj
+        return super().get_form(request, obj, change=change, **kwargs)
+
     def get_readonly_fields(self, request, obj=None):
-        """Make all fields readonly if missive has events."""
+        """Lock fields on a sent/cancelled missive; GeoaddressField stays a widget."""
         readonly = list(super().get_readonly_fields(request, obj))
-
-        if obj and obj.pk and obj.external_id:
-            has_events = obj.to_missiveevent.exists()
-            if has_events:
-                all_fields = [
-                    f.name
-                    for f in self.model._meta.get_fields()
-                    if (not f.is_relation or f.one_to_one) and f.name not in ["id"]
-                ]
-                readonly = list(set(readonly + all_fields))
-
+        if not missive_admin_locked(obj):
+            return readonly
+        geoaddress_names = {
+            field.name
+            for field in self.model._meta.get_fields()
+            if isinstance(field, GeoaddressField)
+        }
+        for field in self.model._meta.get_fields():
+            if (not field.is_relation or field.one_to_one) and field.name not in [
+                "id",
+                *geoaddress_names,
+            ]:
+                if field.name not in readonly:
+                    readonly.append(field.name)
         return readonly
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
@@ -215,7 +230,21 @@ class MissiveAdmin(AdminBoostModel):
             if db_field.null:
                 return PhoneNumberFormField(**kwargs)
             return SplitPhoneNumberField(**kwargs)
-        return super().formfield_for_dbfield(db_field, request, **kwargs)
+        formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if isinstance(db_field, GeoaddressField) and missive_admin_locked(
+            getattr(self, "_lock_obj", None)
+        ):
+            lock_geoaddress_formfield(formfield)
+        return formfield
+
+    def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
+        if missive_admin_locked(obj):
+            context["show_save"] = False
+            context["show_save_and_continue"] = False
+            context["show_save_and_add_another"] = False
+        return super().render_change_form(
+            request, context, add=add, change=change, form_url=form_url, obj=obj
+        )
 
     def recipient_display(self, obj):
         recipient = obj.first_recipient
@@ -393,6 +422,21 @@ class MissiveAdmin(AdminBoostModel):
             obj.last_campaign_send_date)
     campaign_display.short_description = _("Campaign / Last Send Date")
 
+    def scheduler_display(self, obj):
+        if obj.scheduler_id is None:
+            return "-"
+        sched = obj.scheduler
+        when = sched.send_date or sched.scheduled_send_date
+        status_html = self.format_label(
+            sched.run_status,
+            size="small",
+            label_type={"pending": "warning", "running": "info", "completed": "success"}.get(
+                sched.run_status, "secondary"
+            ),
+        )
+        return self.format_with_help_text(status_html, when)
+    scheduler_display.short_description = _("Scheduler")
+
     def change_fieldsets(self):
         """Configure fieldsets for change view."""
         self.add_to_fieldset(
@@ -426,6 +470,7 @@ class MissiveAdmin(AdminBoostModel):
                 "status",
                 "webhook_url",
                 "external_id_display",
+                "substitute_id",
                 "missive_support",
                 "thread_id",
                 "thread_type",
@@ -521,7 +566,11 @@ class MissiveAdmin(AdminBoostModel):
         return (obj and obj.pk and obj.status != MissiveStatus.CANCELLED)
 
     def has_change_permission(self, request, obj=None):
-        return self.is_not_cancelled(obj) and not obj.external_id
+        # GET stays True so GeoaddressField widgets render their native readonly
+        # layout instead of Django dumping the JSON. POST is still blocked.
+        if request.method == "POST" and missive_admin_locked(obj):
+            return False
+        return True
 
     def has_prepare_missive_permission(self, request, obj=None):
         return self.is_draft(obj) and self.provider_has_service(obj, "create") and not obj.external_id
@@ -614,7 +663,7 @@ class MissiveAdmin(AdminBoostModel):
 
     @admin_boost_view("adminform", _("Retrieve from provider"), requires_object=False)
     def retrieve_from_provider(self, request, form=None):
-        """Retrieve or open a missive from a provider partner ID or internal UID."""
+        """Create a missive from a provider partner ID or internal UID."""
         if form is None:
             return {
                 "form": RetrieveMissiveForm(),
@@ -622,11 +671,14 @@ class MissiveAdmin(AdminBoostModel):
                 "has_change_permission": True,
             }
         try:
-            missive, created = get_or_retrieve_from_provider(
+            missive, _created = do_retrieve_from_provider(
                 provider=form.cleaned_data["provider"],
                 missive_type=form.cleaned_data["missive_type"],
                 partner_id=form.cleaned_data.get("partner_id"),
                 uid=form.cleaned_data.get("uid"),
+                acknowledgement=form.cleaned_data.get("acknowledgement"),
+                delivery_mode=form.cleaned_data.get("delivery_mode"),
+                priority=form.cleaned_data.get("priority"),
             )
         except Exception as exc:
             messages.error(request, str(exc))
@@ -635,11 +687,30 @@ class MissiveAdmin(AdminBoostModel):
                 "save_label": _("Retrieve"),
                 "has_change_permission": True,
             }
-        if created:
-            messages.success(request, _("Missive retrieved from provider."))
-        else:
-            messages.info(request, _("Missive already exists."))
+        messages.success(request, _("Missive retrieved from provider."))
         return redirect(reverse("admin:django_pymissive_missive_change", args=[missive.pk]))
+
+    def has_refresh_from_provider_permission(self, request, obj=None):
+        return bool(obj and obj.pk and self.provider_has_service(obj, "retrieve"))
+
+    @admin_boost_view("confirm", _("Retrieve from provider"))
+    def refresh_from_provider(self, request, obj, confirmed=False):
+        """Update this missive from the provider using its uid and external_id."""
+        if not confirmed:
+            return {
+                "confirm": _(
+                    "Retrieve this missive from the provider and replace local data "
+                    "(subject, body, sender, recipients, events)? "
+                    "The missive external ID is kept."
+                )
+            }
+        try:
+            do_retrieve_from_provider(missive=obj)
+        except Exception as exc:
+            messages.error(request, str(exc))
+            return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
+        messages.success(request, _("Missive updated from provider."))
+        return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
 
     def has_retrieve_missive_permission(self, request, obj=None):
         return self.is_not_cancelled(obj) and self.provider_has_service(obj, "retrieve") and obj.external_id
@@ -650,6 +721,16 @@ class MissiveAdmin(AdminBoostModel):
         obj = self.get_object(request, object_id)
         obj.retrieve_missive()
         messages.success(request, _("Missive status updated successfully."))
+
+    def has_retrieve_tracking_numbers_permission(self, request, obj=None):
+        return bool(obj and obj.can_tracking_numbers())
+
+    @admin_boost_action("retrieve_tracking_numbers", _("Tracking number"))
+    def handle_retrieve_tracking_numbers(self, request, object_id):
+        object_id = unquote(object_id)
+        obj = self.get_object(request, object_id)
+        obj.retrieve_tracking_numbers()
+        messages.success(request, _("Tracking numbers updated successfully."))
 
     def has_duplicate_missive_permission(self, request, obj=None):
         return obj and obj.pk

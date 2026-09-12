@@ -253,6 +253,17 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         verbose_name=_("External ID"),
         help_text=_("External identifier from the provider"),
     )
+    substitute_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Substitute ID"),
+        help_text=_(
+            "Provider custom_id from another internal reference. "
+            "When empty, the missive UUID pk is used."
+        ),
+    )
     webhook_url = models.URLField(
         max_length=255,
         blank=True,
@@ -292,7 +303,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     def _ensure_missive_defaults(self):
         """Apply default values for support and delivery settings."""
-        if self.can_be_modified:
+        if self.can_be_modified or not self.missive_support:
             support = get_missive_support_from_type(self.missive_type)
             if support:
                 self.missive_support = support
@@ -1060,6 +1071,8 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             recipient.pk = None
             recipient.id = None
             recipient.external_id = None
+            recipient.substitute_id = None
+            recipient.tracking_number = None
             recipient.missive = new_missive
             recipient.save()
 
@@ -1110,6 +1123,8 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         new_missive.pk = None
         new_missive.id = None
         new_missive.external_id = None
+        new_missive.substitute_id = None
+        new_missive.scheduler = None
         new_missive.thread_id = thread_id or uuid.uuid4()
         new_missive.thread_type = thread_type
         new_missive.status = MissiveStatus.DRAFT
@@ -1136,9 +1151,18 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                 continue
             rec = self.to_missiverecipient.filter(id=internal_id).first()
             if rec is None:
+                rec = self.to_missiverecipient.filter(
+                    substitute_id=str(internal_id)
+                ).first()
+            if rec is None:
                 continue
             rec.external_id = recipient.get("external_id")
-            rec.save(update_fields=["external_id"])
+            update_fields = ["external_id"]
+            tracking_number = recipient.get("tracking_number")
+            if tracking_number:
+                rec.tracking_number = tracking_number
+                update_fields.append("tracking_number")
+            rec.save(update_fields=update_fields)
 
     def _update_attachments(self, attachments):
         """Echo back ``external_id`` for missive-owned attachments only.
@@ -1377,6 +1401,8 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         "Status" admin button is never a no-op.
         """
         response = self.call_provider_service("retrieve", **self.get_serialized_data(attachments=False))
+        if response.get("recipients"):
+            self._update_recipients(response.get("recipients"))
         events = response.get("events")
         if events:
             from ..signals import suppress_event_billings
@@ -1395,6 +1421,28 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         if status != self.status:
             self.status = status
             self.save(update_fields=["status"])
+
+    #########################################################
+    # Tracking numbers
+    #########################################################
+
+    def can_tracking_numbers(self):
+        return self.has_service("tracking_number") and self.external_id and not is_dry_run()
+
+    def retrieve_tracking_numbers(self):
+        """Fetch carrier tracking numbers from the provider and persist them on recipients."""
+        if not self.can_tracking_numbers():
+            return []
+        response = self.call_provider_service(
+            "tracking_number", **self.get_serialized_data(attachments=False)
+        )
+        if isinstance(response, dict):
+            recipients = response.get("recipients") or []
+        else:
+            recipients = response or []
+        if recipients:
+            self._update_recipients(recipients)
+        return recipients
 
     #########################################################
     # Billing
