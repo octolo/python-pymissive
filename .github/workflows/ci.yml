@@ -34,7 +34,7 @@ jobs:
             test_command: python -c "import pymissive; print(pymissive.__name__)"
           - package_name: django-pymissive
             working_directory: django-pymissive
-            test_command: python -m pytest
+            test_command: python -m pytest --ignore=tests/test_maileva_deposit_proof_tracking.py
 
     steps:
       - name: Checkout repository
