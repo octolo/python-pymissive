@@ -19,6 +19,7 @@ def _email_missive(**kwargs) -> Missive:
         "missive_type": MissiveType.EMAIL,
         "subject": "Hello",
         "body_text": "Body",
+        "provider": "brevo",
     }
     defaults.update(kwargs)
     return Missive.objects.create(**defaults)
