@@ -53,6 +53,27 @@ class MissiveCampaignAdmin(AdminBoostModel):
         CampaignRelatedObjectInline,
     ]
 
+    #: Counters the changelist columns below read. Named one by one because
+    #: ``with_counts()`` without arguments also annotates the per-status,
+    #: per-support and per-thread breakdowns — some fifty aggregates nothing
+    #: here displays, each one a deduplication pass over the same joined rows.
+    #: The percentages bring their own recipient counters along.
+    changelist_counters = (
+        "count_missive",
+        "count_recipient",
+        "count_event",
+        "count_related_object",
+        "count_attachment",
+        "pct_recipient_failed",
+        "pct_recipient_success",
+        "pct_recipient_processing",
+        *(f"count_type_{type_key}" for type_key in MISSIVE_TYPES),
+    )
+
+    def get_queryset(self, request):
+        """Annotate the counters :attr:`changelist_counters` enumerates."""
+        return super().get_queryset(request).with_counts(*self.changelist_counters)
+
     def save_formset(self, request, form, formset, change):
         super().save_formset(request, form, formset, change)
         if formset.model and issubclass(formset.model, MissiveBaseAttachment):

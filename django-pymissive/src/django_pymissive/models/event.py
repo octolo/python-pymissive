@@ -111,6 +111,10 @@ class MissiveEvent(CommentTimestampedModel):
         Re-normalizes via the provider, then processes on ``self.missive``
         (do not re-lookup by ``external_id``: retrieve can create duplicates,
         and ``handle_events`` would swallow the error).
+
+        ``pk`` is handed to ``_process_event`` as an argument so this row is
+        updated rather than duplicated. It deliberately does not travel inside
+        the payload: that is the untrusted channel the webhook also feeds.
         """
         if not self.missive_id:
             raise ValueError("Cannot replay event without associated missive")
@@ -120,7 +124,6 @@ class MissiveEvent(CommentTimestampedModel):
         if not isinstance(event, dict):
             raise ValueError("No replayable event in trace")
         event = dict(event)
-        event["pk"] = self.pk
         provider = self.missive.provider
         backend = getattr(provider, "_provider", None)
         if backend is None:
@@ -134,4 +137,4 @@ class MissiveEvent(CommentTimestampedModel):
             raise ValueError("Provider did not return a replayable event")
         for normalized in events_normalized:
             if isinstance(normalized, dict):
-                _process_event(normalized, self.missive)
+                _process_event(normalized, self.missive, pk=self.pk)

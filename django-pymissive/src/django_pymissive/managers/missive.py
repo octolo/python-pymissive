@@ -1,7 +1,8 @@
 from django.db import models
 from django.db.models.expressions import Subquery, OuterRef
-from django.db.models import F, Max, Q, Sum, Prefetch
+from django.db.models import F, Max, Min, Q, Sum, Prefetch
 from django.db.models.functions import Coalesce
+from pymissive.config import SENT_EVENTS
 
 from ..models.choices import (
     MissiveThreadType,
@@ -60,6 +61,19 @@ class BaseMissiveManager(models.Manager):
             output_field=models.CharField(),
         )
 
+    def sent_at_expr(self):
+        """When the missive actually left, from its events.
+
+        ``Missive`` has no ``sent_at`` column, and ``updated_at`` is bumped by
+        any later save, so neither can date a send. The oldest event proving the
+        missive left the system (:data:`pymissive.config.SENT_EVENTS`) does.
+        ``NULL`` while nothing has been sent.
+        """
+        return Min(
+            "to_missiveevent__occurred_at",
+            filter=Q(to_missiveevent__event__in=SENT_EVENTS),
+        )
+
     def is_billable_expr(self):
         return models.Case(
             models.When(total_billing_amount__gt=0, then=True),
@@ -113,6 +127,7 @@ class BaseMissiveManager(models.Manager):
             last_event=self.last_event_subquery(field="event"),
             last_event_reason=self.last_event_subquery(field="reason"),
             last_event_date=Coalesce(Max("to_missiveevent__occurred_at"), F("created_at")),
+            sent_at=self.sent_at_expr(),
             count_related_object=models.Count("to_missiverelatedobject", distinct=True),
             count_attachment=models.Count("to_missiveattachment", distinct=True),
             total_billing_amount=self.total_billing_expr("billing_amount"),

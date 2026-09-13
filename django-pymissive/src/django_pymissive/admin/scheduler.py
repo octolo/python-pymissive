@@ -81,6 +81,7 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
         "campaign",
         "send_date",
         "ended_at",
+        "campaign_snapshot",
         "progress_display",
         "by_type_display",
         "by_status_display",
@@ -134,7 +135,7 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
         )
         self.add_to_fieldset(
             _("Config / audit"),
-            ["additional_config", "comment", "created_at", "updated_at"],
+            ["additional_config", "campaign_snapshot", "comment", "created_at", "updated_at"],
             classes=("collapse",),
         )
 
@@ -259,6 +260,10 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
         base = f"{obj.total_sent_count} / {obj.total_count} ({obj.progress}%)"
         if obj.total_error_count:
             base += f" — {obj.total_error_count} {_('error(s)')}"
+        # Explains a "By status" column summing above the total: those attempts
+        # left the live set when a later run retried them.
+        if obj.history_count:
+            base += f" — {obj.history_count} {_('retried elsewhere')}"
         return base
 
     @admin.display(description=_("Per channel"))

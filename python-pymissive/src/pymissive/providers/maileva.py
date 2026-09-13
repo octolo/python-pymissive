@@ -1,11 +1,11 @@
 import json
 import re
 import zlib
+from datetime import datetime, timezone as dt_timezone
 from functools import cached_property
 from typing import Any
 
 import requests
-from django.utils import timezone
 
 from pymissive.utils import _truthy, is_disable_send
 from .base import MissiveProviderBase
@@ -699,13 +699,12 @@ class MailevaProvider(MissiveProviderBase):
             "custom_data": kwargs.get("custom_data", "pymissive_temporary_preview"),
         }
         external_id, recipients, attachments = self._stage_lre_before_submit(**kwargs)
-        print("external_id", external_id)
         return {
             "id": external_id,
             "event": "draft",
             "code": 200,
             "message": "",
-            "event_date": timezone.now().isoformat(),
+            "event_date": datetime.now(dt_timezone.utc).isoformat(),
             "attachments": attachments,
             "recipients": recipients,
         }
@@ -727,7 +726,7 @@ class MailevaProvider(MissiveProviderBase):
             "event": "request" if response.status_code == 200 else "error",
             "code": response.status_code,
             "message": response.text,
-            "event_date": timezone.now().isoformat(),
+            "event_date": datetime.now(dt_timezone.utc).isoformat(),
             "attachments": attachments,
             "recipients": recipients,
         }

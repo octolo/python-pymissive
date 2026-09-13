@@ -25,7 +25,7 @@ FIELDS = {
     },
     "linked": {
         "label": "Linked",
-        "description": "Linked",
+        "description": "If true, the attachment is offered as an access link instead of being physically attached",
         "format": "bool",
     },
     "priority": {

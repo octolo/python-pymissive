@@ -226,9 +226,10 @@ def test_replay_processed_updates_unknown_event_and_attaches_recipient():
                 "id": "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686",
                 "name": "THE UNIQUE PAPER COMPANY LIMIT",
             },
-            "raw": {**stored.trace, "pk": stored.pk},
+            "raw": stored.trace,
         },
         missive,
+        pk=stored.pk,
     )
     stored.refresh_from_db()
     assert stored.event == "processed"

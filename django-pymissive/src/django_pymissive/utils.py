@@ -323,6 +323,52 @@ def get_progress_hooks():
     return [_resolve_hook(hook)]
 
 
+#: Support → (model field, key in ``PYMISSIVE_DEFAULT_SENDER``).
+SENDER_CONTACT_FIELDS = {
+    "email": ("sender_email", "email"),
+    "phone": ("sender_phone", "phone"),
+    "address": ("sender_address", "address"),
+}
+
+CAMPAIGN_SENDER_NAME_FIELDS = (
+    "sender_email_name",
+    "sender_phone_name",
+    "sender_address_name",
+)
+
+
+def get_default_sender() -> dict:
+    """Return ``settings.PYMISSIVE_DEFAULT_SENDER`` (name / email / phone / address)."""
+    raw = getattr(settings, "PYMISSIVE_DEFAULT_SENDER", None)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def is_empty_sender_value(value) -> bool:
+    if value is None or value == "":
+        return True
+    if isinstance(value, dict) and not any(value.values()):
+        return True
+    return False
+
+
+def apply_default_sender_fields(instance, fields: dict) -> None:
+    """Fill empty *instance* attributes from ``PYMISSIVE_DEFAULT_SENDER``.
+
+    *fields* maps attribute name → setting key (``name``, ``email``, …).
+    Already-set values are left untouched.
+    """
+    defaults = get_default_sender()
+    if not defaults:
+        return
+    for attr, key in fields.items():
+        if not hasattr(instance, attr) or not is_empty_sender_value(getattr(instance, attr, None)):
+            continue
+        value = defaults.get(key)
+        if value in (None, "", {}, []):
+            continue
+        setattr(instance, attr, value)
+
+
 def is_dry_run() -> bool:
     """Return True when dry-run mode is enabled (test/staging).
 

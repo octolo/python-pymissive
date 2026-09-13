@@ -113,8 +113,63 @@ GENERIC_SUPPORT = {
     "email": ["email", "email_marketing", "ere"],
     "phone": ["sms", "rcs", "voice_call",],
     "address": ["lre", "hand_delivery"],
-    "application": ["push_notification", "branded"],
+    "application": ["notification", "push_notification", "branded"],
 }
+
+
+#: Events that prove the missive left the system. The oldest one dates the send
+#: (see the ``sent_at`` annotation in django-pymissive): a delivered missive was
+#: necessarily sent, even when the provider never emitted ``sent`` itself.
+SENT_EVENTS = ("sent", "accepted", "delivered")
+
+
+#: Spellings that consumers use for a support without being a missive type.
+#: Support keys and missive types resolve on their own, so only genuine
+#: synonyms belong here.
+MISSIVE_SUPPORT_ALIASES = {
+    "courrier": "address",
+    "mail": "address",
+    # Plain mail is ``lre`` without acknowledgement of receipt, but older rows
+    # and query strings still say ``postal``.
+    "postal": "address",
+    "app": "application",
+}
+
+
+def missive_support_for_type(missive_type: str) -> str:
+    """Return the ``GENERIC_SUPPORT`` key owning ``missive_type``, or ``""``."""
+    mt = str(missive_type or "").strip().lower()
+    if not mt:
+        return ""
+    for support, types in GENERIC_SUPPORT.items():
+        if mt in types:
+            return support
+    return ""
+
+
+def normalize_support(value: str) -> str:
+    """Return the canonical support key for a support name, alias or missive type.
+
+    Accepts what the different layers actually pass around: a support key
+    (``address``), a missive type (``lre``, ``hand_delivery``), a synonym
+    (``courrier``, ``postal``) or a hyphenated spelling (``hand-delivery``).
+    Returns ``""`` when nothing matches.
+    """
+    key = str(value or "").strip().lower().replace("-", "_")
+    if not key:
+        return ""
+    if key in GENERIC_SUPPORT:
+        return key
+    return missive_support_for_type(key) or MISSIVE_SUPPORT_ALIASES.get(key, "")
+
+
+def missive_types_for_support(support: str) -> list[str]:
+    """Missive types belonging to ``support`` (inverse of :func:`missive_support_for_type`).
+
+    ``support`` goes through :func:`normalize_support`, so a type or an alias is
+    accepted too. Returns ``[]`` for an unknown support.
+    """
+    return list(GENERIC_SUPPORT.get(normalize_support(support), []))
 
 PRIORITIES = ["low", "normal", "high", "urgent"]
 DELIVERY_MODES = ["economic", "normal", "premium", "express"]

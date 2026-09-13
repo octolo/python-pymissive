@@ -22,6 +22,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
+from django_pymissive.managers.scheduler import count_annotations
 from django_pymissive.models.campaign import MissiveCampaign
 from django_pymissive.models.scheduler import MissiveScheduledCampaign
 from django_pymissive.models.choices import MissiveEventType, MissiveStatus, MissiveThreadType
@@ -273,6 +274,55 @@ def test_run_with_tracking_idempotent_on_double_call():
     assert len(call_count) == 1
 
 
+def test_campaign_snapshot_empty_until_run():
+    sched = _scheduled(_campaign())
+    assert sched.campaign_snapshot == {}
+
+
+def test_campaign_snapshot_frozen_at_run():
+    """The run stores the campaign as it was when sending started."""
+    c = _campaign(
+        email_body_text="Hello",
+        additional_config={"watermark": True},
+        additional_context={"offer": "spring"},
+        body_processors=["some.processor"],
+    )
+    sched = _scheduled(c)
+    with patch.object(sched, "run_campaign"):
+        sched.run_with_tracking()
+
+    sched.refresh_from_db()
+    snap = sched.campaign_snapshot
+    assert snap["subject"] == "Test campaign"
+    assert snap["email_body_text"] == "Hello"
+    assert snap["additional_config"] == {"watermark": True}
+    assert snap["additional_context"] == {"offer": "spring"}
+    assert snap["body_processors"] == ["some.processor"]
+    assert snap["id"] == str(c.pk)
+    assert "processing" not in (snap.get("metadata") or {})
+
+    c.subject = "Changed subject"
+    c.email_body_text = "Goodbye"
+    c.save(update_fields=["subject", "email_body_text"])
+    sched.run_with_tracking()
+    sched.refresh_from_db()
+    assert sched.campaign_snapshot["subject"] == "Test campaign"
+    c.refresh_from_db()
+    assert c.subject == "Changed subject"
+
+
+def test_campaign_snapshot_json_safe():
+    """Phone / address / UUID values round-trip through JSON."""
+    import json
+
+    c = _campaign(sender_phone="+33600000000")
+    snap = c.to_snapshot()
+    json.dumps(snap)
+    assert isinstance(snap["id"], str)
+    assert isinstance(snap["sender_phone"], str)
+    assert isinstance(snap["sender_address"], dict)
+
+
 def test_run_with_tracking_records_error_and_clears_processing():
     c = _campaign()
     c.metadata = {"processing": True}
@@ -288,6 +338,7 @@ def test_run_with_tracking_records_error_and_clears_processing():
 
     sched.refresh_from_db()
     assert sched.ended_at is not None
+    assert sched.campaign_snapshot.get("subject") == "Test campaign"
     assert "network error" in (sched.additional_config or {}).get("last_error", "")
     c.refresh_from_db()
     assert "processing" not in c.metadata
@@ -347,10 +398,49 @@ def test_run_campaign_external_task_backend(settings):
     assert called_with == [sched.id]
 
 
-def test_run_with_tracking_retry_resets_send_error_in_place():
-    """retry_failed: send-time ERROR missives are reset to DRAFT on the same row."""
+def test_run_with_tracking_claims_drafts_left_by_an_ended_run():
+    """A run created by hand claims what start_campaign would claim."""
     c = _campaign()
-    old_run = _scheduled(c)
+    ended = _scheduled(c, ended_at=timezone.now())
+    orphan = _missive(c, scheduler=ended)
+    free = _missive(c)
+
+    sched = _scheduled(c)
+    with patch.object(MissiveScheduledCampaign, "run_campaign"):
+        sched.run_with_tracking()
+
+    orphan.refresh_from_db()
+    free.refresh_from_db()
+    assert orphan.scheduler_id == sched.id
+    assert free.scheduler_id == sched.id
+    assert set(sched.get_missives().values_list("pk", flat=True)) == {orphan.pk, free.pk}
+
+
+def test_run_with_tracking_leaves_the_drafts_of_an_open_run_alone():
+    """Without the claim rule, the fallback swept another run's missives."""
+    c = _campaign()
+    open_run = _scheduled(c)
+    claimed = _missive(c, scheduler=open_run)
+
+    other = _scheduled(c)
+    sent = []
+    with patch.object(Missive, "send_missive", lambda self: sent.append(self.pk)):
+        other.run_with_tracking()
+
+    claimed.refresh_from_db()
+    assert sent == []
+    assert claimed.status == MissiveStatus.DRAFT
+    assert claimed.scheduler_id == open_run.id
+
+
+def test_run_with_tracking_retry_leaves_send_error_on_its_own_run():
+    """retry_failed: a send-time ERROR is archived where it happened, not moved.
+
+    Rewriting ``scheduler`` would hand the failure to the retrying run — which
+    never sent it — and wipe it from the report of the run that did.
+    """
+    c = _campaign()
+    old_run = _scheduled(c, ended_at=timezone.now())
     failed = _missive(c, status=MissiveStatus.ERROR, missive_type="email")
     failed.scheduler = old_run
     failed.save(update_fields=["scheduler"])
@@ -360,10 +450,17 @@ def test_run_with_tracking_retry_resets_send_error_in_place():
         sched.run_with_tracking()
 
     failed.refresh_from_db()
-    assert failed.thread_type == MissiveThreadType.MISSIVE
-    assert failed.status == MissiveStatus.DRAFT
-    assert failed.scheduler_id == sched.id
-    assert Missive.objects.filter(campaign=c).count() == 1
+    assert failed.thread_type == MissiveThreadType.HISTORY
+    assert failed.status == MissiveStatus.ERROR
+    assert failed.scheduler_id == old_run.id
+
+    dups = Missive.objects.filter(campaign=c, status=MissiveStatus.DRAFT, scheduler=sched)
+    assert dups.count() == 1
+    assert dups.first().thread_id == failed.thread_id
+
+    annotated = MissiveScheduledCampaign.objects.with_counts().get(pk=old_run.pk)
+    assert annotated.count_missive_error == 1
+    assert annotated.count_thread_history == 1
 
 
 def test_run_with_tracking_retry_duplicates_error_missives_at_claim():
@@ -390,6 +487,50 @@ def test_run_with_tracking_retry_duplicates_error_missives_at_claim():
     )
     assert dups.count() == 1
     assert dups.first().thread_id == failed.thread_id
+
+
+def test_run_with_tracking_retry_also_sends_the_pending_drafts():
+    """``retry_failed`` adds the retries, it does not replace the payload.
+
+    The claim used to be skipped as soon as the run had missives — and
+    ``_retry_error_missives`` had just given it some, so a run with the option on
+    sent only its retries and left the campaign's fresh drafts with no run at
+    all: never sent, and no error to show for it.
+    """
+    c = _campaign()
+    ended = _scheduled(c, ended_at=timezone.now())
+    failed = _missive(c, status=MissiveStatus.FAILED, missive_type="email")
+    failed.scheduler = ended
+    failed.save(update_fields=["scheduler"])
+    fresh = [_missive(c, missive_type="email") for _ in range(2)]
+
+    sched = _scheduled(c, retry_failed=True)
+    sent = []
+    with patch.object(Missive, "send_missive", lambda self: sent.append(self.pk)):
+        sched.run_with_tracking()
+
+    # The two drafts and the retry of the failure, all three dispatched.
+    assert len(sent) == 3
+    for missive in fresh:
+        missive.refresh_from_db()
+        assert missive.scheduler_id == sched.id
+    assert not Missive.objects.filter(
+        campaign=c, status=MissiveStatus.DRAFT, scheduler__isnull=True,
+    ).exists()
+
+
+def test_run_with_tracking_retry_does_not_reclaim_its_own_retry_drafts():
+    """The unconditional claim is idempotent: an open run's drafts are its own."""
+    c = _campaign()
+    _missive(c, status=MissiveStatus.FAILED, missive_type="email")
+
+    sched = _scheduled(c, retry_failed=True)
+    with patch.object(MissiveScheduledCampaign, "run_campaign"):
+        sched.run_with_tracking()
+
+    # One archived attempt, one duplicate — the claim did not duplicate again.
+    assert Missive.objects.filter(campaign=c).count() == 2
+    assert sched.to_missive.count() == 1
 
 
 def test_run_with_tracking_retry_processed_generically_by_backend():
@@ -589,6 +730,93 @@ def test_with_counts_by_status_and_type():
     assert "label" in payload["by_status"][MissiveStatus.SUCCESS]
     assert payload["by_type"]["email"]["by_status"][MissiveStatus.SUCCESS] == 1
     assert payload["by_type"]["sms"]["by_status"][MissiveStatus.FAILED] == 1
+
+
+def test_every_counter_reaches_a_non_annotated_instance():
+    """The fallback reads the very enumeration ``with_counts()`` applies.
+
+    Listing those names a second time is how ``count_support_*`` used to answer 0
+    on an instance fetched without ``with_counts()`` — a plausible zero, not an
+    error.
+    """
+    c = _campaign()
+    sched = _scheduled(c)
+    _missive(c, missive_type="email", status=MissiveStatus.SUCCESS, scheduler=sched)
+    _missive(c, missive_type="sms", status=MissiveStatus.DRAFT, scheduler=sched)
+
+    plain = MissiveScheduledCampaign.objects.get(pk=sched.pk)
+    assert plain._count("count_support_email") == 1
+    assert plain._count("count_support_email_sent") == 1
+    assert plain._count("count_support_phone_sent") == 0
+
+    annotated = MissiveScheduledCampaign.objects.with_counts().get(pk=sched.pk)
+    names = MissiveScheduledCampaign._count_fields()
+    assert set(names) == set(count_annotations())
+    for name in names:
+        assert plain._count(name) == getattr(annotated, name), name
+
+
+def test_with_counts_sees_a_missive_whose_type_is_off_the_registry():
+    """The overall counters are aggregated, not summed from the per-type buckets.
+
+    A type never set — or left behind by a renamed one in ``MISSIVE_TYPES`` —
+    belongs to no bucket, and used to make the missive invisible to the run
+    while the campaign still counted it.
+    """
+    c = _campaign()
+    sched = _scheduled(c)
+    _missive(c, missive_type="", status=MissiveStatus.SUCCESS, scheduler=sched)
+    _missive(c, missive_type="email", status=MissiveStatus.DRAFT, scheduler=sched)
+
+    annotated = MissiveScheduledCampaign.objects.with_counts().get(pk=sched.pk)
+    assert annotated.count_total == 2
+    assert annotated.count_sent == 1
+    assert annotated.progress == 50
+    assert MissiveCampaign.objects.get(pk=c.pk).count_missive == 2
+    # The breakdown only knows the configured types — that gap is the detector.
+    assert annotated.count_total_email == 1
+
+
+def test_finished_run_keeps_the_failures_a_later_retry_archived():
+    """The report of a run is a log: a retry elsewhere must not empty it."""
+    c = _campaign()
+    ended = _scheduled(c, ended_at=timezone.now())
+    _missive(c, status=MissiveStatus.SUCCESS, scheduler=ended)
+    _missive(c, status=MissiveStatus.FAILED, scheduler=ended)
+
+    before = MissiveScheduledCampaign.objects.with_counts().get(pk=ended.pk)
+    assert (before.count_total, before.count_sent, before.count_missive_failed) == (2, 2, 1)
+
+    retry = _scheduled(c, retry_failed=True)
+    with patch.object(MissiveScheduledCampaign, "run_campaign"):
+        retry.run_with_tracking()
+
+    after = MissiveScheduledCampaign.objects.with_counts().get(pk=ended.pk)
+    # The archived attempt leaves the live set — it is the retry's job now...
+    assert after.count_total == 1
+    # ...but the run that produced the failure still reports it.
+    assert after.count_missive_failed == 1
+    assert after.count_thread_history == 1
+    assert after.counts_by_status(only_active=True)[MissiveStatus.FAILED] == 1
+    assert MissiveScheduledCampaign.objects.get(pk=ended.pk).history_count == 1
+
+
+def test_ended_run_emptied_by_a_newer_one_reads_as_complete():
+    """A finished run whose leftover draft was reclaimed is done, not at 0%."""
+    c = _campaign()
+    ended = _scheduled(c, ended_at=timezone.now())
+    leftover = _missive(c, status=MissiveStatus.DRAFT, scheduler=ended)
+
+    assert MissiveScheduledCampaign.objects.get(pk=ended.pk).progress == 0
+
+    newer = _scheduled(c)
+    with patch.object(MissiveScheduledCampaign, "run_campaign"):
+        newer.run_with_tracking()
+
+    leftover.refresh_from_db()
+    assert leftover.scheduler_id == newer.id
+    reloaded = MissiveScheduledCampaign.objects.get(pk=ended.pk)
+    assert (reloaded.total_count, reloaded.progress) == (0, 100)
 
 
 def test_duplicate_missive_clears_scheduler():
