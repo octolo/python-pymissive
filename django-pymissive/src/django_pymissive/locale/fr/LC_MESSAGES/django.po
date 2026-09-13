@@ -521,8 +521,12 @@ msgstr "Métadonnées supplémentaires en JSON"
 msgid "Linked"
 msgstr "Lié"
 
-msgid "Indicates if the attachment is linked to a related object"
-msgstr "Indique si la pièce jointe est liée à un objet associé"
+msgid ""
+"If true, the attachment is offered as an access link instead of being "
+"physically attached"
+msgstr ""
+"Si vrai, la pièce jointe est mise en lien d'accès plutôt que jointe "
+"physiquement"
 
 msgid "Priority"
 msgstr "Priorité"
@@ -792,6 +796,16 @@ msgstr "Terminé le"
 
 msgid "Actual ended date for the campaign"
 msgstr "Date réelle de fin de la campagne"
+
+msgid "Campaign snapshot"
+msgstr "Instantané de la campagne"
+
+msgid ""
+"Copy of the campaign configuration captured when this run starts. "
+"Later edits to the campaign do not change it."
+msgstr ""
+"Copie de la configuration de la campagne capturée au démarrage de cet "
+"envoi. Les modifications ultérieures de la campagne ne la changent pas."
 
 msgid "Campaign send"
 msgstr "Envoi de campagne"

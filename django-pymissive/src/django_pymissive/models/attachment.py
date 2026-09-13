@@ -25,6 +25,7 @@ from ..managers.attachment import (
     CampaignVirtualAttachmentManager,
     MissiveProofManager,
 )
+from ..managers.related_object import object_id_value
 from ..fields import JSONField
 
 # Priority 0 is reserved for the first-document (letter body PDF). Other attachments use 1, 2, 3...
@@ -154,11 +155,14 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         help_text=_("Type of model to which this file is attached"),
     )
 
-    attachment_object_id = models.PositiveIntegerField(
+    attachment_object_id = models.CharField(
+        max_length=255,
         null=True,
         blank=True,
         verbose_name=_("Object ID"),
-        help_text=_("ID of the object to which this file is attached"),
+        help_text=_(
+            "ID of the object to which this file is attached (integer pk as well as UUID)"
+        ),
     )
 
     attachment_object_arguments = JSONField(
@@ -188,7 +192,9 @@ class MissiveBaseAttachment(CommentTimestampedModel):
     linked = models.BooleanField(
         default=True,
         verbose_name=_("Linked"),
-        help_text=_("Indicates if the attachment is linked to a related object"),
+        help_text=_(
+            "If true, the attachment is offered as an access link instead of being physically attached"
+        ),
     )
 
     priority = models.PositiveIntegerField(
@@ -456,6 +462,8 @@ class MissiveBaseAttachment(CommentTimestampedModel):
 
     def save(self, *args, **kwargs):
         """Auto priority on insert (use ``_state.adding``, not ``pk`` — UUID set at init)."""
+        if self.attachment_object_id is not None:
+            self.attachment_object_id = object_id_value(self.attachment_object_id)
         if self._state.adding and (self.missive_id or self.campaign_id):
             self.priority = self.calculate_priority()
         else:

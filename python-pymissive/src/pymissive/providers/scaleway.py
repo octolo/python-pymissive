@@ -77,24 +77,6 @@ class ScalewayProvider(MissiveProviderBase):
         self._project_id = self._get_config_or_env("PROJECT_ID")
         self._email_data: dict[str, Any] = {}
 
-    def _get_mnq_api(self):
-        """Return MnqV1Beta1SnsAPI if scaleway SDK is available and configured. Else None."""
-        if not self._access_key or not self._secret_key:
-            return None
-        try:
-            from scaleway import Client
-            from scaleway.mnq.v1beta1 import MnqV1Beta1SnsAPI
-
-            client = Client(
-                access_key=self._access_key,
-                secret_key=self._secret_key,
-                default_project_id=self._project_id or "",
-                default_region=self._region,
-            )
-            return MnqV1Beta1SnsAPI(client)
-        except ImportError:
-            return None
-
     #########################################################
     # Helpers
     #########################################################

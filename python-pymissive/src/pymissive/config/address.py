@@ -1,4 +1,6 @@
 TYPES = {
+    # Covers plain mail too: providers expose a single service and derive the
+    # mode from ``acknowledgement_of_receipt`` (Maileva: mail / registered_mail).
     "lre": "Electronic registered letter (LRE)",
     "hand_delivery": "Hand delivery",
 }

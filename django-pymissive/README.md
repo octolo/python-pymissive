@@ -121,6 +121,22 @@ MISSIVE_PROVIDERS = {
 
 # Default email
 DEFAULT_FROM_EMAIL = 'noreply@example.com'
+
+# Applied on save when sender fields are empty.
+# Campaigns receive every provided key. Missives only receive the fields
+# for their type, and only when the campaign does not already have a sender.
+PYMISSIVE_DEFAULT_SENDER = {
+    "name": "Octolo",
+    "email": "contact@octolo.tech",
+    "phone": "+33123456789",
+    "address": {
+        "organization": "Octolo",
+        "address_line1": "1 rue de la Paix",
+        "postal_code": "75002",
+        "city": "Paris",
+        "country": "France",
+    },
+}
 ```
 
 ## 🚀 Quick usage
@@ -213,6 +229,188 @@ if missive.status == MissiveEventType.PENDING:
     missive.status = MissiveEventType.SENT
     missive.save()
 ```
+
+## Counters and annotations
+
+### Supports rather than types
+
+A support groups the missive types of one physical channel
+(`pymissive.config.GENERIC_SUPPORT`): `address` covers `lre` and
+`hand_delivery`, `email` covers `email`, `email_marketing` and `ere`, and so on.
+Plain mail is not a type of its own — it is `lre` without
+`acknowledgement_of_receipt`, which is what providers key the mode on. Count per
+support instead of listing types by hand:
+
+```python
+from pymissive.config import missive_types_for_support, normalize_support
+
+normalize_support("courrier")        # 'address'
+normalize_support("postal")          # 'address' (legacy synonym)
+missive_types_for_support("address") # ['lre', 'hand_delivery']
+```
+
+Counters are opt-in on both sides, under the same name — `with_counts()` on the
+campaign as on its runs, so a template can switch between the two:
+
+```python
+MissiveCampaign.objects.with_counts()
+# count_missive, count_sent / count_pending / count_error,
+# count_support_<support> (+ _sent, _error), count_missive_<status>,
+# count_type_<type>, count_thread_<type>,
+# count_recipient (+ _<status>), count_event, count_related_object,
+# count_attachment, pct_recipient_<status>
+```
+
+`MissiveCampaign.objects` itself annotates only what costs no `GROUP BY`:
+`last_send_date` and `last_ended_at` (subqueries), `has_sent_missives` and
+`has_open_run` (booleans). A `.get(pk=…)` stays a primary key lookup — asking for
+the counters everywhere made it four times slower, and the recipient and event
+joins multiply each other on top of that (5 000 missives with 2 recipients and 8
+events each is 80 000 intermediate rows for every `COUNT(DISTINCT)`).
+
+Reading a counter on a campaign nobody annotated still works: the whole set is
+fetched in one query and cached on the instance. Convenient for a detail page,
+ruinous for a list — measured on 100 campaigns, reading three counters costs 11 ms
+annotated and 500 ms through the fallback. Call `with_counts()` as soon as you
+iterate.
+
+Name the ones you display: `with_counts("count_missive", "pct_recipient_success")`
+annotates those two (plus the counters a percentage divides) instead of all sixty.
+They share one scan of the joined rows, so the cost follows the number of
+aggregates — naming the handful the admin changelist shows measured 2,5 times
+faster than taking every counter along. An unknown name raises `ValueError`
+rather than quietly falling back to one query per row.
+
+`count_sent` / `count_pending` / `count_error` and `count_support_*` cover
+`thread_type=MISSIVE` only, on a campaign as on a run,
+since the `HISTORY` rows a resend leaves behind are not new sends. They say where
+the payload stands *now*, so they follow the missives: the total of a finished run
+drops when a newer run takes over a draft it never sent, or when a retry archives
+one of its attempts.
+
+The historical counters keep the archived threads instead — `count_missive` and
+`count_type_<type>` on the campaign, `count_missive_<status>` and
+`count_thread_<type>` on both — which is what keeps the failures of a finished
+run readable once a later run has retried them (`run.history_count` says how many
+of its attempts were archived that way). Per-status counts may therefore sum
+above `count_total`.
+
+Never filter on `status="draft"` to tell sent from pending: databases predating
+the `draft` default hold an empty status too. Use the shared predicates:
+
+```python
+from django_pymissive.models.choices import (
+    error_missive_q, missive_type_filter, pending_missive_q, sent_missive_q,
+)
+
+Missive.objects.filter(sent_missive_q())
+campaign.to_missive.filter(pending_missive_q())
+Missive.objects.filter(**missive_type_filter("courrier"))
+```
+
+### Annotating your own models
+
+Missives point at your models through `MissiveRelatedObject`, campaigns through
+`CampaignRelatedObject`. Mix `MissiveRelatedQuerySetMixin` into **your**
+queryset to annotate them:
+
+```python
+from django_pymissive.managers.related_object import MissiveRelatedQuerySetMixin
+
+class ParticipantQuerySet(MissiveRelatedQuerySetMixin, models.QuerySet):
+    pass
+
+class Participant(models.Model):
+    objects = ParticipantQuerySet.as_manager()
+```
+
+```python
+qs = (
+    Participant.objects
+    # {"uid", "status", "missive_type", "sent_at"} of the newest match, or {}
+    .with_last_missive(campaign=campaign, support="email")
+    # one integer per counter you name
+    .with_missive_count(name="email_count", support="email")
+    .with_missive_count(name="sent_count", sent=True)
+    # both counters in a single scan: {"missives": N, "events": E}
+    .with_missive_counts(prefix="totals")
+)
+```
+
+Every method takes the same filters — `campaign`, `support`, `missive_type`,
+`thread_type`, `metadata`, `sent` — described on
+`django_pymissive.managers.related_object.missive_link_q`. The `prefix` /
+`name` arguments above name the annotation; `prefix` is refused as a filter,
+since these methods own the lookup path to the missive. For an object linked
+to a whole campaign (a meeting, a company) rather than to individual missives,
+`with_campaign_missive_count()` walks the campaign link instead.
+
+Outside of an annotation, `missive_related_queryset(instance, **filters)` returns
+the link rows themselves, newest missive first.
+
+Each annotation is a correlated subquery, re-evaluated for every row it
+annotates: the right trade on a paginated page, the wrong one on a full export.
+For a batch, `missive_summaries_by_object()` answers in two grouped queries
+whatever its size — the link rows, then the events of their missives:
+
+```python
+from django_pymissive.managers.related_object import (
+    missive_summaries_by_object, object_id_value,
+)
+
+summaries = missive_summaries_by_object(Participant, [p.pk for p in participants])
+summaries[object_id_value(participant.pk)]
+# {"missives": 2, "events": 5, "last": {"uid", "status", "missive_type", "sent_at"}}
+```
+
+It takes the same filters, and the values reuse the names the annotations
+produce, so a template can read either source. Every object asked for gets an
+entry, zeroed with an empty `last` when it has no matching missive. On 1 000
+objects carrying three missives each, the five annotations above take ~1 000 ms
+where the batch pass takes ~22 ms.
+
+Your model's primary key can be an integer or a UUID: `object_id` is a text
+column, holding the pk without its dashes (`uuid.hex`), because PostgreSQL
+renders a UUID dashed where SQLite stores 32 hex characters. Go through
+`missive_related_queryset()` or the mixin rather than filtering `object_id`
+yourself; if you must, normalise with
+`django_pymissive.managers.related_object.object_id_value(pk)`.
+
+### Send dates and recipient values
+
+`Missive` has no `sent_at` column and `updated_at` is bumped by any later save,
+so neither dates a send. The `sent_at` annotation (on by default) reports the
+oldest event proving the missive left, and is `NULL` until then.
+
+To render recipients for a page of missives without a query per row:
+
+```python
+MissiveRecipient.objects.targets_by_missive(missive_ids, support="email")
+# {"<missive_id>": ["alice@example.com", …]}
+```
+
+Values keep their natural type — a string for e-mail, phone and notification id,
+the address dict for postal supports — and fall back to the recipient name when
+no contact value is on file.
+
+### Before and after a send
+
+```python
+campaign.send_preview_payload()  # {"total", "by_support", "by_type"} — what a send would push out
+campaign.progress_payload()      # what already went out, per type, plus the runs
+campaign.is_processing           # flag set, or a run still open
+campaign.can_remove              # nothing sent yet
+```
+
+Both payloads cover `thread_type=MISSIVE`, so their totals agree with
+`count_sent` / `count_error` and stay below `count_missive`, which counts the
+archived and conversation threads too.
+
+The last two read the `has_open_run` / `has_sent_missives` annotations that
+`MissiveCampaign.objects` adds, and fall back to one `EXISTS` each, memoised on
+the instance. Iterate a list of campaigns through that manager rather than
+through `Missive.objects.select_related("campaign")`, which cannot carry the
+annotations: the fallback then costs two queries per campaign instead of none.
 
 ## Development
 

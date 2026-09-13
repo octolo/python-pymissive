@@ -143,6 +143,22 @@ MISSIVE_AUTHENTICATED_ACKNOWLEDGEMENT = False
 MISSIVE_SIGNED_ACKNOWLEDGEMENT = False
 MISSIVE_QUALIFIED_ACKNOWLEDGEMENT = False
 
+# Applied on save when sender fields are empty. Campaigns get every key;
+# missives only the ones matching their type, and only if the campaign
+# does not already provide that sender.
+PYMISSIVE_DEFAULT_SENDER = {
+    "name": "Octolo",
+    "email": "contact@octolo.tech",
+    "phone": "+33123456789",
+    "address": {
+        "organization": "Octolo",
+        "address_line1": "1 rue de la Paix",
+        "postal_code": "75002",
+        "city": "Paris",
+        "country": "France",
+    },
+}
+
 # PYMISSIVE_SAVE_UNTREATED_EVENTS = True  # Save events that could not be processed (default: False)
 PYMISSIVE_ATTACHMENT_PATH_MAX_LENGTH = 4000
 # Dry-run: full local pipeline, no provider calls (prepare + send).

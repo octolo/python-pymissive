@@ -56,7 +56,16 @@ def _save_untreated(event, provider):
 FANOUT_EVENTS = {"request", "accepted", "processed", "queued", "processing"}
 
 
-def _upsert_event(event, missive, recipient, occurred_at, allow_pk=True):
+def _upsert_event(event, missive, recipient, occurred_at, pk=None):
+    """Create or update the event row identified by its business key.
+
+    ``pk`` targets one existing row instead, so a replay updates the row it
+    came from rather than duplicating it — the business key then moves to the
+    values written. It is a caller argument on purpose: it must never be read
+    from the event payload, since ``raw`` is the provider request body verbatim
+    and ``MissiveEvent`` has a sequential pk, which would let an unauthenticated
+    webhook rewrite any event row by guessing its id.
+    """
     lookup = {
         "missive": missive,
         "event": event.get("event"),
@@ -68,22 +77,21 @@ def _upsert_event(event, missive, recipient, occurred_at, allow_pk=True):
         "reason": event.get("reason", "No reason provided"),
         "trace": event.get("raw") or {},
     }
-    raw = event.get("raw") or {}
-    if allow_pk and "pk" in raw:
+    if pk is not None:
         defaults = {
             **defaults,
             **lookup,
         }
-        lookup = {"pk": raw.get("pk")}
+        lookup = {"pk": pk}
     MissiveEvent.objects.update_or_create(defaults=defaults, **lookup)
 
 
-def _process_event(event, missive):
+def _process_event(event, missive, pk=None):
     occurred_at = _get_occurred_at(event.get("occurred_at"))
 
     if event.get("recipient"):
         recipient = get_recipient(missive, event.get("recipient"))
-        _upsert_event(event, missive, recipient, occurred_at)
+        _upsert_event(event, missive, recipient, occurred_at, pk=pk)
         if recipient:
             recipient.set_status()
         missive.set_status()
@@ -93,11 +101,12 @@ def _process_event(event, missive):
         list(missive.recipients) if event.get("event") in FANOUT_EVENTS else []
     )
     if fanout_recipients:
+        # No pk here: one row per recipient, so there is no single row to target.
         for recipient in fanout_recipients:
-            _upsert_event(event, missive, recipient, occurred_at, allow_pk=False)
+            _upsert_event(event, missive, recipient, occurred_at)
             recipient.set_status()
     else:
-        _upsert_event(event, missive, None, occurred_at)
+        _upsert_event(event, missive, None, occurred_at, pk=pk)
     missive.set_status()
 
 

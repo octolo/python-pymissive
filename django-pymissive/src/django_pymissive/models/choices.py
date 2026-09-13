@@ -3,6 +3,7 @@
 from typing import Optional
 
 from django.db import models
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 from django.conf import settings
 
@@ -15,6 +16,9 @@ from pymissive.config import (
     GENERIC_SUPPORT,
     DELIVERY_MODES,
     PRIORITIES,
+    missive_support_for_type,
+    missive_types_for_support,
+    normalize_support,
 )
 
 
@@ -31,13 +35,25 @@ MissiveSupport = models.TextChoices(
 
 def get_missive_support_from_type(missive_type: str) -> str:
     """Get the missive support from the type. Returns DB value (lowercase)."""
-    if not missive_type:
-        return ""
-    mt = str(missive_type).lower()
-    for key, values in GENERIC_SUPPORT.items():
-        if mt in [str(v).lower() for v in values]:
-            return key
-    return ""
+    return missive_support_for_type(missive_type)
+
+
+def missive_type_filter(support: str, prefix: str = "") -> dict:
+    """ORM filter kwargs selecting every missive type of ``support``.
+
+    ``prefix`` is the lookup path leading to the missive: ``""`` on a ``Missive``
+    queryset, ``"missive"`` from a ``MissiveRelatedObject``, ``"to_missive"``
+    from a campaign or a scheduled run.
+
+    Raises:
+        ValueError: for an unknown support — returning an empty filter would
+            silently widen the queryset to every missive instead.
+    """
+    types = missive_types_for_support(support)
+    if not types:
+        raise ValueError(f"Unknown missive support: {support!r}")
+    field = f"{prefix}__missive_type" if prefix else "missive_type"
+    return {f"{field}__in": types}
 
 
 _MISSIVE_EVENT_STYLE_MAP = {
@@ -58,6 +74,46 @@ class MissiveStatus(models.TextChoices):
     PARTIALLY_FAILED = "partially_failed", _("Partially failed")
     ERROR = "error", _("Error")
     CANCELLED = "cancelled", _("Cancelled")
+
+
+#: Statuses of a missive still waiting to be sent. The empty string is a legacy
+#: value found in databases predating the ``draft`` default.
+PENDING_STATUSES = (MissiveStatus.DRAFT, "")
+
+#: Statuses of a send that did not go through.
+ERROR_STATUSES = (
+    MissiveStatus.FAILED,
+    MissiveStatus.PARTIALLY_FAILED,
+    MissiveStatus.ERROR,
+)
+
+
+def _status_field(prefix: str) -> str:
+    return f"{prefix}__status" if prefix else "status"
+
+
+def sent_missive_q(prefix: str = "") -> Q:
+    """``Q`` matching missives that left the pending state.
+
+    ``prefix`` is the lookup path leading to the missive (see
+    :func:`missive_type_filter`).
+
+    ``status__isnull=False`` is stated rather than left to the negation: on the
+    ``LEFT JOIN`` of a campaign or a run without missives, ``~Q(status__in=…)``
+    also matches the NULL row the join produces.
+    """
+    field = _status_field(prefix)
+    return Q(**{f"{field}__isnull": False}) & ~Q(**{f"{field}__in": PENDING_STATUSES})
+
+
+def pending_missive_q(prefix: str = "") -> Q:
+    """``Q`` matching missives still waiting to be sent (draft or legacy empty)."""
+    return Q(**{f"{_status_field(prefix)}__in": PENDING_STATUSES})
+
+
+def error_missive_q(prefix: str = "") -> Q:
+    """``Q`` matching missives whose send failed."""
+    return Q(**{f"{_status_field(prefix)}__in": ERROR_STATUSES})
 
 
 # Python UPPERCASE, DB lowercase, label from config (already localized in translation_catalog)

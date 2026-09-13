@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymissive"
-version = "1.3.13"
+version = "1.3.14"
 description = "Framework-agnostic messaging library for multi-channel communication."
 authors = [{ name = "Octolo", email = "dev@octolo.tech" }]
 readme = "README.md"
@@ -15,6 +15,7 @@ keywords = ["messaging", "email", "sms", "missive", "multi-channel", "notificati
 dependencies = [
   "clicommands>=0.1.1",
   "providerkit>=1.1.1",
+  "requests>=2.31",  # imported at module level by the maileva, scaleway and partner providers
 ]
 
 classifiers = [
@@ -22,6 +23,17 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+]
+
+# One extra per provider needing an SDK beyond requests. Each mirrors the
+# provider's own ``required_packages``, and the imports are lazy, so a missing
+# extra costs only that provider.
+[project.optional-dependencies]
+brevo = [
+  "brevo-python>=4.0",
+]
+scaleway = [
+  "boto3>=1.28",
 ]
 
 [project.scripts]

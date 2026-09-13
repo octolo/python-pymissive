@@ -12,7 +12,6 @@ Usage:
 
 from datetime import datetime
 
-from django.db.models import Count
 from django.core.management.base import BaseCommand
 
 from ...models.missive import Missive
@@ -54,9 +53,10 @@ class Command(BaseCommand):
             .order_by("created_at")
         )
         if options.get("noevent"):
-            missives = missives.annotate(event_count=Count("to_missiveevent")).filter(
-                event_count__lte=1
-            )
+            # count_event is the default manager's own distinct annotation; a
+            # plain Count here would be multiplied by the other reverse-FK joins
+            # it already carries and would skip missives that do have 0 or 1 event.
+            missives = missives.filter(count_event__lte=1)
         total = missives.count()
         synced = 0
         errors = 0

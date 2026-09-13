@@ -30,6 +30,7 @@ attachments without uploading a real file.
 from pathlib import Path
 
 from django.db import models
+from django_pymissive.managers.related_object import MissiveRelatedQuerySetMixin
 
 # tests/ folder (parent of fakeapp/), where ``pdf_sample_1mb.pdf`` lives.
 FIXTURE_DIR = Path(__file__).resolve().parent.parent
@@ -105,6 +106,10 @@ class Category(models.Model):
         return self.name
 
 
+class ContactQuerySet(MissiveRelatedQuerySetMixin, models.QuerySet):
+    """How an integration exposes the missive annotations on its own model."""
+
+
 class Contact(models.Model):
     """Test contact (``./manage.py seed_fake_contacts``)."""
 
@@ -118,6 +123,8 @@ class Contact(models.Model):
         blank=True,
         related_name="contacts",
     )
+
+    objects = ContactQuerySet.as_manager()
 
     class Meta:
         app_label = "fakeapp"

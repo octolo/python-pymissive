@@ -6,7 +6,11 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from .mixins import CommentTimestampedModel
-from ..managers.related_object import MissiveRelatedObjectManager, CampaignRelatedObjectManager
+from ..managers.related_object import (
+    CampaignRelatedObjectManager,
+    MissiveRelatedObjectManager,
+    object_id_value,
+)
 
 
 class BaseRelatedObject(CommentTimestampedModel):
@@ -18,9 +22,10 @@ class BaseRelatedObject(CommentTimestampedModel):
         verbose_name=_("Content Type"),
         help_text=_("Type of the related object"),
     )
-    object_id = models.PositiveIntegerField(
+    object_id = models.CharField(
+        max_length=255,
         verbose_name=_("Object ID"),
-        help_text=_("ID of the related object"),
+        help_text=_("ID of the related object (integer pk as well as UUID)"),
     )
     content_object = GenericForeignKey("content_type", "object_id")
     object_str = models.CharField(
@@ -40,7 +45,9 @@ class BaseRelatedObject(CommentTimestampedModel):
         ordering = ["-created_at"]
 
     def save(self, *args, **kwargs):
-        """Save the object string representation before saving."""
+        """Normalize the object id and save the string representation."""
+        if self.object_id is not None:
+            self.object_id = object_id_value(self.object_id)
         if self.content_object:
             try:
                 self.object_str = str(self.content_object)

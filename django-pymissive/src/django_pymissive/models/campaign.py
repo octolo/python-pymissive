@@ -1,19 +1,34 @@
 """Missive campaign models."""
 
+import json
 import uuid
 
 from django.core.exceptions import ValidationError
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from ..managers.campaign import MissiveCampaignManager
+from ..managers.campaign import MissiveCampaignManager, count_annotation_names
 from ..models.mixins import CommentTimestampedModel, ConfigMixin, ProcessorsMixin
-from ..models.choices import MissiveStatus, MissivePriority, AcknowledgementLevel, MissiveDeliveryMode
+from ..models.choices import (
+    AcknowledgementLevel,
+    MissiveDeliveryMode,
+    MissivePriority,
+    MissiveStatus,
+    MissiveThreadType,
+    sent_missive_q,
+)
 from django_geoaddress.fields import GeoaddressField
 from phonenumber_field.modelfields import PhoneNumberField
 from ..fields import RichTextField
+from ..utils import (
+    CAMPAIGN_SENDER_NAME_FIELDS,
+    SENDER_CONTACT_FIELDS,
+    apply_default_sender_fields,
+    serialize_model_for_context,
+)
 
 
 class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
@@ -180,6 +195,30 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def __str__(self):
         return self.subject
 
+    def to_snapshot(self) -> dict:
+        """JSON-serializable copy of this campaign's configuration.
+
+        Used by a scheduled run to freeze the campaign at send start, so later
+        edits do not rewrite the history of that run. The live ``processing``
+        metadata flag is omitted: it is a lock, not configuration.
+        """
+        data = serialize_model_for_context(self)
+        metadata = dict(data.get("metadata") or {})
+        metadata.pop("processing", None)
+        data["metadata"] = metadata
+        return json.loads(json.dumps(data, cls=DjangoJSONEncoder, default=str))
+
+    def _ensure_default_sender(self):
+        """Fill every empty sender slot from ``PYMISSIVE_DEFAULT_SENDER``."""
+        fields = {attr: "name" for attr in CAMPAIGN_SENDER_NAME_FIELDS}
+        for attr, key in SENDER_CONTACT_FIELDS.values():
+            fields[attr] = key
+        apply_default_sender_fields(self, fields)
+
+    def save(self, *args, **kwargs):
+        self._ensure_default_sender()
+        super().save(*args, **kwargs)
+
     def get_browser_preview_path(self, *, preview_kind: str = "email") -> str:
         """Relative URL for the staff preview of this campaign.
 
@@ -242,6 +281,171 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             | Q(attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT),
         )
 
+    # ------------------------------------------------------------------
+    # Counters (annotated by with_counts(), fetched on demand otherwise)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _count_fields(cls) -> frozenset:
+        """Every counter name ``with_counts()`` produces — read from its source.
+
+        Derived rather than listed again: a counter added to
+        :func:`~django_pymissive.managers.campaign.count_annotations` becomes
+        readable on a non-annotated campaign at the same time.
+        """
+        return count_annotation_names()
+
+    def _count(self, name: str):
+        """One counter, from the annotation when present, from the database else.
+
+        The whole set is fetched and cached in one query, so reading a second
+        counter on the same instance is free.
+        """
+        if name in self.__dict__:
+            return self.__dict__[name] or 0
+        cache = self.__dict__.get("_counts_cache")
+        if cache is None:
+            annotated = (
+                type(self)._default_manager.with_counts().filter(pk=self.pk).first()
+            )
+            fields = self._count_fields()
+            cache = {
+                field: (getattr(annotated, field, 0) or 0) if annotated else 0
+                for field in fields
+            }
+            self.__dict__["_counts_cache"] = cache
+        return cache.get(name, 0)
+
+    def __getattr__(self, name):
+        """Serve a counter of ``with_counts()`` the queryset did not annotate.
+
+        The counters are opt-in — they force a ``GROUP BY`` that every plain
+        lookup would otherwise pay — but a template or a report reading
+        ``campaign.count_missive`` must keep working. It costs one query per
+        campaign, so annotate with ``with_counts()`` when a list displays them.
+        """
+        # Prefix first: this runs on every missing attribute, and Django probes a
+        # few (``get_absolute_url``, dunders), which have no business building the
+        # annotation set.
+        if not name.startswith(("count_", "pct_")) or name not in self._count_fields():
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute {name!r}"
+            )
+        return self._count(name)
+
+    @property
+    def is_processing(self) -> bool:
+        """True while a send is under way.
+
+        Either ``start_campaign`` flagged the campaign, or a scheduled run has
+        not ended yet. Reads the ``has_open_run`` annotation or the prefetch
+        cache of ``to_missivecampaignsend`` when either is available, so
+        iterating a list of campaigns costs no query per row.
+
+        The fallback ``EXISTS`` is memoised under the annotation name, so reading
+        the property twice on an instance that carries neither — a campaign
+        reached through ``select_related("campaign")`` from a missive — queries
+        once, not twice. Like the annotation itself, it is a snapshot: reload the
+        campaign after starting a send.
+        """
+        if (self.metadata or {}).get("processing"):
+            return True
+        annotated = getattr(self, "has_open_run", None)
+        if annotated is not None:
+            return bool(annotated)
+        cache = getattr(self, "_prefetched_objects_cache", None) or {}
+        runs = cache.get("to_missivecampaignsend")
+        if runs is not None:
+            return any(run.ended_at is None for run in runs)
+        open_run = self.to_missivecampaignsend.filter(ended_at__isnull=True).exists()
+        self.__dict__["has_open_run"] = open_run
+        return open_run
+
+    @property
+    def can_remove(self) -> bool:
+        """True while no live missive of the campaign has been sent.
+
+        Uses the ``has_sent_missives`` annotation when the queryset carries it
+        (``MissiveCampaignManager`` adds it by default), else falls back to a
+        single ``EXISTS``, memoised under the annotation name like
+        :pyattr:`is_processing` does.
+        """
+        annotated = getattr(self, "has_sent_missives", None)
+        if annotated is None:
+            annotated = self.to_missive.filter(
+                sent_missive_q(), thread_type=MissiveThreadType.MISSIVE,
+            ).exists()
+            self.__dict__["has_sent_missives"] = annotated
+        return not annotated
+
+    def pending_send_queryset(self):
+        """The missives a send would push out right now.
+
+        The single definition of that set: :meth:`start_campaign` and the run
+        (``run_with_tracking`` / ``get_missives``) all derive from it, whatever
+        run the drafts were attached to.
+
+        ``thread_type`` matters as much as the status here. A conversation
+        message lives in the same table with the same ``draft`` default, so
+        without that filter a reply being composed would be claimed by the next
+        campaign send and pushed out.
+
+        Deliberately narrower than :func:`pending_missive_q` on the status side:
+        the send pipeline transitions ``draft`` rows to ``processing``, so legacy
+        rows with an empty status are counted as pending by the campaign
+        annotations but are never actually sent.
+        """
+        return self.to_missive.filter(
+            status=MissiveStatus.DRAFT,
+            thread_type=MissiveThreadType.MISSIVE,
+        )
+
+    def claimable_send_queryset(self):
+        """The pending missives a *new* run may take over.
+
+        Same set as :meth:`pending_send_queryset` minus the drafts another run is
+        still working on. A draft duplicated by ``retry_failed`` keeps the FK of
+        the run that produced it, so restricting to ``scheduler IS NULL`` would
+        leave it stranded once that run has ended; a run still open, on the other
+        hand, reads its own scope through that same FK and must be left alone.
+
+        Used by :meth:`start_campaign` and by the run itself
+        (``run_with_tracking`` / ``get_missives``), so that a run created by hand
+        claims exactly what a run created here would.
+        """
+        return self.pending_send_queryset().filter(
+            models.Q(scheduler__isnull=True)
+            | models.Q(scheduler__ended_at__isnull=False),
+        )
+
+    def send_preview_payload(self) -> dict:
+        """What :meth:`start_campaign` would send, grouped by support and by type.
+
+        The counterpart of :meth:`progress_payload` for the confirmation step
+        shown *before* sending. ``by_support`` uses the canonical support keys
+        (``email``, ``phone``, ``address``, ``application``) so a caller never
+        has to know which types belong to which channel.
+        """
+        from pymissive.config import GENERIC_SUPPORT, missive_support_for_type
+
+        by_support = dict.fromkeys(GENERIC_SUPPORT, 0)
+        by_type: dict = {}
+        total = 0
+        rows = (
+            self.pending_send_queryset()
+            .order_by()
+            .values("missive_type")
+            .annotate(total=models.Count("id", distinct=True))
+        )
+        for row in rows:
+            count = row["total"]
+            total += count
+            by_type[row["missive_type"]] = count
+            support = missive_support_for_type(row["missive_type"])
+            if support:
+                by_support[support] += count
+        return {"total": total, "by_support": by_support, "by_type": by_type}
+
     def get_progress_path(self) -> str:
         """Relative URL for the live progress page of this campaign."""
         if not self.pk:
@@ -253,16 +457,32 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         return self.get_progress_path()
 
     def progress_payload(self) -> dict:
-        """JSON-serializable progress snapshot for the campaign front page."""
-        from django.db.models import Count, Q
-        from pymissive.config import MISSIVE_TYPES
-        from ..managers.scheduler import ERROR_STATUSES
-        from ..models.choices import MissiveStatus
+        """JSON-serializable progress snapshot for the campaign front page.
 
-        rows = self.to_missive.values("missive_type").annotate(
-            total=Count("id"),
-            sent=Count("id", filter=~Q(status=MissiveStatus.DRAFT)),
-            error=Count("id", filter=Q(status__in=ERROR_STATUSES)),
+        Live sends only, like ``count_sent`` / ``count_error``: the ``HISTORY``
+        rows a retry archived would otherwise count their failure twice — once
+        as the archive, once as its replacement — and a conversation message
+        would inflate the progress of a campaign it is not part of. ``total``
+        therefore stays below ``count_missive``, which counts every thread.
+        """
+        from django.db.models import Count
+        from pymissive.config import MISSIVE_TYPES
+        from ..models.choices import error_missive_q
+        from ..models.missive import Missive
+
+        # _base_manager rather than self.to_missive: the default manager annotates
+        # counts over reverse FKs, and their LEFT JOINs survive .values() — which
+        # only drops the column — so each Count would group multiplied rows and
+        # inflate the progress by recipients x events.
+        rows = (
+            Missive._base_manager
+            .filter(campaign=self, thread_type=MissiveThreadType.MISSIVE)
+            .values("missive_type")
+            .annotate(
+                total=Count("id"),
+                sent=Count("id", filter=sent_missive_q()),
+                error=Count("id", filter=error_missive_q()),
+            )
         )
 
         by_type: dict = {}
@@ -285,11 +505,11 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             }
 
         progress = round(sent_count / total_count * 100) if total_count else 0
-        is_processing = bool((self.metadata or {}).get("processing"))
+        is_processing = self.is_processing
 
         if is_processing:
             status = "running"
-        elif total_count and not self.to_missive.filter(status=MissiveStatus.DRAFT).exists():
+        elif total_count and not self.pending_send_queryset().exists():
             status = "completed"
         else:
             status = "pending"
@@ -334,8 +554,5 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             )
             # Attach pending missives to this scheduler in bulk so the
             # live annotations (with_counts) can be derived from the FK.
-            campaign.to_missive.filter(
-                status=MissiveStatus.DRAFT,
-                scheduler__isnull=True,
-            ).update(scheduler=scheduled)
+            campaign.claimable_send_queryset().update(scheduler=scheduled)
             scheduled.start_scheduled_campaign()

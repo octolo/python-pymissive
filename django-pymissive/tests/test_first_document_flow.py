@@ -175,7 +175,9 @@ def test_generate_first_document_does_not_overwrite_virtual_attachment(settings)
 
     virtual.refresh_from_db()
     assert virtual.attachment_type == MissiveAttachmentType.VIRTUAL_ATTACHMENT
-    assert virtual.attachment_object_id == doc.pk
+    # str on both sides: attachment_object_id is text, so an integer pk comes
+    # back as "1", not 1.
+    assert str(virtual.attachment_object_id) == str(doc.pk)
     # And the first_document is its own dedicated row.
     assert att.pk != virtual.pk
     assert att.priority == FIRST_DOCUMENT_PRIORITY
@@ -284,7 +286,7 @@ def test_duplicate_missive_copies_regular_and_virtual_attachments(settings):
     duplicated_virtual = new_attachments.filter(
         attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT
     ).first()
-    assert duplicated_virtual.attachment_object_id == doc.pk
+    assert str(duplicated_virtual.attachment_object_id) == str(doc.pk)
     assert duplicated_virtual.attachment_content_type == virtual.attachment_content_type
     assert duplicated_virtual.pk != virtual.pk
 

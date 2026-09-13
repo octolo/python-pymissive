@@ -16,11 +16,14 @@ from pymissive.config import MISSIVE_TYPES
 
 from ..fields import JSONField
 from ..managers.scheduler import (
+    ATTEMPT_THREADS,
     ERROR_STATUSES,
     MissiveScheduledCampaignManager,
+    count_annotations,
     error_annotation_name,
     sent_annotation_name,
     status_annotation_name,
+    thread_annotation_name,
     total_annotation_name,
 )
 from ..models.choices import MissiveStatus, MissiveThreadType, MissiveType
@@ -65,10 +68,16 @@ def _resolve_task_method(obj, method_name: str):
 class MissiveScheduledCampaign(CommentTimestampedModel):
     """Scheduled send for a campaign.
 
+    ``campaign_snapshot`` freezes the campaign configuration when the run
+    starts, so later edits of the campaign do not rewrite this run's history.
+
     Run counters (``total_count`` / ``sent_count`` / ``error_count``) are
     derived live from the related missives via
     :meth:`MissiveScheduledCampaignQuerySet.with_counts`, so they cannot drift
-    from the actual missive statuses.
+    from the actual missive statuses. Being live, they follow the missives: the
+    total of an ended run drops when a newer run reclaims a draft this one never
+    sent. What the run *did* send stays put — see ``counts_by_status`` and
+    ``history_count``, which keep the attempts a retry has archived.
     """
 
     id = models.UUIDField(
@@ -120,8 +129,9 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         default=False,
         verbose_name=_("Retry failed"),
         help_text=_(
-            "If enabled, missives that fail during this run are reset to DRAFT "
-            "and retried once after the initial pass (history missives excluded)."
+            "If enabled, the campaign's failed missives are archived and duplicated "
+            "as fresh drafts when this run starts, then sent by it "
+            "(already archived attempts and conversation messages excluded)."
         ),
     )
 
@@ -170,6 +180,16 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         verbose_name=_("Additional configuration"),
         help_text=_("Additional configuration as JSON"),
     )
+    campaign_snapshot = JSONField(
+        default=dict,
+        blank=True,
+        editable=False,
+        verbose_name=_("Campaign snapshot"),
+        help_text=_(
+            "Copy of the campaign configuration captured when this run starts. "
+            "Later edits to the campaign do not change it."
+        ),
+    )
 
     objects = MissiveScheduledCampaignManager()
 
@@ -201,15 +221,13 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
     @classmethod
     def _count_fields(cls):
-        """All annotation names produced by ``with_counts`` (overall + per type)."""
-        fields = ["count_total", "count_sent", "count_error"]
-        for status in MissiveStatus:
-            fields.append(status_annotation_name(status))
-        for missive_type in MISSIVE_TYPES:
-            fields.append(total_annotation_name(missive_type))
-            fields.append(sent_annotation_name(missive_type))
-            fields.append(error_annotation_name(missive_type))
-        return fields
+        """Every annotation name ``with_counts`` produces — read from its source.
+
+        Derived rather than listed again: a counter added to
+        :func:`count_annotations` is immediately readable on a non-annotated
+        instance too, instead of silently answering 0 here.
+        """
+        return list(count_annotations())
 
     def _fetch_counts(self):
         """Compute the run counters live from the related missives."""
@@ -261,10 +279,25 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         return result
 
     def _status_counts_by_type(self):
-        """``{missive_type: {status: count}}`` from a single grouped query."""
+        """``{missive_type: {status: count}}`` from a single grouped query.
+
+        Scoped like ``count_missive_<status>`` (every attempt of the run,
+        archived ones included), so this breakdown may sum above the per-type
+        total once a later run has retried some of these missives.
+        """
         from django.db.models import Count
 
-        rows = self.to_missive.values("missive_type", "status").annotate(n=Count("id"))
+        from ..models.missive import Missive
+
+        # _base_manager rather than self.to_missive: the default manager annotates
+        # counts over reverse FKs whose LEFT JOINs survive .values(), which would
+        # make Count group multiplied rows.
+        rows = (
+            Missive._base_manager
+            .filter(scheduler=self, thread_type__in=ATTEMPT_THREADS)
+            .values("missive_type", "status")
+            .annotate(n=Count("id"))
+        )
         result = {}
         for row in rows:
             result.setdefault(row["missive_type"], {})[row["status"]] = row["n"]
@@ -272,6 +305,10 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
     def counts_by_status(self, *, only_active=False):
         """Overall status breakdown: ``{status: count}``.
+
+        Covers every attempt of the run, including the ones a later retry
+        archived, so the failures of a finished run stay readable. May therefore
+        sum above :attr:`total_count`.
 
         With ``only_active=True`` statuses with ``count == 0`` are omitted.
         """
@@ -285,8 +322,13 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
     @property
     def total_count(self):
-        """Total missives attached to this run (any status)."""
+        """Missives attached to this run (any status, archived attempts excluded)."""
         return self._count("count_total")
+
+    @property
+    def history_count(self):
+        """Attempts of this run a later retry archived — no longer in the total."""
+        return self._count(thread_annotation_name(MissiveThreadType.HISTORY))
 
     @property
     def total_sent_count(self):
@@ -294,14 +336,24 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         return self._count("count_sent")
 
     @property
+    def total_pending_count(self):
+        """Missives of this run still waiting to be sent."""
+        return self._count("count_pending")
+
+    @property
     def total_error_count(self):
         """Missives in an error status, summed across every channel."""
         return self._count("count_error")
 
-    # Backwards-compatible aliases.
+    # Short aliases, kept for backwards compatibility — one per overall counter,
+    # so a caller can iterate over the statuses it displays.
     @property
     def sent_count(self):
         return self.total_sent_count
+
+    @property
+    def pending_count(self):
+        return self.total_pending_count
 
     @property
     def error_count(self):
@@ -309,10 +361,14 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
     @property
     def progress(self):
-        """Completion percentage (0-100) of the current/last run."""
+        """Completion percentage (0-100) of the current/last run.
+
+        An ended run with nothing left is done, not at 0%: either it had nothing
+        to send, or a newer run took over the drafts it never sent.
+        """
         total = self.total_count
         if not total:
-            return 0
+            return 100 if self.ended_at else 0
         return round(self.total_sent_count / total * 100)
 
     def progress_payload(self):
@@ -345,7 +401,9 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
             "total_count": self.total_count,
             "total_sent_count": self.total_sent_count,
+            "total_pending_count": self.total_pending_count,
             "total_error_count": self.total_error_count,
+            "history_count": self.history_count,
             "progress": self.progress,
             "by_type": by_type,
             "by_status": by_status,
@@ -397,39 +455,48 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
         The ``send_date`` claim is a single conditional ``UPDATE … WHERE
         send_date IS NULL``: atomic on every backend and safe against concurrent
-        workers. On completion (success or failure) ``ended_at`` is set and the
-        campaign ``processing`` flag is cleared; on failure the error is
-        recorded in ``additional_config['last_error']`` and re-raised.
+        workers. The same UPDATE freezes ``campaign_snapshot`` so later edits
+        of the campaign do not rewrite this run's history. On completion
+        (success or failure) ``ended_at`` is set and the campaign ``processing``
+        flag is cleared; on failure the error is recorded in
+        ``additional_config['last_error']`` and re-raised.
         """
         now = timezone.now()
         with transaction.atomic():
+            from .campaign import MissiveCampaign
+            snapshot = MissiveCampaign.objects_plain.get(pk=self.campaign_id).to_snapshot()
             claimed = (
                 type(self)
                 .objects.filter(pk=self.pk, send_date__isnull=True)
-                .update(send_date=now)
+                .update(send_date=now, campaign_snapshot=snapshot)
             )
             if not claimed:
                 return
             self.send_date = now
+            self.campaign_snapshot = snapshot
 
-            # When retry_failed is set, re-queue error missives at claim time —
-            # send-time ERROR rows are reset to DRAFT in place; delivery failures
-            # are duplicated as fresh DRAFTs. Done here (not in run_campaign) so
-            # retry works generically for every backend the task dispatches to.
+            # When retry_failed is set, re-queue the campaign's failures at claim
+            # time as fresh DRAFTs. Done here (not in run_campaign) so retry
+            # works generically for every backend the task dispatches to.
             if self.retry_failed:
                 self._retry_error_missives()
 
             # Attach all relevant DRAFT missives to this scheduler in the same
             # transaction as the send_date claim, so live count annotations are
-            # accurate from the very first progress poll.
-            if not self.to_missive.exists():
-                qs = self.campaign.to_missive.filter(
-                    status=MissiveStatus.DRAFT,
-                    scheduler__isnull=True,
-                )
-                if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
-                    qs = qs.filter(missive_type=self.missive_type)
-                qs.update(scheduler=self)
+            # accurate from the very first progress poll. Same claim rule as
+            # ``start_campaign`` — drafts left behind by an ended run included.
+            #
+            # Claimed unconditionally: guarding on an empty ``to_missive`` made
+            # ``retry_failed`` substitutive instead of additive, since
+            # ``_retry_error_missives`` has just filled it with the retry drafts.
+            # The campaign's own pending missives were then left with no run to
+            # send them. Re-claiming costs nothing and takes nothing from
+            # anybody: the drafts of a run still open — this one's included —
+            # are not claimable.
+            qs = self.campaign.claimable_send_queryset()
+            if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
+                qs = qs.filter(missive_type=self.missive_type)
+            qs.update(scheduler=self)
 
         error = None
         try:
@@ -471,11 +538,19 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         relation for accuracy. Otherwise fall back to the campaign relation
         (useful for runs created manually without the bulk-update step).
         Filtered by ``missive_type`` when not ``"*"``.
+
+        The fallback claims what
+        :meth:`MissiveCampaign.claimable_send_queryset` allows — not every draft
+        of the campaign: a run must not process the missives another open run is
+        working on, and a conversation message is not a send at all.
         """
         if self.to_missive.exists():
-            qs = self.to_missive.filter(status=MissiveStatus.DRAFT)
+            qs = self.to_missive.filter(
+                status=MissiveStatus.DRAFT,
+                thread_type=MissiveThreadType.MISSIVE,
+            )
         else:
-            qs = self.campaign.to_missive.filter(status=MissiveStatus.DRAFT)
+            qs = self.campaign.claimable_send_queryset()
         if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
             qs = qs.filter(missive_type=self.missive_type)
         return qs
@@ -538,27 +613,26 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
     def _retry_error_missives(self) -> int:
         """Re-queue failed missives for another send attempt.
 
-        Send-time failures (``ERROR``) are retried on the same row — no HISTORY
-        duplicate. Delivery failures (``FAILED``, ``PARTIALLY_FAILED``) are
-        duplicated as fresh DRAFTs so the provider sees a new submission.
+        Every failure — send-time (``ERROR``) as well as delivery
+        (``FAILED``, ``PARTIALLY_FAILED``) — is archived as ``HISTORY`` and
+        duplicated as a fresh DRAFT attached to this run, so the provider sees a
+        new submission. The archived row keeps its ``scheduler``: rewriting that
+        FK would hand the failure over to this run, which never sent it, and
+        erase it from the report of the run that did.
+
+        Live sends only: archived attempts are already retried through their
+        replacement, and a failed conversation message is not a campaign send.
         """
-        base_qs = self.campaign.to_missive.exclude(
-            thread_type=MissiveThreadType.HISTORY,
+        base_qs = self.campaign.to_missive.filter(
+            thread_type=MissiveThreadType.MISSIVE,
+            status__in=ERROR_STATUSES,
         )
         if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
             base_qs = base_qs.filter(missive_type=self.missive_type)
 
-        send_error_count = base_qs.filter(status=MissiveStatus.ERROR).update(
-            status=MissiveStatus.DRAFT,
-            scheduler=self,
-        )
-
-        delivery_error_qs = base_qs.filter(
-            status__in=[MissiveStatus.FAILED, MissiveStatus.PARTIALLY_FAILED],
-        )
-        duplicate_count = 0
+        retried = 0
         with transaction.atomic():
-            for missive in delivery_error_qs:
+            for missive in base_qs:
                 missive.thread_type = MissiveThreadType.HISTORY
                 missive.save(update_fields=["thread_type"])
                 new_missive = missive.duplicate_missive(
@@ -568,9 +642,9 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
                 )
                 new_missive.scheduler = self
                 new_missive.save(update_fields=["scheduler"])
-                duplicate_count += 1
+                retried += 1
 
-        return send_error_count + duplicate_count
+        return retried
 
     def run_campaign(self):
         """Execute the campaign — task_object, external backend, or built-in loop."""

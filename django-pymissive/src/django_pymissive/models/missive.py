@@ -40,7 +40,17 @@ from ..dispatch_signals import (
     missive_pre_duplicate,
     missive_pre_send,
 )
-from ..utils import get_base_url, build_webhook_url, get_default_domain, get_default_scheme, is_dry_run, serialize_model_for_context
+from ..utils import (
+    apply_default_sender_fields,
+    build_webhook_url,
+    get_base_url,
+    get_default_domain,
+    get_default_scheme,
+    is_dry_run,
+    is_empty_sender_value,
+    serialize_model_for_context,
+    SENDER_CONTACT_FIELDS,
+)
 from django.core import signing
 from django.core.files.base import ContentFile
 
@@ -315,6 +325,29 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             self.delivery_mode = MissiveDeliveryMode.NORMAL
         if not self.priority and not has_campaign:
             self.priority = MissivePriority.NORMAL
+        self._ensure_default_sender()
+
+    def _ensure_default_sender(self):
+        """Fill empty sender fields from settings when the campaign has none.
+
+        Campaign sender wins (fields stay empty and resolve via
+        :meth:`get_locally_or_campaign_value`). Otherwise only the fields for
+        this missive's support are taken from ``PYMISSIVE_DEFAULT_SENDER``.
+        Sent / retrieved missives (``external_id`` set) are left as-is.
+        """
+        if self.external_id:
+            return
+        support = (self.missive_support or "").lower()
+        fields = {}
+        if is_empty_sender_value(self.sender_name) and not self.get_campaign_value("sender_name"):
+            fields["sender_name"] = "name"
+        mapping = SENDER_CONTACT_FIELDS.get(support)
+        if mapping:
+            attr, key = mapping
+            if is_empty_sender_value(getattr(self, attr, None)) and not self.get_campaign_value(attr):
+                fields[attr] = key
+        if fields:
+            apply_default_sender_fields(self, fields)
 
     def save(self, *args, **kwargs):
         """Save the missive with auto-filled defaults (provider, support, acknowledgement, etc.)."""
@@ -1565,7 +1598,12 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         Fields that can be inherited from campaign are nullable, but become required
         when no campaign is attached. Dispatches to clean_support_{support} for
         support-specific extra validation (e.g. attachments for LRE).
+
+        Sender defaults from ``PYMISSIVE_DEFAULT_SENDER`` are applied first so
+        admin ``full_clean`` can persist them. If that setting is empty (or
+        has no value for this type), the required-field checks still run.
         """
+        self._ensure_missive_defaults()
         errors = {}
         support = (self.missive_support or "").lower()
         required = self._REQUIRED_FIELDS_BY_SUPPORT.get(support, [])
