@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.storage import Storage, default_storage
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.urls import reverse
 from django.utils.deconstruct import deconstructible
 from django.utils.module_loading import import_string
@@ -30,6 +30,16 @@ from ..fields import JSONField
 
 # Priority 0 is reserved for the first-document (letter body PDF). Other attachments use 1, 2, 3...
 FIRST_DOCUMENT_PRIORITY = 0
+
+#: Types that share the page-order sequence (letter + annexes). Proofs etc. stay out.
+_PAGE_ORDER_TYPES = (
+    MissiveAttachmentType.ATTACHMENT,
+    MissiveAttachmentType.VIRTUAL_ATTACHMENT,
+)
+
+
+def _page_order_q() -> models.Q:
+    return models.Q(attachment_type__in=_PAGE_ORDER_TYPES)
 
 
 def _default_attachment_object_arguments():
@@ -225,12 +235,54 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         verbose_name = _("Attachment")
         verbose_name_plural = _("Attachments")
         ordering = ["priority",]
+        # Every access goes through the GenericRelation of a missive or a
+        # campaign, never through the attachment itself.
+        indexes = [
+            models.Index(fields=["attachment_content_type", "attachment_object_id"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["missive", "priority"],
+                condition=models.Q(missive__isnull=False) & _page_order_q(),
+                name="uniq_missive_att_priority",
+            ),
+            models.UniqueConstraint(
+                fields=["campaign", "priority"],
+                condition=models.Q(campaign__isnull=False) & _page_order_q(),
+                name="uniq_campaign_att_priority",
+            ),
+        ]
+
+    def is_publicly_downloadable(self) -> bool:
+        """Anonymous GET is for access-link and postal-preview files only.
+
+        ``PROOF`` (LRE delivery evidence, PII) is never public, even when
+        ``linked`` was left at its default True. Physically attached email
+        files (``linked=False``) are not world-downloadable by id. Postal/LRE
+        preview still needs the letter and annexes without a login; campaign
+        annexes render in that same public preview.
+        """
+        if self.attachment_type == MissiveAttachmentType.PROOF:
+            return False
+        if self.linked:
+            return True
+        missive = self.missive
+        if missive is not None:
+            return missive.is_postal_like()
+        return self.campaign_id is not None
 
     @property
     def is_first_document(self):
-        """True if this is the first-document (letter body PDF). Reserved for priority 0."""
-        name = getattr(self.attachment_file, "name", None) or ""
-        return "first-document-" in name
+        """True if this is the letter-body PDF: ``ATTACHMENT`` at priority 0.
+
+        Not by filename. A user file named ``first-document-x.pdf`` is a
+        regular annex; ``generate_first_document`` still uses that prefix
+        only as a storage name.
+        """
+        return (
+            self.attachment_type == MissiveAttachmentType.ATTACHMENT
+            and self.priority == FIRST_DOCUMENT_PRIORITY
+        )
 
     def _resolved_name(self) -> str:
         """Best-effort full path/name of the underlying file.
@@ -410,22 +462,43 @@ class MissiveBaseAttachment(CommentTimestampedModel):
             campaign=campaign,
         )
 
+    def _lock_priority_parent(self) -> None:
+        """Serialize priority assignment on the missive or campaign row.
+
+        ``SELECT MAX`` then INSERT races when two attachments are created at
+        once: both see the same max and write the same priority. Locking an
+        empty sibling queryset would not help — there is nothing to lock —
+        so the parent row is the mutex. Caller must already be in
+        ``transaction.atomic()``.
+        """
+        if self.missive_id:
+            from .missive import Missive
+
+            list(Missive.objects.select_for_update().filter(pk=self.missive_id))
+        elif self.campaign_id:
+            from .campaign import MissiveCampaign
+
+            list(
+                MissiveCampaign.objects.select_for_update().filter(pk=self.campaign_id)
+            )
+
     def calculate_priority(self):
         """Return next priority. First-document uses 0; others use 1, 2, 3... (0 is reserved)."""
         from django.db.models import Max
 
         if self.is_first_document:
             return FIRST_DOCUMENT_PRIORITY
-        qs = MissiveBaseAttachment.objects
+        qs = MissiveBaseAttachment.objects.filter(_page_order_q())
         if self.missive_id:
             qs = qs.filter(missive_id=self.missive_id)
         elif self.campaign_id:
             qs = qs.filter(campaign_id=self.campaign_id)
         else:
             return 1
-        # Exclude first-documents (priority 0) from max; others start at 1
         qs = qs.exclude(priority=FIRST_DOCUMENT_PRIORITY)
-        max_priority = qs.aggregate(Max("priority"))["priority__max"] or (FIRST_DOCUMENT_PRIORITY)
+        max_priority = qs.aggregate(Max("priority"))["priority__max"] or (
+            FIRST_DOCUMENT_PRIORITY
+        )
         return max(1, max_priority + 1)
 
     def _recalculate_sibling_priorities(self):
@@ -465,12 +538,17 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         if self.attachment_object_id is not None:
             self.attachment_object_id = object_id_value(self.attachment_object_id)
         if self._state.adding and (self.missive_id or self.campaign_id):
-            self.priority = self.calculate_priority()
-        else:
-            if self.is_first_document:
-                self.priority = FIRST_DOCUMENT_PRIORITY
-            elif self.priority == FIRST_DOCUMENT_PRIORITY:
-                self.priority = 1
+            for attempt in range(2):
+                try:
+                    with transaction.atomic():
+                        self._lock_priority_parent()
+                        self.priority = self.calculate_priority()
+                        super().save(*args, **kwargs)
+                    return
+                except IntegrityError:
+                    if attempt:
+                        raise
+            return
         super().save(*args, **kwargs)
 
 class MissiveAttachment(MissiveBaseAttachment):

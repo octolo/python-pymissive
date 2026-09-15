@@ -1,7 +1,10 @@
 """Webhook model for storing webhook configurations."""
 
 from django.db import models
+from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.utils.translation import gettext_lazy as _
+from virtualqueryset.models import VirtualModel
+
 from .choices import MissiveType, WebhookScheme
 
 from pymissive.config import WEBHOOK_FIELDS
@@ -25,8 +28,8 @@ WEBHOOK_FIELD_MAX_LENGTHS = {
 }
 
 
-class MissiveWebhook(models.Model):
-    """Webhook configuration for missive events."""
+class MissiveWebhook(VirtualModel):
+    """Webhook configuration stored on the provider, not in Django."""
 
     provider = ProviderField(
         package_name="pymissive",
@@ -63,6 +66,7 @@ class MissiveWebhook(models.Model):
 
     class Meta:
         managed = False
+        app_label = "django_pymissive"
         verbose_name = _("Webhook")
         verbose_name_plural = _("Webhooks")
         ordering = ["-created_at"]
@@ -114,17 +118,41 @@ class MissiveWebhook(models.Model):
             )
 
     def save(self, *args, **kwargs):
-        self.webhook_id = (
-            self.new_webhook() if not self.webhook_id else self.update_webhook()
+        """Persist on the provider. ``VirtualModel.save`` raises — do not call it."""
+        created = not self.webhook_id
+        using = kwargs.get("using")
+        update_fields = kwargs.get("update_fields")
+        pre_save.send(
+            sender=type(self),
+            instance=self,
+            raw=False,
+            using=using,
+            update_fields=update_fields,
+        )
+        webhook_id = self.new_webhook() if created else self.update_webhook()
+        if webhook_id:
+            self.webhook_id = webhook_id
+        self._state.adding = False
+        post_save.send(
+            sender=type(self),
+            instance=self,
+            created=created,
+            raw=False,
+            using=using,
+            update_fields=update_fields,
         )
 
-    def delete(self):
+    def delete(self, using=None, keep_parents=False):
+        """Remove on the provider. ``VirtualModel.delete`` raises — do not call it."""
+        pre_delete.send(sender=type(self), instance=self, using=using)
         service = f"delete_webhook_{self.type}".lower()
         provider = self.get_provider()
         if hasattr(provider._provider, service):
             provider._provider.call_service(
                 service, webhook_data=self.get_webhook_data()
             )
+        post_delete.send(sender=type(self), instance=self, using=using)
+        return 1, {self._meta.label: 1}
 
 
 for field, cfg in WEBHOOK_FIELDS.items():

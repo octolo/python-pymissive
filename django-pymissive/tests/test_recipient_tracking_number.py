@@ -6,8 +6,10 @@ from unittest.mock import patch
 
 import pytest
 
+from django.utils import timezone
+
 from django_pymissive.models import MissiveRecipientEmail
-from django_pymissive.models.choices import MissiveType
+from django_pymissive.models.choices import MissiveStatus, MissiveType
 from django_pymissive.models.missive import Missive
 from django_pymissive.retrieve import retrieve_from_provider
 
@@ -79,12 +81,18 @@ def test_duplicate_recipients_clears_tracking_number():
         email="alice@example.com",
         external_id="mv-1",
         tracking_number="2C123456789FR",
+        status=MissiveStatus.SUCCESS,
+        sent_at=timezone.now(),
+        delivered_at=timezone.now(),
     )
     clone = _email_missive(subject="Clone")
     source.duplicate_recipients(clone, source)
     cloned = clone.to_missiverecipient.get()
     assert cloned.external_id is None
     assert cloned.tracking_number is None
+    assert cloned.status == MissiveStatus.DRAFT
+    assert cloned.sent_at is None
+    assert cloned.delivered_at is None
 
 
 def test_retrieve_missive_updates_tracking_number():

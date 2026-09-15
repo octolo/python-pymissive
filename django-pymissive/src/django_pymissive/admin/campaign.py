@@ -1,11 +1,7 @@
 """Admin for MissiveCampaign model."""
 
-from urllib.parse import unquote
-
 from django.contrib import admin
 from django.urls import reverse
-from django.utils import timezone
-from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django.utils.text import format_lazy
@@ -26,10 +22,11 @@ from ..utils import recalculate_attachment_priorities
 from .attachment import CampaignAttachmentBaseInline
 from .related_object import CampaignRelatedObjectInline
 from .scheduler import MissiveScheduledCampaignInline
+from .permissions import ActionRightsMixin
 
 
 @admin.register(MissiveCampaign)
-class MissiveCampaignAdmin(AdminBoostModel):
+class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
     """Admin for missive campaign model."""
 
     view_on_site = True
@@ -238,19 +235,25 @@ class MissiveCampaignAdmin(AdminBoostModel):
 
     last_ended_at_display.short_description = _("Last ended at")
 
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and not obj.can_remove:
+            return False
+        return super().has_delete_permission(request, obj)
+
     def has_start_campaign_permission(self, request, obj=None):
-        return obj and obj.pk
+        return bool(self.has_action_rights(request, obj) and obj and obj.pk)
 
     @admin_boost_action("start_campaign", _("Start campaign"))
     def handle_start_campaign(self, request, object_id):
-        object_id = unquote(object_id)
-        obj = self.get_object(request, object_id)
-        return redirect(reverse("admin:django_pymissive_missivecampaign_start_campaign", args=[obj.pk]))
+        return self.redirect_to_boost_view(request, object_id, "start_campaign")
 
     @admin_boost_view("confirm", _("Start campaign"), hidden=True)
     def start_campaign(self, request, obj, confirmed=False):
-        if not confirmed:
-            return {"confirm": _("Are you sure you want to start this campaign?")}
+        waiting = self.confirm_action(
+            request, obj, confirmed, _("Are you sure you want to start this campaign?")
+        )
+        if waiting:
+            return waiting
         obj.start_campaign()
         messages.success(request, _("Campaign started successfully."))
         return redirect(obj.get_progress_path())

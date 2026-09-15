@@ -1,103 +1,110 @@
-# python-missive
+# pymissive
 
-Lightweight, framework-agnostic Python library for multi-channel message sending (email, SMS, push notifications, postal mail, etc.).
+Lightweight, framework-agnostic Python library for multi-channel message sending: email, SMS, WhatsApp, registered electronic mail (LRE) and team messaging.
 
 ## Overview
 
-**python-missive** is a framework-agnostic Python library that provides unified providers for multi-channel message sending. It serves as the base for **django-missive** and can be used independently in any Python project.
+**pymissive** exposes one provider interface per channel, so the calling code
+stays the same whichever service actually delivers the message. It is the base
+of **django-pymissive** and can be used on its own in any Python project.
+
+The PyPI name is `pymissive`; the directory holding it in this monorepo is
+`python-pymissive/`.
 
 ### Main features
 
-- 🔌 **15+ integrated providers** for different communication channels
-- 📧 **Email**: SendGrid, Mailgun, SES, Brevo, SMTP, Django Email
-- 📱 **SMS & Voice**: Twilio, Vonage, SMSPartner
-- 💬 **Messaging**: Telegram, Signal, Messenger, Slack, Teams
-- 📮 **Postal & LRE**: La Poste, Maileva, AR24, Certeurope
-- 🔔 **Push notifications**: FCM (Firebase), APN (Apple), In-App
+- 🔌 **8 providers**, all sharing the same service names
+- 📧 **Email**: Brevo, Scaleway
+- 📱 **SMS**: Brevo, SMSPartner
+- 💬 **WhatsApp**: Brevo
+- 📮 **Registered electronic mail (LRE)**: Maileva
+- 👥 **Team messaging**: Slack, Microsoft Teams, Discord
+- ✋ **Hand delivery**: tracks an in-person hand-over, no external API
 - 🏗️ **Modular architecture** based on ProviderKit
 - ✅ **Framework-agnostic**: usable with or without a framework
-- 🎯 **Complete type hints** and documentation
+- 🎯 **Type hints** throughout
 
 ## Installation
 
 ```bash
-# Basic installation
-pip install python-missive
+pip install pymissive
+```
 
-# With dependencies for specific providers
-pip install python-missive[email]      # Email providers
-pip install python-missive[sms]        # SMS and voice
-pip install python-missive[messaging]  # Telegram, Signal, etc.
-pip install python-missive[push]       # FCM, APN
-pip install python-missive[postal]     # Postal mail
-pip install python-missive[all]        # All providers
+`requests` is a base dependency, so Maileva and SMSPartner work as installed.
+Providers needing another SDK have their own extra. Those imports are lazy, so a
+missing extra only disables that one provider:
+
+```bash
+pip install pymissive[brevo]     # brevo-python
+pip install pymissive[scaleway]  # boto3
+pip install pymissive[discord]   # discord.py
 ```
 
 ## Quick usage
 
 ```python
-from pymissive.providers.sendgrid import SendGridProvider
+from pymissive.providers.slack import SlackProvider
 
-# Configure the provider
-provider = SendGridProvider(config={
-    'SENDGRID_API_KEY': 'your-api-key'
+provider = SlackProvider(config={
+    "SLACK_BOT_TOKEN": "xoxb-your-token",
+    "SLACK_CHANNEL_ID": "C0123456789",
 })
 
-# Send an email
-result = provider.send_email(
-    from_email='sender@example.com',
-    to_email='recipient@example.com',
-    subject='Hello',
-    body='<p>Message content</p>'
+result = provider.send_branded(
+    subject="Deployment finished",
+    body_text="Version 1.3.15 is live.",
 )
 ```
 
+Each key in `config_keys` is read from `config` first, then from the
+environment, so exporting `SLACK_BOT_TOKEN` instead works the same way.
+
 ## Available providers
 
-### Email
-- `DjangoEmailProvider` - Uses Django email backend
-- `SMTPProvider` - Generic SMTP
-- `SendGridProvider` - SendGrid API
-- `MailgunProvider` - Mailgun API
-- `SESProvider` - Amazon SES
-- `BrevoProvider` - Brevo (ex-Sendinblue)
-- `ScalewayProvider` - Scaleway Transactional Email
+Services are named `<verb>_<missive_type>` — `send_email`, `retrieve_lre`,
+`handle_webhook_sms`, and so on. `branded` is the missive type used by the team
+messaging platforms, where the sender identity is the bot rather than an address.
 
-### SMS & Voice
-- `TwilioProvider` - Twilio SMS and voice calls
-- `VonageProvider` - Vonage (ex-Nexmo)
-- `SMSPartnerProvider` - SMSPartner
+| Provider | Class | Missive types | Extra |
+|---|---|---|---|
+| Brevo | `BrevoAPIProvider` | `email`, `sms`, `whatsapp`, `branded` | `[brevo]` |
+| Scaleway | `ScalewayProvider` | `email`, `branded` | `[scaleway]` |
+| Maileva | `MailevaProvider` | `lre`, `branded` | — |
+| SMSPartner | `PartnerProvider` | `sms`, `branded` | — |
+| Slack | `SlackProvider` | `branded` | — |
+| Microsoft Teams | `TeamsProvider` | `branded` | — |
+| Discord | `DiscordProvider` | `branded` | `[discord]` |
+| Hand delivery | `HandDeliveryProvider` | `hand_delivery`, `branded` | — |
 
-### Messaging
-- `TelegramProvider` - Telegram Bot API
-- `SignalProvider` - Signal Messenger
-- `MessengerProvider` - Facebook Messenger
-- `SlackProvider` - Slack
-- `TeamsProvider` - Microsoft Teams
-
-### Postal mail & LRE
-- `LaPosteProvider` - La Poste (physical mail)
-- `MailevaProvider` - Maileva
-- `AR24Provider` - AR24 (LRE)
-- `CerteuropeProvider` - Certeurope
-
-### Push notifications
-- `FCMProvider` - Firebase Cloud Messaging
-- `APNProvider` - Apple Push Notification
-- `InAppNotificationProvider` - In-app notifications
+`providers/todo/` holds one-class placeholders (SendGrid, Mailgun, Twilio,
+Telegram, FCM, APN, SMTP, …). They are a backlog, not an API: they are not
+importable and nothing is wired to them.
 
 ## Architecture
 
-The library uses **ProviderKit** for provider management:
+Providers are plain classes discovered by **ProviderKit**:
 
 ```python
-from pymissive.providers import get_missive_providers
+from pathlib import Path
 
-# Discover all available providers
-providers = get_missive_providers()
+import pymissive.providers as providers_package
+from providerkit import autodiscover_providers
 
-# Filter by service type
-email_providers = [p for p in providers if 'email' in p.services]
+classes = autodiscover_providers(
+    Path(list(providers_package.__path__)[0]),
+    base_module="pymissive.providers",
+    exclude_files=["base"],
+)
+# {'brevo': BrevoAPIProvider, 'maileva': MailevaProvider, ...}
+```
+
+Beware of `ProviderBase.services`: it lists the whole catalogue of service names,
+not the subset a given provider implements. To know whether a provider really
+supports something, look for the method itself:
+
+```python
+provider = classes["brevo"]()
+can_send_sms = hasattr(provider, "send_sms")
 ```
 
 ## Documentation
@@ -112,21 +119,14 @@ For more details, see the documentation in the `docs/` folder:
 ## Development
 
 ```bash
-# Create virtual environment
-python service.py dev venv
+pip install -e .
 
-# Install in development mode
-python service.py dev install-dev
-
-# Run tests
-python service.py dev test
-
-# Format code
-python service.py dev format
-
-# Run all quality checks
-python service.py quality check
+# Lint (same command as CI, from the repository root)
+ruff check src
 ```
+
+This package has no test suite of its own yet: CI only checks that it imports.
+The behaviour of the providers is covered by the suite in `django-pymissive/`.
 
 ## License
 

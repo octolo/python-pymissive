@@ -194,18 +194,20 @@ def test_get_billings_lre_user_reference_is_substitute_id_not_external_id():
     captured = {}
 
     class FakeResponse:
+        status_code = 200
+
         def raise_for_status(self):
             return None
 
         def json(self):
             return {"paging": {"total_results": 0}, "items": []}
 
-    def fake_get(url, headers=None, timeout=None, params=None):
+    def fake_request(method, url, headers=None, timeout=None, params=None, **kwargs):
         captured["url"] = url
         captured["params"] = params
         return FakeResponse()
 
-    with patch("pymissive.providers.maileva.requests.get", fake_get):
+    with patch("pymissive.providers.maileva.requests.request", fake_request):
         MailevaProvider.get_billings_lre(
             _billing_provider(),
             id="new-pk",
@@ -222,18 +224,20 @@ def test_get_billings_lre_user_reference_falls_back_to_missive_pk():
     captured = {}
 
     class FakeResponse:
+        status_code = 200
+
         def raise_for_status(self):
             return None
 
         def json(self):
             return {"items": []}
 
-    def fake_get(url, headers=None, timeout=None, params=None):
+    def fake_request(method, url, headers=None, timeout=None, params=None, **kwargs):
         captured["url"] = url
         captured["params"] = params
         return FakeResponse()
 
-    with patch("pymissive.providers.maileva.requests.get", fake_get):
+    with patch("pymissive.providers.maileva.requests.request", fake_request):
         MailevaProvider.get_billings_lre(
             _billing_provider(),
             id="c880d57c-4dc8-4cd7-90dc-76c33b824ad6",
@@ -248,6 +252,8 @@ def test_get_billings_lre_returns_empty_when_not_invoiced():
     from pymissive.providers.maileva import MailevaProvider
 
     class FakeResponse:
+        status_code = 200
+
         def raise_for_status(self):
             return None
 
@@ -255,7 +261,7 @@ def test_get_billings_lre_returns_empty_when_not_invoiced():
             return {"paging": {"total_results": 0}, "items": []}
 
     with patch(
-        "pymissive.providers.maileva.requests.get", lambda *a, **k: FakeResponse()
+        "pymissive.providers.maileva.requests.request", lambda *a, **k: FakeResponse()
     ):
         billings = MailevaProvider.get_billings_lre(
             _billing_provider(),

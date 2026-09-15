@@ -8,7 +8,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from pymissive.utils import is_disable_send
+from pymissive.utils import HTTP_TIMEOUT, is_disable_send
 
 from .base import MissiveProviderBase
 
@@ -93,8 +93,6 @@ class BrevoAPIProvider(MissiveProviderBase):
 
     def __init__(self, **kwargs: str | None) -> None:
         super().__init__(**kwargs)
-        if not hasattr(self, "attachments"):
-            self.attachments = []
         self._email_api_key = self._get_config_or_env("EMAIL_API_KEY")
         self._sms_api_key = self._get_config_or_env("SMS_API_KEY")
         self._whatsapp_api_key = self._get_config_or_env("WHATSAPP_API_KEY")
@@ -304,6 +302,13 @@ class BrevoAPIProvider(MissiveProviderBase):
     #########################################################
 
     def delete_blocked_emails(self, kwargs: dict[str, Any]) -> bool:
+        """Unblock every To/Cc/Bcc address before send.
+
+        This library sends transactional mail, not marketing lists. Brevo
+        (and other tools) often mark a contact blocked after a bounce or a
+        false positive; we always clear that so a later legitimate send is
+        not silently dropped. Failures are ignored: the send still runs.
+        """
         with contextlib.suppress(Exception):
             client = self._get_email_client()
             for recipient in kwargs.get("recipients", []):
@@ -482,7 +487,7 @@ class BrevoAPIProvider(MissiveProviderBase):
                 method="GET",
             )
             try:
-                with urlopen(req) as resp:
+                with urlopen(req, timeout=HTTP_TIMEOUT) as resp:
                     payload = json.loads(resp.read().decode())
             except HTTPError as e:
                 body = e.read().decode() if e.fp else ""
@@ -597,7 +602,7 @@ class BrevoAPIProvider(MissiveProviderBase):
             method="POST",
         )
         try:
-            with urlopen(req) as resp:
+            with urlopen(req, timeout=HTTP_TIMEOUT) as resp:
                 return self._response_to_dict(_json.loads(resp.read().decode()))
         except HTTPError as e:
             body = e.read().decode() if e.fp else ""

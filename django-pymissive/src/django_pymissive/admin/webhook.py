@@ -2,18 +2,30 @@
 
 from urllib.parse import unquote
 
+from django import forms
+from django.conf import settings
 from django.contrib import admin
-from django.http import HttpResponseRedirect
 from django.utils.translation import gettext_lazy as _
-
 from django_boosted import AdminBoostModel
+from django_boosted.decorators import admin_boost_view
 
-from ..models.provider import MissiveProviderModel
+from pymissive.webhook_secret import generate_webhook_secret as make_webhook_secret
+
+from ..forms.webhook import GenerateWebhookSecretForm
 from ..models.webhook import MissiveWebhook
+from .permissions import ActionRightsMixin
+
+
+def _webhook_provider_name(webhook) -> str:
+    name = getattr(webhook, "provider_name", None)
+    if name:
+        return str(name)
+    provider = getattr(webhook, "provider", None)
+    return getattr(provider, "name", None) or str(provider or "")
 
 
 class ProviderListFilter(admin.SimpleListFilter):
-    """Custom filter for provider field."""
+    """Filter virtual webhooks by provider name."""
 
     title = _("Provider")
     parameter_name = "provider"
@@ -21,22 +33,27 @@ class ProviderListFilter(admin.SimpleListFilter):
     def lookups(self, request, _model_admin):
         """Return list of providers as filter options."""
         try:
-            # Get the provider field from the model
             provider_field = MissiveWebhook._meta.get_field("provider")
-            # Use the field's method to get choices
             choices = provider_field.get_provider_choices()
-            # Remove the empty choice
             return [choice for choice in choices if choice[0]]
         except Exception:
             return []
 
     def queryset(self, request, queryset):
-        """Filter queryset by provider."""
-        return queryset
+        value = self.value()
+        if not value:
+            return queryset
+        rows = getattr(queryset, "_result_cache", None)
+        if rows is None:
+            rows = list(queryset)
+        kept = [obj for obj in rows if _webhook_provider_name(obj) == value]
+        return queryset.model.objects.queryset_class(
+            model=queryset.model, data=kept
+        )
 
 
 @admin.register(MissiveWebhook)
-class MissiveWebhookAdmin(AdminBoostModel):
+class MissiveWebhookAdmin(ActionRightsMixin, AdminBoostModel):
     """Admin for missive webhooks."""
 
     list_display = [
@@ -78,6 +95,11 @@ class MissiveWebhookAdmin(AdminBoostModel):
             return hasattr(provider._provider, f"delete_webhook_{obj.type}")
         return False
 
+    def has_action_rights(self, request, obj=None) -> bool:
+        # Change is denied on the changelist (virtual rows). Generating a
+        # secret is a staff action, not an update of a subscription.
+        return admin.ModelAdmin.has_view_permission(self, request, obj)
+
     def get_readonly_fields(self, request, obj=None):
         if obj:
             readonly = list(self.readonly_fields)
@@ -96,15 +118,6 @@ class MissiveWebhookAdmin(AdminBoostModel):
         )
         self.add_to_fieldset(_("Infos"), ["webhook_id", "url", "created_at", "updated_at"])
 
-    def changelist_view(self, request, extra_context=None):
-        if "provider" not in request.GET:
-            providers = MissiveProviderModel.objects.all()
-            if providers:
-                params = request.GET.copy()
-                params["provider"] = providers[0].name
-                return HttpResponseRedirect(f"{request.path}?{params.urlencode()}")
-        return super().changelist_view(request, extra_context=extra_context)
-
     def get_object(self, request, object_id, _from_field=None):
         webhook_id = unquote(object_id)
         provider = webhook_id.split("-")[0]
@@ -114,6 +127,43 @@ class MissiveWebhookAdmin(AdminBoostModel):
         )
 
     def get_queryset(self, request):
-        if provider := request.GET.get("provider"):
+        provider = request.GET.get(ProviderListFilter.parameter_name)
+        if provider:
             return self.model.objects.get_queryset(provider)
-        return self.model.objects.none()
+        return self.model.objects.all_providers()
+
+    def has_generate_webhook_secret_permission(self, request, obj=None):
+        return self.has_action_rights(request, obj)
+
+    @admin_boost_view(
+        "adminform", _("Generate webhook secret"), requires_object=False
+    )
+    def generate_webhook_secret(self, request, form=None):
+        """Show a secret seeded by provider name, UTC date, and SECRET_KEY."""
+        self.require_action_rights(request)
+        if form is None:
+            return {
+                "form": GenerateWebhookSecretForm(),
+                "save_label": _("Generate"),
+                "has_change_permission": True,
+            }
+        provider = str(form.cleaned_data["provider"])
+        token = make_webhook_secret(provider, settings.SECRET_KEY)
+        result = GenerateWebhookSecretForm(initial={"provider": provider})
+        result.fields["secret"] = forms.CharField(
+            initial=token,
+            label=_("Webhook secret"),
+            help_text=_(
+                "Copy into WEBHOOK_SECRET for this provider, then re-create "
+                "the webhook."
+            ),
+            widget=forms.TextInput(
+                attrs={"readonly": "readonly", "style": "font-family:monospace"}
+            ),
+        )
+        result.order_fields(["provider", "secret"])
+        return {
+            "form": result,
+            "save_label": _("Generate"),
+            "has_change_permission": True,
+        }

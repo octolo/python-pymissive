@@ -78,8 +78,16 @@ class MissiveAttachmentDownloadView(DetailView):
             )
             return content_bytes
 
+    def _can_download(self, request, attachment_obj) -> bool:
+        if attachment_obj.is_publicly_downloadable():
+            return True
+        user = getattr(request, "user", None)
+        return bool(user is not None and user.is_staff)
+
     def get(self, request, *args, **kwargs):
         attachment_obj = self.get_object()
+        if not self._can_download(request, attachment_obj):
+            raise Http404
         attachment = attachment_obj.get_attachment()
         skip_processors = request.GET.get("raw") in {"1", "true", "yes"}
 

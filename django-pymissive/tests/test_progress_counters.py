@@ -1,11 +1,9 @@
-"""Grouped counters must not be inflated by the default manager's joins.
+"""Grouped counters must not be inflated by leftover reverse-FK joins.
 
-``Missive.objects`` annotates counts over reverse FKs (recipients, events,
-attachments, related objects). Those LEFT JOINs survive a ``.values()`` added
-downstream — it only drops the column, not the join — so a non-distinct
-``Count`` stacked on top groups multiplied rows: one missive with 3 recipients
-and 4 events is counted 12 times. Every grouped counter therefore has to start
-from ``_base_manager``.
+A ``.values()`` added downstream drops annotation columns but keeps their
+LEFT JOINs, so a non-distinct ``Count`` stacked on top groups multiplied
+rows: one missive with 3 recipients and 4 events is counted 12 times.
+Every grouped counter therefore has to start from ``_base_manager``.
 """
 
 from __future__ import annotations

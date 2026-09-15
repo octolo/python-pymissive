@@ -10,7 +10,11 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 
-from django_pymissive.billings import delay_retrieve_billings, retrieve_billings
+from django_pymissive.billings import (
+    _process_billing,
+    delay_retrieve_billings,
+    retrieve_billings,
+)
 from django_pymissive.forms.billing import RetrieveBillingsForm
 from django_pymissive.models.billing import MissiveBilling
 from django_pymissive.models.choices import MissiveType
@@ -52,6 +56,47 @@ def test_form_accepts_range_and_as_task():
     assert form.cleaned_data["as_task"] is True
     assert form.cleaned_data["start_date"] == date(2026, 1, 1)
     assert form.cleaned_data["end_date"] == date(2026, 1, 31)
+
+
+def test_process_billing_updates_amount_on_the_same_invoice():
+    missive = Missive.objects.create(
+        missive_type=MissiveType.LRE,
+        external_id="send-amt",
+        subject="LRE",
+    )
+    _process_billing(
+        missive,
+        {
+            "invoice": "INV-1",
+            "billing_amount": 1.20,
+            "estimate_amount": 1.20,
+            "currency": "EUR",
+        },
+    )
+    _process_billing(
+        missive,
+        {
+            "invoice": "INV-1",
+            "billing_amount": 1.35,
+            "estimate_amount": 1.20,
+            "currency": "EUR",
+        },
+    )
+    assert MissiveBilling.objects.filter(missive=missive).count() == 1
+    row = MissiveBilling.objects.get(missive=missive)
+    assert float(row.billing_amount) == 1.35
+    assert float(row.estimate_amount) == 1.20
+
+
+def test_process_billing_keeps_distinct_invoices():
+    missive = Missive.objects.create(
+        missive_type=MissiveType.LRE,
+        external_id="send-two",
+        subject="LRE",
+    )
+    _process_billing(missive, {"invoice": "A", "billing_amount": 1.0})
+    _process_billing(missive, {"invoice": "B", "billing_amount": 2.0})
+    assert MissiveBilling.objects.filter(missive=missive).count() == 2
 
 
 def test_retrieve_billings_calls_provider_and_upserts():

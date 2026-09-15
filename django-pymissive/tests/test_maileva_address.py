@@ -1,10 +1,49 @@
 """Maileva retrieve maps all address_line_N fields to geoaddress."""
 
+import pytest
+
 from pymissive.providers.maileva import (
     MailevaProvider,
     _address_from_maileva_lines,
+    _maileva_address_line_6,
     _parse_maileva_address_line_6,
 )
+
+
+def test_maileva_address_line_6_joins_postal_code_and_city():
+    assert _maileva_address_line_6({"postal_code": "75000", "city": "Paris"}) == "75000 Paris"
+    assert (
+        _maileva_address_line_6(
+            {"postal_code": "75000", "city": "Paris", "sorting_code": "CEDEX 01"}
+        )
+        == "75000 Paris CEDEX 01"
+    )
+
+
+def test_recipient_lre_requires_organization_or_name():
+    provider = MailevaProvider.__new__(MailevaProvider)
+    address = {"address_line1": "1 rue", "postal_code": "75001", "city": "Paris"}
+    with pytest.raises(ValueError, match="address_line_1 or address_line_2"):
+        provider.get_recipient_lre_data({"address": address})
+    data = provider.get_recipient_lre_data(
+        {"name": "Alice", "address": address}
+    )
+    assert data["address_line_2"] == "Alice"
+    data = provider.get_recipient_lre_data(
+        {"address": {**address, "organization": "Octolo"}}
+    )
+    assert data["address_line_1"] == "Octolo"
+
+
+def test_maileva_address_line_6_rejects_missing_parts():
+    with pytest.raises(ValueError, match="postal_code and city"):
+        _maileva_address_line_6({"postal_code": "75000"})
+    with pytest.raises(ValueError, match="postal_code and city"):
+        _maileva_address_line_6({"city": "Paris"})
+    with pytest.raises(ValueError, match="recipient address"):
+        MailevaProvider.__new__(MailevaProvider).get_recipient_lre_data(
+            {"name": "Alice", "address": {"address_line1": "1 rue"}}
+        )
 
 
 def test_parse_domestic_line_6():

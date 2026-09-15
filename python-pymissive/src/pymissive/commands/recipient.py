@@ -21,8 +21,8 @@ def _recipient_command(args: list[str]) -> bool:
     if parsed.get("help"):
         from .help import print_command_help
         return print_command_help("recipient")
-    cmd_data = parsed.get("command", {})
-    subcommand = (cmd_data.get("args") or ["validate"])[0]
+    cmd_args = parsed.get("args") or []
+    subcommand = cmd_args[0] if cmd_args else "validate"
 
     recipients_raw = parsed.get("recipients", "")
     if not recipients_raw:

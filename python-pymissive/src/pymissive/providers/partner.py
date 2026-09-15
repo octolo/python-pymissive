@@ -6,8 +6,7 @@ from typing import Any, Dict
 
 import requests
 
-from pymissive.config import ALL_EVENTS
-from pymissive.utils import is_disable_send
+from pymissive.utils import HTTP_TIMEOUT, is_disable_send
 
 from .base import MissiveProviderBase
 
@@ -56,12 +55,18 @@ class PartnerProvider(MissiveProviderBase):
     #########################################################
 
     def _request(self, url: str, method: str, data: dict = None) -> dict:
-        """Request to the API."""
+        """Call SMS Partner.
+
+        GET puts ``data`` (including ``apiKey``) in the query string; POST puts
+        it in the JSON body. That split is the published API, not a local
+        choice: https://www.docpartner.dev/api/sms-partner
+        """
         kwargs: dict[str, Any] = {"headers": {"Content-Type": "application/json"}}
         if method.upper() == "GET":
             kwargs["params"] = data
         else:
             kwargs["json"] = data
+        kwargs.setdefault("timeout", HTTP_TIMEOUT)
         response = requests.request(method, url, **kwargs)
         return response.json()
 

@@ -10,6 +10,8 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from pymissive.utils import HTTP_TIMEOUT
+
 from .base import MissiveProviderBase
 
 
@@ -84,7 +86,7 @@ class TeamsProvider(MissiveProviderBase):
         )
 
         try:
-            with urlopen(request) as response:
+            with urlopen(request, timeout=HTTP_TIMEOUT) as response:
                 body = response.read().decode("utf-8")
                 message_id = body.strip() or "sent"
                 # No channel_id (unlike Slack/Discord): destination is the webhook URL.

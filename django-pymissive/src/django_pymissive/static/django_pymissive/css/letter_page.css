@@ -96,6 +96,11 @@
     color: #999;
 }
 
+.a4-body .sandboxed-html-preview {
+    min-height: 180mm;
+    height: 180mm;
+}
+
 /* When the letter page is printed, the wrapper padding is dropped — see postal_preview @page */
 @media print {
     .a4-page {

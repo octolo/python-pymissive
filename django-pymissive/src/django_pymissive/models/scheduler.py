@@ -27,6 +27,7 @@ from ..managers.scheduler import (
     total_annotation_name,
 )
 from ..models.choices import MissiveStatus, MissiveThreadType, MissiveType
+from ..utils import stale_processing_cutoff
 from ..models.mixins import CommentTimestampedModel
 
 logger = logging.getLogger(__name__)
@@ -419,6 +420,32 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         return self.send_date is not None and self.ended_at is None
 
     @property
+    def is_stale(self) -> bool:
+        """True when this open run missed its heartbeat timeout.
+
+        A SIGKILL skips the ``finally`` that sets ``ended_at``. After
+        ``PYMISSIVE_STALE_PROCESSING_SECONDS`` without a heartbeat the run
+        is treated as dead so ``start_campaign`` can start again.
+
+        A run still waiting for ``scheduled_send_date`` is not stale.
+        """
+        if self.ended_at:
+            return False
+        if self.scheduled_send_date and self.scheduled_send_date > timezone.now():
+            return False
+        cutoff = stale_processing_cutoff()
+        if cutoff is None:
+            return False
+        stamp = self.updated_at or self.send_date or self.created_at
+        return stamp is not None and stamp <= cutoff
+
+    def heartbeat(self) -> None:
+        """Touch ``updated_at`` so a live worker is not mistaken for a crash."""
+        now = timezone.now()
+        type(self).objects.filter(pk=self.pk, ended_at__isnull=True).update(updated_at=now)
+        self.updated_at = now
+
+    @property
     def run_status(self):
         """``pending`` | ``running`` | ``completed``."""
         if self.ended_at:
@@ -471,6 +498,13 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
                 .update(send_date=now, campaign_snapshot=snapshot)
             )
             if not claimed:
+                self.refresh_from_db()
+                if self.is_stale:
+                    self._finalize_run(
+                        str(_("Stale run: timed out waiting for a heartbeat."))
+                    )
+                    from .missive import Missive
+                    Missive.reclaim_stale_processing(scheduler=self)
                 return
             self.send_date = now
             self.campaign_snapshot = snapshot
@@ -518,6 +552,15 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             update_fields.append("additional_config")
         self.save(update_fields=update_fields)
 
+        still_open = (
+            type(self)
+            .objects.filter(campaign_id=self.campaign_id, ended_at__isnull=True)
+            .exclude(pk=self.pk)
+            .exists()
+        )
+        if still_open:
+            return
+
         with transaction.atomic():
             from .campaign import MissiveCampaign
             campaign = (
@@ -544,12 +587,16 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         of the campaign: a run must not process the missives another open run is
         working on, and a conversation message is not a send at all.
         """
+        from .missive import Missive
+
         if self.to_missive.exists():
+            Missive.reclaim_stale_processing(scheduler=self)
             qs = self.to_missive.filter(
                 status=MissiveStatus.DRAFT,
                 thread_type=MissiveThreadType.MISSIVE,
             )
         else:
+            Missive.reclaim_stale_processing(campaign=self.campaign)
             qs = self.campaign.claimable_send_queryset()
         if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
             qs = qs.filter(missive_type=self.missive_type)
@@ -594,6 +641,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
                 missive.send_missive()
         failures = []
         for missive in self.iter_claimed_missives():
+            self.heartbeat()
             try:
                 send_fn(missive)
             except Exception as exc:

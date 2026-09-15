@@ -1,5 +1,6 @@
 """Event handling: normalize via provider.handle_webhook_{missive_type}, then process each event."""
 
+import logging
 from datetime import timezone as dt_timezone
 
 from django.conf import settings
@@ -9,7 +10,10 @@ from django.utils.dateparse import parse_datetime
 from .models.choices import MissiveEventType
 from .models.event import MissiveEvent
 from .models.missive import Missive
+from .signals import suppress_event_billings, trigger_billings
 from .utils import get_recipient
+
+logger = logging.getLogger(__name__)
 
 
 def _can_save_untreated(provider_name):
@@ -31,10 +35,11 @@ def _get_occurred_at(occurred_at):
     return timezone.now().replace(microsecond=0)
 
 
-def _save_untreated(event, provider):
+def _save_untreated(event, provider) -> bool:
+    """Park an event whose missive is unknown. False when it was dropped."""
     provider_name = getattr(provider, "name", None) or str(provider)
     if not _can_save_untreated(provider_name):
-        return
+        return False
     trace = {"event": event, "provider": provider_name}
     MissiveEvent.objects.create(
         missive=None,
@@ -44,6 +49,7 @@ def _save_untreated(event, provider):
         occurred_at=_get_occurred_at(event.get("occurred_at")),
         trace=trace,
     )
+    return True
 
 
 # Sending-level lifecycle events that describe the whole missive rather than a
@@ -102,43 +108,65 @@ def _process_event(event, missive, pk=None):
     )
     if fanout_recipients:
         # No pk here: one row per recipient, so there is no single row to target.
-        for recipient in fanout_recipients:
-            _upsert_event(event, missive, recipient, occurred_at)
-            recipient.set_status()
+        # The rows all belong to the same missive, so the per-event billing
+        # signal is suppressed and the provider is called once below instead of
+        # once per recipient — a 50-recipient webhook used to mean 50 calls.
+        with suppress_event_billings():
+            for recipient in fanout_recipients:
+                _upsert_event(event, missive, recipient, occurred_at)
+                recipient.set_status()
+        trigger_billings(missive)
     else:
         _upsert_event(event, missive, None, occurred_at, pk=pk)
     missive.set_status()
 
 
-def handle_event(event, provider, missive_type: str) -> Missive | None:
-    try:
-        external_id = event.get("external_id")
-        missive = Missive.objects.get(external_id=external_id)
-        _process_event(event, missive)
-    except Missive.DoesNotExist:
-        _save_untreated(event, provider)
-    return None
+def handle_event(event, provider, missive_type: str) -> bool:
+    """Process one event. False when it could be neither applied nor parked.
+
+    An unknown ``external_id`` is usually a webhook that overtook the commit of
+    the missive it refers to, so losing it is not acceptable: the caller turns
+    a False into a retryable response.
+    """
+    missive = Missive.objects.get_by_external_id(event.get("external_id"))
+    if missive is None:
+        return _save_untreated(event, provider)
+    _process_event(event, missive)
+    return True
 
 
-def handle_events(events, provider, missive_type: str) -> Missive | None:
-    """Normalize via provider.handle_webhook_{missive_type}, then process each event."""
+def handle_events(events, provider, missive_type: str) -> int:
+    """Normalize via provider.handle_webhook_{missive_type}, then process each event.
+
+    Returns the number of events that were lost. One bad event must not stop
+    the batch, but the count lets the webhook answer with a retryable status
+    instead of pretending everything went through.
+    """
     events_normalized = provider._provider.call_service_formatted(
         f"handle_webhook_{missive_type}", payload=events
     )
-    if events_normalized:
-        if isinstance(events_normalized, dict):
-            events_normalized = [events_normalized]
-        for event in events_normalized:
-            try:
-                handle_event(event, provider, missive_type)
-            except Exception:
-                import logging
-                logging.getLogger(__name__).exception(
-                    "handle_events: failed for external_id=%s event=%s",
+    if not events_normalized:
+        return 0
+    if isinstance(events_normalized, dict):
+        events_normalized = [events_normalized]
+    lost = 0
+    for event in events_normalized:
+        try:
+            if not handle_event(event, provider, missive_type):
+                lost += 1
+                logger.warning(
+                    "handle_events: no missive for external_id=%s event=%s",
                     event.get("external_id") if isinstance(event, dict) else None,
                     event.get("event") if isinstance(event, dict) else None,
                 )
-    return None
+        except Exception:
+            lost += 1
+            logger.exception(
+                "handle_events: failed for external_id=%s event=%s",
+                event.get("external_id") if isinstance(event, dict) else None,
+                event.get("event") if isinstance(event, dict) else None,
+            )
+    return lost
 
 
 def retrieve_events(*, provider, missive_type, start_date, end_date):

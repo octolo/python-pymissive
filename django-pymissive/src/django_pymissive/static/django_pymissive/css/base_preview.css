@@ -46,3 +46,17 @@ body {
     text-align: center;
     padding: 40px;
 }
+
+/* Compiled HTML lives in a sandboxed iframe (no scripts, unique origin).
+   Parent JS cannot read iframe height without allow-same-origin, so the
+   frame scrolls instead of growing with the document. */
+.sandboxed-html-preview {
+    display: block;
+    width: 100%;
+    min-height: 320px;
+    height: 70vh;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    background: #fff;
+}

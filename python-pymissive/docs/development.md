@@ -40,7 +40,7 @@
 
 ### Provider Development
 
-- **Provider inheritance**: All providers must inherit from the appropriate base provider class (e.g., `EmailProvider`, `SMSProvider`, `NotificationProvider`)
+- **Provider inheritance**: All providers inherit from `MissiveProviderBase`. Implement the `send_*` / `retrieve_*` methods you support; ProviderKit raises if a declared service has no method.
 - **Required attributes**: Providers must define `name`, `display_name`, and optionally `description`
 - **Service implementation**: Providers must implement the required service methods based on their category
 - **Configuration**: Use `config_keys` and `config_defaults` for provider configuration

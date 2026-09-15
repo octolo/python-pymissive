@@ -1,5 +1,5 @@
 {% extends "django_pymissive/base_preview.html" %}
-{% load static i18n %}
+{% load static i18n django_pymissive_preview %}
 
 {% block preview_stylesheet %}
 <link rel="stylesheet" href="{% static 'django_pymissive/css/email_preview.css' %}">
@@ -47,7 +47,8 @@
         {% if missive.body_rich_compiled %}
             <fieldset class="email-html">
                 <legend>{% trans "HTML Content" %}</legend>
-                {{ missive.body_rich_compiled|safe }}
+                {% trans "HTML Content" as html_preview_title %}
+                {% sandboxed_html missive.body_rich_compiled html_preview_title %}
             </fieldset>
         {% endif %}
 

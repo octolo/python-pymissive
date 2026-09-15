@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load i18n django_pymissive_preview %}
 {# Single source for postal first page: browser preview + PDF (via body_to_pdf). #}
 {% if provider_address_css_lre %}
 <style>{{ provider_address_css_lre|safe }}</style>
@@ -22,10 +22,19 @@
     </div>
 
     <div class="a4-body">
+        {% trans "Letter body" as letter_preview_title %}
         {% if missive.first_document_compiled %}
-            {{ missive.first_document_compiled|safe }}
+            {% if sandbox_compiled_body %}
+                {% sandboxed_html missive.first_document_compiled letter_preview_title %}
+            {% else %}
+                {{ missive.first_document_compiled|safe }}
+            {% endif %}
         {% elif missive.body_rich %}
-            {{ missive.body_rich|safe }}
+            {% if sandbox_compiled_body %}
+                {% sandboxed_html missive.body_rich letter_preview_title %}
+            {% else %}
+                {{ missive.body_rich|safe }}
+            {% endif %}
         {% elif missive.body_text %}
             <pre>{{ missive.body_text }}</pre>
         {% else %}

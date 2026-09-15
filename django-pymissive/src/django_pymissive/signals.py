@@ -21,10 +21,20 @@ def suppress_event_billings():
         _suppress_event_billings.reset(token)
 
 
+def trigger_billings(missive):
+    """Fetch billings for ``missive`` when its provider supports them.
+
+    Callable directly so a caller creating several events for the *same*
+    missive can make this provider call once instead of once per event.
+    """
+    if missive is not None and missive.can_billings():
+        missive.get_billings()
+
+
 @receiver(post_save, sender=MissiveEvent)
 def trigger_billings_on_event(sender, instance, created, **kwargs):
     """Call get_billings on the missive after a new event is saved."""
     if not created or _suppress_event_billings.get():
         return
-    if instance.missive_id and instance.missive.can_billings():
-        instance.missive.get_billings()
+    if instance.missive_id:
+        trigger_billings(instance.missive)

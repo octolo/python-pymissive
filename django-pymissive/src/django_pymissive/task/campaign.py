@@ -1,4 +1,3 @@
-from django.utils import timezone
 
 from ..models.scheduler import MissiveScheduledCampaign
 

@@ -1,9 +1,7 @@
 class BrandedMixin:
     """Mixin for branded messages."""
 
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        cls.brands = []
+    brands: list[str] = []
 
     def get_brands(self):
         """Get the brands."""

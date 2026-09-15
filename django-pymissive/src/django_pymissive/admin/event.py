@@ -14,6 +14,7 @@ from django.contrib import messages
 from ..events import delay_retrieve_events, retrieve_events as do_retrieve_events
 from ..forms.event import RetrieveEventsForm
 from ..models.event import MissiveEvent
+from .permissions import ActionRightsMixin
 
 class UntreatedListFilter(admin.SimpleListFilter):
     """Custom filter for untreated events."""
@@ -88,7 +89,7 @@ class MissiveEventInline(admin.TabularInline, AdminBoostFormat):
 
 
 @admin.register(MissiveEvent)
-class MissiveEventAdmin(AdminBoostModel):
+class MissiveEventAdmin(ActionRightsMixin, AdminBoostModel):
     """Admin for missive event model."""
 
     list_display = [
@@ -160,7 +161,9 @@ class MissiveEventAdmin(AdminBoostModel):
         return False
 
     def has_replay_permission(self, request, obj=None):
-        return obj and obj.pk and obj.can_replay()
+        return bool(
+            self.has_action_rights(request, obj) and obj and obj.pk and obj.can_replay()
+        )
 
     @admin.display(ordering="missive__provider", description=_("Provider"))
     def missive_provider(self, obj):
@@ -176,6 +179,7 @@ class MissiveEventAdmin(AdminBoostModel):
     @admin_boost_view("adminform", _("Retrieve events"), requires_object=False)
     def retrieve_events(self, request, form=None):
         """Retrieve provider events between two dates, optionally as a task."""
+        self.require_action_rights(request)
         if form is None:
             return {
                 "form": RetrieveEventsForm(),

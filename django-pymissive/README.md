@@ -1,63 +1,56 @@
-# Django Missive
+# django-pymissive
 
-🚀 A complete Django library for managing **multi-channel missive sending**: email, SMS, WhatsApp, postal mail, and in-app notifications.
+🚀 A Django library for managing **multi-channel missive sending**: email, SMS, registered electronic mail (LRE), hand delivery and team messaging.
 
 ## ✨ Features
 
 ### Main features
 
-- 📧 **Multi-channel**: 14 supported types (Email, SMS, WhatsApp, Telegram, Signal, Messenger, RCS, Postal mail, LRE, Voice calls, Push notifications, Slack, Teams)
-- 🔌 **15+ integrated providers**: SendGrid, Mailgun, Twilio, La Poste, Telegram, FCM, APN, Slack, Teams, etc.
-- 📎 **Flexible attachments**: Local files OR external URLs (S3, Google Drive)
-- 🔔 **Unified webhooks**: Single endpoint `/missive/webhook/{provider}/`
-- 📊 **Full tracking**: History, statuses, events
-- 🎯 **Recipient model**: Centralized contact details (email, phone, address)
-- 🔍 **Built-in validation**: Pre-send risk checks
-- 👨‍💼 **Complete Django admin**: Management interface with validation actions
-- 🔗 **GenericForeignKey**: Flexible link with your business models
-- 📝 **Reusable templates**: Create missive templates
-- 📊 **Advanced monitoring**: Services, credits, SLA and health check per provider
-- 🔄 **Automatic fallback**: Switch to backup provider on failure
+- 📧 **Multi-channel**: 11 declared missive types; `email`, `sms`, `lre`, `hand_delivery` and `branded` have a working provider today
+- 🔌 **8 providers** through `pymissive`: Brevo, Scaleway, Maileva, SMSPartner, Slack, Microsoft Teams, Discord, hand delivery
+- 📎 **Flexible attachments**: local files OR external URLs (S3, Google Drive)
+- 🔔 **Unified webhooks**: one endpoint, `/missive/webhook/<provider>/<missive_type>/`
+- 📊 **Full tracking**: history, statuses, events
+- 🎯 **Recipient model**: centralized contact details (email, phone, address)
+- 🔍 **Built-in validation**: pre-send checks
+- 👨‍💼 **Complete Django admin**: management interface with validation actions
+- 🔗 **GenericForeignKey**: flexible link with your business models
+- 📢 **Campaigns and scheduling**: shared content, scheduled runs, progress tracking
 
 ### Technical architecture
 
-- ✅ Compatible with Django 3.2+ and Python 3.10+
-- ✅ Modular structure with mixins (providers/base/)
-- ✅ Comprehensive unit tests (8/8 ✅)
-- ✅ Exhaustive documentation (16 .md files)
+- ✅ Django 5.0+ and Python 3.10+ (CI covers Django 5.0, 5.1 and 5.2)
+- ✅ Modular structure with mixins (`acknowledgement`, `attachments`, `branded` in `pymissive`)
+- ✅ ~500 tests under `tests/`
 - ✅ CI/CD with GitHub Actions
-- ✅ Type hints and mypy
-- ✅ Code formatted with Black + isort
+- ✅ Linted with ruff
 
 ## Installation
 
-### 🔧 Development mode (local project)
-
 ```bash
-# Core only (Django + validation)
-pip install -r requirements.txt
-
-# Development (tests, linters)
-pip install -r requirements-dev.txt
-
-# All providers
-pip install -r requirements-all.txt
+pip install django-pymissive
 ```
 
-### 📦 Production mode (future - after PyPI publication)
+Provider SDKs live in `pymissive`, next to the code importing them, and are
+re-exported here as extras. The imports are lazy, so a missing extra only
+disables that provider:
 
 ```bash
-# Base installation
-pip install django-missive
+pip install django-pymissive[brevo]     # Brevo: email, SMS, WhatsApp
+pip install django-pymissive[scaleway]  # Scaleway: email
+pip install django-pymissive[pdf]       # PDF rendering: weasyprint, pypdf, reportlab
+```
 
-# With specific providers
-pip install django-missive[email]        # Email (SendGrid, Mailgun, SES)
-pip install django-missive[sms]          # SMS & Voice (Twilio, Vonage)
-pip install django-missive[messaging]    # Telegram, Signal, Messenger
-pip install django-missive[push]         # Push notifications (FCM, APN)
-pip install django-missive[professional] # Slack, Teams
-pip install django-missive[postal]       # Postal, LRE
-pip install django-missive[all]          # All providers
+Maileva, SMSPartner and hand delivery need nothing beyond the base install.
+
+### Working on the library itself
+
+`django-pymissive` pins a matching `pymissive` version, so install the local
+core first or pip will try to fetch an unreleased version from PyPI:
+
+```bash
+pip install -e ../python-pymissive
+pip install -e ".[test]"   # includes [pdf]: pypdf, reportlab, weasyprint
 ```
 
 ## Quick Start
@@ -89,42 +82,52 @@ urlpatterns = [
 ```
 
 This will create the following URLs:
-- `/missive/webhook/{provider}/` - Unified webhook for all providers
+- `/missive/webhook/<provider>/<missive_type>/` - Unified webhook, e.g.
+  `/missive/webhook/brevo/email/`. Both segments are required: the provider
+  name selects the credentials, the missive type selects the
+  `handle_webhook_<missive_type>` normalizer.
 
 4. Configure providers in `settings.py`:
 
+Credentials are keyed by provider name in `PROVIDERKIT_PROVIDERS_CONFIG`, using
+each provider's own `config_keys`. A provider whose keys are absent simply stays
+unusable; it does not break the rest.
+
 ```python
-# Django Missive configuration
-MISSIVE_PROVIDERS = {
-    # Providers by missive type (uses python-missive)
-    'EMAIL': {
-        'backend': 'pymissive.providers.sendgrid.SendGridProvider',
-        'config': {
-            'SENDGRID_API_KEY': os.getenv('SENDGRID_API_KEY'),
-        }
+PROVIDERKIT_PROVIDERS_CONFIG = {
+    "brevo": {
+        "EMAIL_API_KEY": os.getenv("BREVO_EMAIL_API_KEY"),
+        "SMS_API_KEY": os.getenv("BREVO_SMS_API_KEY"),
     },
-    'SMS': {
-        'backend': 'pymissive.providers.twilio.TwilioProvider',
-        'config': {
-            'TWILIO_ACCOUNT_SID': os.getenv('TWILIO_ACCOUNT_SID'),
-            'TWILIO_AUTH_TOKEN': os.getenv('TWILIO_AUTH_TOKEN'),
-            'TWILIO_PHONE_NUMBER': '+33123456789',
-        }
+    "partner": {
+        "SMS_API_KEY": os.getenv("PARTNER_SMS_API_KEY"),
     },
-    'POSTAL': {
-        'backend': 'pymissive.providers.laposte.LaPosteProvider',
-        'config': {
-            'LAPOSTE_API_KEY': os.getenv('LAPOSTE_API_KEY'),
-        }
+    "maileva": {
+        "USERNAME": os.getenv("MAILEVA_USERNAME"),
+        "PASSWORD": os.getenv("MAILEVA_PASSWORD"),
+        "CLIENTID": os.getenv("MAILEVA_CLIENTID"),
+        "SECRET": os.getenv("MAILEVA_SECRET"),
+        "SANDBOX": True,
     },
 }
+```
 
+`tests/settings.py` holds a complete, working example for every provider.
+
+Which provider serves which missive type is chosen per `MissiveConfig` row in
+the admin, not in the settings. `Missive.provider` overrides it case by case.
+
+```python
 # Default email
 DEFAULT_FROM_EMAIL = 'noreply@example.com'
 
 # Applied on save when sender fields are empty.
 # Campaigns receive every provided key. Missives only receive the fields
 # for their type, and only when the campaign does not already have a sender.
+# Seconds without a scheduler heartbeat before a PROCESSING missive or an
+# open run is treated as dead (worker crash / SIGKILL). Default 1800.
+# PYMISSIVE_STALE_PROCESSING_SECONDS = 1800
+
 PYMISSIVE_DEFAULT_SENDER = {
     "name": "Octolo",
     "email": "contact@octolo.tech",
@@ -143,91 +146,83 @@ PYMISSIVE_DEFAULT_SENDER = {
 
 ### Send an email
 
-```python
-from django_pymissive.models import Missive, MissiveType, MissiveEventType
+Recipients are rows of their own, so `send_missive()` and its per-type
+shortcuts create the missive, attach one recipient and send it in one call.
 
-# Create an email missive
-missive = Missive.objects.create(
-    sender=request.user,
-    missive_type=MissiveType.EMAIL,
-    recipient_email="client@example.com",
+```python
+from django_pymissive.shortcuts import send_email
+
+missive = send_email(
+    name="Jean Dupont",
+    email="jean@acme.com",
     subject="Order confirmed",
-    body="<p>Your order #123 is confirmed</p>",
+    body_rich="<p>Your order #123 is confirmed</p>",
     body_text="Your order #123 is confirmed",
-    status=MissiveEventType.PENDING,
+    sender_name="Octolo",
+    sender_email="contact@octolo.tech",
 )
-
-# Sending can be handled via async tasks or manually
 ```
 
-### Use the model to create missives
+### Send an SMS, or stage without sending
 
 ```python
-from django_pymissive.models import Missive, MissiveType, MissiveEventType
+from django_pymissive.shortcuts import send_missive, send_sms
 
-# Create a recipient with all contact details
-missive = Missive.objects.create(
-    sender=request.user,
-    missive_type=MissiveType.EMAIL,
-    recipient_first_name="Jean",
-    recipient_last_name="Dupont",
-    recipient_email="jean@acme.com",
-    recipient_phone="+33600000000",
-    recipient_address_line1="123 Rue de la Paix",
-    recipient_postal_code="75001",
-    recipient_city="Paris",
-    recipient_country="FR",
+send_sms(
+    name="Jean Dupont",
+    phone="+33600000000",
+    body_text="Your verification code: 123456",
+)
+
+# and_send=False only creates the rows; call missive.send_missive() later.
+draft = send_missive(
+    missive_type="email",
+    name="Jean Dupont",
+    email="jean@acme.com",
     subject="Welcome",
-    body="<p>Hello Jean, welcome!</p>",
-    status=MissiveEventType.PENDING,
-)
-
-# Create an SMS with the same contact details
-sms = Missive.objects.create(
-    sender=request.user,
-    missive_type=MissiveType.SMS,
-    recipient_phone="+33600000000",
-    body="Your verification code: 123456",
-    status=MissiveEventType.PENDING,
+    body_rich="<p>Hello Jean, welcome!</p>",
+    and_send=False,
 )
 ```
 
-### Provider monitoring (via python-missive)
+A `send_<type>()` shortcut exists for every registered missive type, and each
+takes the same keyword arguments as `send_missive()` minus `missive_type`.
+
+### Several recipients
 
 ```python
-from pymissive.providers.sendgrid import SendGridProvider
+from django_pymissive.models import Missive, MissiveRecipientEmail, MissiveType
 
-# Configure and verify the provider
-provider = SendGridProvider(config={
-    'SENDGRID_API_KEY': 'your-api-key'
-})
-
-# Verify configuration
-is_configured = provider.is_configured()
-print(f"Provider configured: {is_configured}")
-
-# Send a test email
-result = provider.send_email(
-    from_email='sender@example.com',
-    to_email='recipient@example.com',
-    subject='Test',
-    body='<p>Test message</p>'
+missive = Missive.objects.create(
+    missive_type=MissiveType.EMAIL,
+    subject="Newsletter",
+    body_rich="<p>Hello!</p>",
+    sender_name="Octolo",
+    sender_email="contact@octolo.tech",
 )
-```
+for email in ("a@acme.com", "b@acme.com"):
+    MissiveRecipientEmail.objects.create(missive=missive, email=email)
 
-### Validate and send
+missive.send_missive()
+```
+### Follow a missive
+
+Status is never assigned by hand: it is derived from the latest event of each
+recipient, which providers report through the webhook. The values are
+`draft`, `processing`, `success`, `failed`, `partially_success`,
+`partially_failed`, `error` and `cancelled`.
 
 ```python
-from django_pymissive.models import Missive, MissiveEventType
+from django_pymissive.models import Missive, MissiveStatus
 
-# Retrieve a missive
-missive = Missive.objects.get(id=123)
+missive = Missive.objects.get(pk=pk)
 
-# Check it is ready to be sent
-if missive.status == MissiveEventType.PENDING:
-    # Mark as sent (actual sending is done via the configured provider)
-    missive.status = MissiveEventType.SENT
-    missive.save()
+if missive.status == MissiveStatus.ERROR:
+    print(missive.last_send_error())
+
+# Per-recipient timeline
+for event in missive.to_missiveevent.order_by("occurred_at"):
+    print(event.occurred_at, event.event, event.recipient_id)
 ```
 
 ## Counters and annotations
@@ -267,6 +262,12 @@ MissiveCampaign.objects.with_counts()
 the counters everywhere made it four times slower, and the recipient and event
 joins multiply each other on top of that (5 000 missives with 2 recipients and 8
 events each is 80 000 intermediate rows for every `COUNT(DISTINCT)`).
+
+`Missive.objects` follows the same rule. A plain `.get(pk=…)` — and
+`campaign.to_missive` / `scheduler.to_missive` — stay primary-key lookups.
+`with_counts()` annotates recipient / event / attachment / billing counters,
+`sent_at`, `last_event`, and the history / message thread sizes. The admin
+changelist opts in; webhooks and `get_by_external_id` do not.
 
 Reading a counter on a campaign nobody annotated still works: the whole set is
 fetched in one query and cached on the instance. Convenient for a detail page,
@@ -399,7 +400,7 @@ no contact value is on file.
 campaign.send_preview_payload()  # {"total", "by_support", "by_type"} — what a send would push out
 campaign.progress_payload()      # what already went out, per type, plus the runs
 campaign.is_processing           # flag set, or a run still open
-campaign.can_remove              # nothing sent yet
+campaign.can_remove              # nothing past draft; enforced on delete
 ```
 
 Both payloads cover `thread_type=MISSIVE`, so their totals agree with
@@ -414,79 +415,35 @@ annotations: the fallback then costs two queries per campaign instead of none.
 
 ## Development
 
-### Quick Start
-
-This project includes `service.py` - a cross-platform development tool that works on **all operating systems**.
+### Setup
 
 ```bash
-# Setup development environment
-python service.py dev install-dev
-
-# Run tests
-python service.py dev test
-
-# Format code
-python service.py dev format
-
-# Build package
-python service.py dev build
+pip install -e ../python-pymissive
+pip install -e ".[test]"   # includes [pdf]: pypdf, reportlab, weasyprint
 ```
 
-**Linux/macOS users** can make it executable:
-```bash
-chmod +x service.py
-./service.py dev install-dev
-./service.py dev test
-```
+### Tests and checks
 
-### Available Commands
-
-**Development:**
-- `python service.py dev venv` - Create virtual environment
-- `python service.py dev install` - Install in production mode
-- `python service.py dev install-dev` - Install in development mode
-
-**Testing:**
-- `python service.py dev test` - Run tests with pytest
-- `python service.py dev test-verbose` - Run tests with verbose output
-- `python service.py dev coverage` - Run tests with coverage report
-
-**Code Quality:**
-- `python service.py quality lint` - Run linters (flake8, mypy)
-- `python service.py quality format` - Format code (black, isort)
-- `python service.py quality check` - Run all checks (lint + format check)
-
-**Building:**
-- `python service.py dev build` - Build wheel and source distribution
-- `python service.py dev clean` - Remove all build artifacts
-- `python service.py dev clean-test` - Remove test artifacts (htmlcov, .coverage, etc.)
-
-**Publishing:**
-- `python service.py dev upload-test` - Upload to TestPyPI
-- `python service.py dev upload` - Upload to PyPI
-- `python service.py dev release` - Full release workflow
-
-**Utilities:**
-- `python service.py dev show-version` - Show current version
-- `python service.py dev venv-clean` - Recreate virtual environment
-
-Run `python service.py dev help` to see all available commands.
-
-### Django Development Server
-
-Test the library with a Django development server:
+`manage.py` and the test suite run against `tests.settings`, the sandbox
+project bundled with the library.
 
 ```bash
-# Run migrations and create superuser (admin/admin)
-python service.py dev migrate
+python manage.py check
+python -m pytest
 
-# Start development server
-python service.py dev runserver
+# Linting, from the repository root (same command as CI)
+ruff check python-pymissive/src django-pymissive/src
 ```
 
-Access the admin interface at http://127.0.0.1:8000/admin/ (login: admin/admin)
+### Django development server
 
-See [docs/development.md](docs/development.md) for detailed development guide (if available).
+```bash
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver
+```
+
+The admin is then at http://127.0.0.1:8000/admin/.
 
 ## Contributing
 
@@ -502,14 +459,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Changelog
-
-### 0.1.0 (Initial Release)
-
-- Initial release
-- Basic functionality
-
 ## Support
 
-If you encounter any issues or have questions, please file an issue on the [GitHub issue tracker](https://github.com/yourusername/django-missive/issues).
+If you encounter any issues or have questions, please file an issue on the [GitHub issue tracker](https://github.com/octolo/python-missive/issues).
 

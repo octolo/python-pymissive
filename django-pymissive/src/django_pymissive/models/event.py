@@ -84,6 +84,12 @@ class MissiveEvent(CommentTimestampedModel):
         verbose_name = _("Event")
         verbose_name_plural = _("Events")
         ordering = ["-occurred_at",]
+        indexes = [
+            # get_event_counts windows the events of a missive per recipient by
+            # descending occurred_at, and _upsert_event looks a row up by the
+            # same leading columns.
+            models.Index(fields=["missive", "recipient", "-occurred_at"]),
+        ]
 
     def get_reason(self):
         """Return human-readable reason for event from config, or empty string."""

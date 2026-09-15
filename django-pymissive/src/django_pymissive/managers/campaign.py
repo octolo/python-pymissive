@@ -232,6 +232,35 @@ class MissiveCampaignQuerySet(models.QuerySet):
         # annotation cannot be referenced from the call that declares it.
         ).annotate(**percentages)
 
+    def delete(self):
+        """Refuse if any selected campaign has a live missive past draft."""
+        from django.db.models.deletion import ProtectedError
+        from django.utils.translation import gettext as _
+
+        from ..models.missive import Missive
+
+        blocked = self.filter(
+            Exists(
+                Missive._base_manager.filter(
+                    sent_missive_q(),
+                    campaign_id=OuterRef("pk"),
+                    thread_type=MissiveThreadType.MISSIVE,
+                )
+            )
+        )
+        if blocked.exists():
+            protected = set(
+                Missive._base_manager.filter(
+                    campaign_id__in=self.values("pk"),
+                    thread_type=MissiveThreadType.MISSIVE,
+                ).filter(sent_missive_q())
+            )
+            raise ProtectedError(
+                _("Cannot delete a campaign that has missives which left the draft state."),
+                protected or set(blocked),
+            )
+        return super().delete()
+
 
 class MissiveCampaignManager(models.Manager.from_queryset(MissiveCampaignQuerySet)):
     """Manager for MissiveCampaign: two dates, two booleans, counters on demand.
