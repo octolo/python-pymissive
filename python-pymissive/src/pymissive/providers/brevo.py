@@ -78,13 +78,22 @@ class BrevoAPIProvider(MissiveProviderBase):
         "rejected": "rejected",
         "skipped": "dropped",
     }
-    events_exclude = [
-        "requests",
-        "hard_bounce",
-        "soft_bounce",
-        "clicks",
-        "hardBounces",
-        "softBounces",
+    # Brevo create-webhook transactional email events only. events_association
+    # also has aliases (accepted, bounces, loadedByProxy, …) that the API rejects.
+    webhook_email_events = [
+        "request",
+        "sent",
+        "delivered",
+        "hardBounce",
+        "softBounce",
+        "blocked",
+        "spam",
+        "invalid",
+        "deferred",
+        "click",
+        "opened",
+        "uniqueOpened",
+        "unsubscribed",
     ]
 
     #########################################################
@@ -514,11 +523,10 @@ class BrevoAPIProvider(MissiveProviderBase):
     def create_webhook_email(self, webhook_data: dict[str, Any]) -> bool:
         """Configure a webhook to receive Brevo email events."""
         client = self._get_webhooks_client()
-        events = [e for e in self.events_association.keys() if e not in self.events_exclude]
         response = client.webhooks.create_webhook(
             url=webhook_data.get("url"),
             description="Missive webhook email",
-            events=events,
+            events=list(self.webhook_email_events),
             channel="email",
             type="transactional",
             **self._webhook_auth_kwargs(),
