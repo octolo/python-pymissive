@@ -53,10 +53,9 @@ class Command(BaseCommand):
             .order_by("created_at")
         )
         if options.get("noevent"):
-            # count_event is the default manager's own distinct annotation; a
-            # plain Count here would be multiplied by the other reverse-FK joins
-            # it already carries and would skip missives that do have 0 or 1 event.
-            missives = missives.filter(count_event__lte=1)
+            # count_event is a distinct annotation; a plain Count stacked on
+            # other reverse-FK joins would skip missives that do have 0 or 1 event.
+            missives = missives.with_counts().filter(count_event__lte=1)
         total = missives.count()
         synced = 0
         errors = 0

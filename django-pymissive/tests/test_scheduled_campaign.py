@@ -831,3 +831,106 @@ def test_duplicate_missive_clears_scheduler():
     assert source.scheduler_id == sched.id
     assert MissiveScheduledCampaign.objects.with_counts().get(pk=sched.pk).count_total == 1
 
+
+# ---------------------------------------------------------------------------
+# Stale PROCESSING / crashed run bail
+# ---------------------------------------------------------------------------
+
+
+def _age(obj, **fields):
+    """Backdate ``updated_at`` (and any extra fields) past the heartbeat timeout."""
+    past = timezone.now() - timezone.timedelta(hours=2)
+    fields.setdefault("updated_at", past)
+    type(obj).objects.filter(pk=obj.pk).update(**fields)
+    obj.refresh_from_db()
+    return past
+
+
+def test_get_missives_reclaims_stale_processing_without_external_id():
+    c = _campaign()
+    sched = _scheduled(c)
+    stuck = _missive(c, status=MissiveStatus.PROCESSING, scheduler=sched)
+    _age(stuck)
+    assert sched.get_missives().filter(pk=stuck.pk).exists()
+    stuck.refresh_from_db()
+    assert stuck.status == MissiveStatus.DRAFT
+
+
+def test_get_missives_leaves_fresh_processing_alone():
+    c = _campaign()
+    sched = _scheduled(c)
+    live = _missive(c, status=MissiveStatus.PROCESSING, scheduler=sched)
+    assert not sched.get_missives().filter(pk=live.pk).exists()
+    live.refresh_from_db()
+    assert live.status == MissiveStatus.PROCESSING
+
+
+def test_stale_processing_with_external_id_is_not_reset_to_draft():
+    c = _campaign()
+    sched = _scheduled(c)
+    sent = _missive(
+        c, status=MissiveStatus.PROCESSING, scheduler=sched, external_id="prov-1"
+    )
+    _age(sent)
+    assert not sched.get_missives().filter(pk=sent.pk).exists()
+    sent.refresh_from_db()
+    assert sent.status == MissiveStatus.PROCESSING
+
+
+def test_start_campaign_rejects_a_live_processing_run():
+    c = _campaign(metadata={"processing": True})
+    _scheduled(c, send_date=timezone.now())
+    with pytest.raises(ValidationError, match="already"):
+        c.start_campaign()
+
+
+def test_start_campaign_bails_a_stale_run_and_reopens_missives():
+    c = _campaign(metadata={"processing": True})
+    past = timezone.now() - timezone.timedelta(hours=2)
+    run = _scheduled(c, send_date=past)
+    _age(run, send_date=past)
+    stuck = _missive(c, status=MissiveStatus.PROCESSING, scheduler=run)
+    _age(stuck)
+
+    with patch.object(MissiveScheduledCampaign, "start_scheduled_campaign"):
+        c.start_campaign()
+
+    run.refresh_from_db()
+    assert run.ended_at is not None
+    assert "heartbeat" in (run.additional_config or {}).get("last_error", "")
+    stuck.refresh_from_db()
+    assert stuck.status == MissiveStatus.DRAFT
+    c.refresh_from_db()
+    assert c.metadata.get("processing") is True
+    assert c.to_missivecampaignsend.exclude(pk=run.pk).exists()
+
+
+def test_run_with_tracking_finalizes_when_reentered_stale():
+    c = _campaign(metadata={"processing": True})
+    past = timezone.now() - timezone.timedelta(hours=2)
+    sched = _scheduled(c, send_date=past)
+    _age(sched, send_date=past)
+    with patch.object(MissiveScheduledCampaign, "run_campaign") as run_campaign:
+        sched.run_with_tracking()
+    run_campaign.assert_not_called()
+    sched.refresh_from_db()
+    assert sched.ended_at is not None
+    c.refresh_from_db()
+    assert "processing" not in (c.metadata or {})
+
+
+def test_process_missives_heartbeats():
+    c = _campaign()
+    sched = _scheduled(c)
+    _missive(c)
+    with patch.object(sched, "heartbeat") as heartbeat:
+        sched.process_missives(lambda missive: None)
+    heartbeat.assert_called()
+
+
+def test_future_scheduled_run_is_not_stale():
+    future = timezone.now() + timezone.timedelta(hours=3)
+    sched = _scheduled(_campaign(), scheduled_send_date=future)
+    _age(sched)
+    assert sched.is_stale is False
+

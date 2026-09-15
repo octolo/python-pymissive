@@ -2,11 +2,13 @@
 
 import logging
 import os
+from datetime import timedelta
 from urllib.parse import urlparse
 
 from django.conf import settings
 from django.core.exceptions import FieldError, ValidationError
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
@@ -34,27 +36,39 @@ def recalculate_attachment_priorities(missive_id=None, campaign_id=None):
     """
     if not missive_id and not campaign_id:
         return
-    from .models.attachment import FIRST_DOCUMENT_PRIORITY, MissiveBaseAttachment
+    from django.db import transaction
 
-    qs = MissiveBaseAttachment.objects
-    if missive_id:
-        qs = qs.filter(missive_id=missive_id)
-    else:
-        qs = qs.filter(campaign_id=campaign_id)
-    siblings = list(qs.order_by("priority", "id"))
-    to_update = []
-    next_priority = FIRST_DOCUMENT_PRIORITY
-    for att in siblings:
-        if att.is_first_document:
-            expected = FIRST_DOCUMENT_PRIORITY
+    from .models.attachment import (
+        FIRST_DOCUMENT_PRIORITY,
+        MissiveBaseAttachment,
+        _page_order_q,
+    )
+
+    with transaction.atomic():
+        if missive_id:
+            from .models.missive import Missive
+
+            list(Missive.objects.select_for_update().filter(pk=missive_id))
+            qs = MissiveBaseAttachment.objects.filter(missive_id=missive_id)
         else:
-            next_priority = max(next_priority + 1, 1)
-            expected = next_priority
-        if att.priority != expected:
-            att.priority = expected
-            to_update.append(att)
-    if to_update:
-        MissiveBaseAttachment.objects.bulk_update(to_update, ["priority"])
+            from .models.campaign import MissiveCampaign
+
+            list(MissiveCampaign.objects.select_for_update().filter(pk=campaign_id))
+            qs = MissiveBaseAttachment.objects.filter(campaign_id=campaign_id)
+        siblings = list(qs.filter(_page_order_q()).order_by("priority", "id"))
+        to_update = []
+        next_priority = FIRST_DOCUMENT_PRIORITY
+        for att in siblings:
+            if att.is_first_document:
+                expected = FIRST_DOCUMENT_PRIORITY
+            else:
+                next_priority = max(next_priority + 1, 1)
+                expected = next_priority
+            if att.priority != expected:
+                att.priority = expected
+                to_update.append(att)
+        if to_update:
+            MissiveBaseAttachment.objects.bulk_update(to_update, ["priority"])
 
 
 def get_default_domain():
@@ -367,6 +381,29 @@ def apply_default_sender_fields(instance, fields: dict) -> None:
         if value in (None, "", {}, []):
             continue
         setattr(instance, attr, value)
+
+
+#: Seconds without a scheduler heartbeat before a ``PROCESSING`` missive or
+#: an open run is treated as dead (worker crash / SIGKILL). ``<= 0`` disables.
+STALE_PROCESSING_SECONDS_DEFAULT = 30 * 60
+
+
+def stale_processing_seconds() -> int:
+    """Return ``settings.PYMISSIVE_STALE_PROCESSING_SECONDS`` (default 1800)."""
+    return int(getattr(
+        settings, "PYMISSIVE_STALE_PROCESSING_SECONDS", STALE_PROCESSING_SECONDS_DEFAULT
+    ))
+
+
+def stale_processing_cutoff():
+    """Return the datetime before which a heartbeat is considered stale.
+
+    ``None`` when the timeout is disabled (``<= 0``).
+    """
+    seconds = stale_processing_seconds()
+    if seconds <= 0:
+        return None
+    return timezone.now() - timedelta(seconds=seconds)
 
 
 def is_dry_run() -> bool:

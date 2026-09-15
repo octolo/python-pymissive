@@ -194,8 +194,12 @@ class MissiveRecipient(CommentTimestampedModel):
     def set_status(self):
         from ..models.event import MissiveEvent
 
-        success_count, processing_count, failed_count = MissiveEvent.objects.get_event_counts(recipient=self)
-        status = status_from_event_counts(success_count, processing_count, failed_count)
+        success_count, processing_count, failed_count, cancelled_count = (
+            MissiveEvent.objects.get_event_counts(recipient=self)
+        )
+        status = status_from_event_counts(
+            success_count, processing_count, failed_count, cancelled_count
+        )
         if status != self.status:
             self.status = status
             self.save(update_fields=["status"])

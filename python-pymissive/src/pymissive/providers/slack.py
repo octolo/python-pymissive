@@ -5,6 +5,8 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from pymissive.utils import HTTP_TIMEOUT
+
 from .base import MissiveProviderBase
 
 class SlackProvider(MissiveProviderBase):
@@ -57,7 +59,7 @@ class SlackProvider(MissiveProviderBase):
         )
 
         try:
-            with urlopen(request) as response:
+            with urlopen(request, timeout=HTTP_TIMEOUT) as response:
                 data = json.loads(response.read().decode("utf-8"))
                 if not data.get("ok"):
                     raise RuntimeError(f"Slack API error: {data.get('error', 'unknown_error')}")

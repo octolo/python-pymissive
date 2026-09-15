@@ -17,15 +17,22 @@ from .utils import get_base_url, get_recipient
 
 
 def _process_billing(missive, bill):
+    """Upsert one provider billing line.
+
+    Identity is missive + invoice + recipient. Amounts stay in ``defaults`` so
+    a corrected total updates the row instead of inserting a second one that
+    ``total_billing_amount`` would sum.
+    """
     lookup = {
         "missive": missive,
-        "invoice": bill.get("invoice"),
+        "invoice": bill.get("invoice") or None,
+        "recipient": (
+            get_recipient(missive, bill["recipient"]) if bill.get("recipient") else None
+        ),
+    }
+    defaults = {
         "billing_amount": bill.get("billing_amount"),
         "estimate_amount": bill.get("estimate_amount"),
-    }
-    if bill.get("recipient"):
-        lookup["recipient"] = get_recipient(missive, bill.get("recipient"))
-    defaults = {
         "currency": bill.get("currency"),
         "trace": bill.get("raw") or {},
     }
@@ -53,10 +60,8 @@ def handle_billings(**kwargs) -> None:
     billings = provider._provider.call_service_formatted(service_name, **kwargs)
     if not billings:
         return
-    external_id = kwargs.get("external_id")
-    try:
-        missive = Missive.objects.get(external_id=external_id)
-    except Missive.DoesNotExist:
+    missive = Missive.objects.get_by_external_id(kwargs.get("external_id"))
+    if missive is None:
         return
     for bill in billings:
         _process_billing(missive, bill)

@@ -7,11 +7,6 @@ from typing import Any
 from .acknowledgement import AcknowledgementMixin
 from .attachments import AttachmentsMixin
 from .branded import BrandedMixin
-from .email import EmailMixin
-from .notification import NotificationMixin
-from .postal import PostalMixin
-from .sms import SMSMixin
-from .voice_call import VoiceCallMixin
 import re
 import unicodedata
 from pymissive import config
@@ -37,16 +32,16 @@ class MissiveProviderBase(
     AcknowledgementMixin,
     AttachmentsMixin,
     BrandedMixin,
-    EmailMixin,
-    NotificationMixin,
-    PostalMixin,
-    SMSMixin,
-    VoiceCallMixin,
 ):
     """Base class for Missive providers."""
     _default_services_cfg = defaults_services
     provider_key = "key"
     events_association = None
+    fields_associations: dict = {}
+
+    def __init__(self, **kwargs: str | None) -> None:
+        super().__init__(**kwargs)
+        self.attachments: list[Any] = []
 
     def _to_base64(self, content):
         if isinstance(content, bytes):
@@ -104,7 +99,7 @@ class MissiveProviderBase(
 
     def get_normalize_event(self, data: dict[str, Any]) -> str:
         """Return the normalized event of webhook/email/SMS."""
-        return self.events_association.get(data.get("event"), "unknown")
+        return (self.events_association or {}).get(data.get("event"), "unknown")
 
     def get_normalize_webhook_id(self, data: dict) -> str:
         cfg = config.WEBHOOK_FIELDS.get("webhook_id")

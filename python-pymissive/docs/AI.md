@@ -100,10 +100,10 @@ These rules must always be followed.
 ## Architecture (REQUIRED)
 
 - Provider-based architecture built on ProviderKit
-- Each messaging service is implemented as a provider inheriting from category-specific base classes
-- Base provider classes extend `ProviderBase` from ProviderKit
-- Providers are organized in the `providers/` directory with base classes in `providers/base/`
-- Common functionality is shared through base provider classes and mixins
+- Each messaging service is implemented as a provider inheriting from `MissiveProviderBase`
+- `MissiveProviderBase` extends `ProviderBase` from ProviderKit
+- Providers are organized in the `providers/` directory; shared behaviour lives in `providers/base/` (`acknowledgement`, `attachments`, `branded`)
+- Channel types are services in the config; ProviderKit raises if the method is missing
 - Provider discovery and management is handled by ProviderKit
 
 ---
@@ -115,7 +115,7 @@ python-missive/
 ├── src/pymissive/          # Main package
 │   ├── providers/          # Message provider implementations
 │   │   └── base/           # Base provider classes and mixins
-│   ├── helpers.py          # Helper functions
+│   ├── utils.py            # Framework-agnostic helpers
 │   ├── config.py           # Configuration utilities
 │   └── cli.py              # CLI interface
 ├── tests/                  # Test suite
@@ -217,12 +217,12 @@ python-missive/
 
 ### Creating Providers
 
-Providers must inherit from appropriate base classes:
+Providers inherit from `MissiveProviderBase` and implement the services they support:
 
 ```python
-from pymissive.providers.base.email import EmailProvider
+from pymissive.providers.base import MissiveProviderBase
 
-class MyEmailProvider(EmailProvider):
+class MyEmailProvider(MissiveProviderBase):
     name = "my_email_provider"
     display_name = "My Email Provider"
     description = "Description of my email provider"
@@ -230,31 +230,22 @@ class MyEmailProvider(EmailProvider):
     config_keys = ["MY_EMAIL_API_KEY"]
     config_defaults = {"MY_EMAIL_API_KEY": None}
     config_prefix = "MY_EMAIL"
-    services = ["send_email"]
+
+    def send_email(self, **kwargs):
+        ...
 ```
 
 ### Required Services by Provider Type
 
-**Email providers** must implement:
-- `send_email(from_email, to_email, subject, body, **kwargs)`: Send a single email
-
-**SMS providers** must implement:
-- `send_sms(from_number, to_number, message, **kwargs)`: Send a single SMS
-
-**Push notification providers** must implement:
-- `send_notification(device_token, title, body, **kwargs)`: Send a push notification
-
-**Postal providers** must implement:
-- `send_letter(recipient_address, content, **kwargs)`: Send a postal letter
+Implement the `send_*` / `retrieve_*` methods for the missive types you handle
+(`send_email`, `send_sms`, `send_lre`, `send_branded`, …). Services are listed
+in the config; ProviderKit raises ``AttributeError`` if the method is missing.
+Do not add empty category mixins just to raise ``NotImplementedError``.
 
 ### Provider Categories
 
-- **Email**: Inherit from `EmailProvider` in `providers/base/email.py`
-- **SMS**: Inherit from `SMSProvider` in `providers/base/sms.py`
-- **Notification**: Inherit from `NotificationProvider` in `providers/base/notification.py`
-- **Postal**: Inherit from `PostalProvider` in `providers/base/postal.py`
-- **Voice**: Inherit from `VoiceCallProvider` in `providers/base/voice_call.py`
-- **Branded**: Inherit from `BrandedProvider` in `providers/base/branded.py`
+- **All channels**: Inherit from `MissiveProviderBase` in `providers/base/__init__.py`
+- **Branded** (Slack, Teams, Discord): `BrandedMixin` already provides `send_branded` dispatch
 
 ---
 
@@ -344,7 +335,7 @@ Before producing output, ensure:
 - [ ] Code is well-factorized when it improves clarity (without adding complexity)
 - [ ] Imports follow ProviderKit and Qualitybase rules
 - [ ] Public APIs are typed and documented
-- [ ] Providers inherit from appropriate base provider class correctly
+- [ ] Providers inherit from `MissiveProviderBase`
 - [ ] Providers implement all required service methods
 - [ ] Message handling is consistent within provider category
 - [ ] No API keys or secrets are hardcoded

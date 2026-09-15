@@ -13,8 +13,8 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.text import format_lazy
 from django_boosted import AdminBoostModel
 from django.contrib.admin.utils import unquote as admin_unquote
-from urllib.parse import unquote
 from django.contrib import messages
+from django.middleware.csrf import get_token
 from django.shortcuts import redirect
 from phonenumber_field.modelfields import PhoneNumberField
 from phonenumber_field.formfields import PhoneNumberField as PhoneNumberFormField
@@ -37,6 +37,7 @@ from .attachment import (
     MissiveAttachmentBaseInline,
     MissiveProofInline,
 )
+from .permissions import ActionRightsMixin
 from ..models.attachment import MissiveBaseAttachment
 from ..utils import recalculate_attachment_priorities
 from .event import MissiveEventInline
@@ -122,7 +123,7 @@ class HistoryOrMessageListFilter(admin.SimpleListFilter):
         return queryset.filter(thread_type=MissiveThreadType.MISSIVE)
 
 @admin.register(Missive)
-class MissiveAdmin(AdminBoostModel):
+class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     """Admin for missive model."""
 
     list_display = [
@@ -189,6 +190,16 @@ class MissiveAdmin(AdminBoostModel):
         MissiveRelatedObjectInline,
         MissiveProofInline,
     ]
+
+    def get_queryset(self, request):
+        """Annotate the counters the changelist and change form read."""
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("campaign", "scheduler")
+            .prefetch_related(Missive.objects.first_recipients_prefetch())
+            .with_counts()
+        )
 
     def save_formset(self, request, form, formset, change):
         super().save_formset(request, form, formset, change)
@@ -566,25 +577,33 @@ class MissiveAdmin(AdminBoostModel):
         return (obj and obj.pk and obj.status != MissiveStatus.CANCELLED)
 
     def has_change_permission(self, request, obj=None):
-        # GET stays True so GeoaddressField widgets render their native readonly
-        # layout instead of Django dumping the JSON. POST is still blocked.
+        # A locked missive is never editable, whatever rights the user has.
         if request.method == "POST" and missive_admin_locked(obj):
             return False
-        return True
+        # Deliberately skips AdminBoostModel, which returns True as soon as the
+        # admin declares changeform actions — that is what gave every staff
+        # account write access to every missive. Action buttons keep their own
+        # has_<action>_permission gating.
+        return admin.ModelAdmin.has_change_permission(self, request, obj)
 
     def has_prepare_missive_permission(self, request, obj=None):
-        return self.is_draft(obj) and self.provider_has_service(obj, "create") and not obj.external_id
+        return (
+            self.has_action_rights(request, obj)
+            and self.is_draft(obj)
+            and self.provider_has_service(obj, "create")
+            and not obj.external_id
+        )
 
     @admin_boost_action("prepare_missive", _("Prepare"))
     def handle_prepare_missive(self, request, object_id):
-        object_id = unquote(object_id)
-        obj = self.get_object(request, object_id)
-        obj.prepare_missive()
-        messages.success(request, _("Missive prepared successfully."))
+        self.call_object_method(
+            request, object_id, "prepare_missive", _("Missive prepared successfully.")
+        )
 
     def has_resend_missive_permission(self, request, obj=None):
         return (
-            self.is_not_cancelled(obj)
+            self.has_action_rights(request, obj)
+            and self.is_not_cancelled(obj)
             and obj.can_resend()
             and not self.is_draft(obj)
             and obj.status != MissiveStatus.ERROR
@@ -592,14 +611,15 @@ class MissiveAdmin(AdminBoostModel):
 
     @admin_boost_action("resend_missive", _("Resend"))
     def handle_resend_missive(self, request, object_id):
-        object_id = unquote(object_id)
-        obj = self.get_object(request, object_id)
-        return redirect(reverse("admin:django_pymissive_missive_resend_missive", args=[obj.pk]))
+        return self.redirect_to_boost_view(request, object_id, "resend_missive")
 
     @admin_boost_view("confirm", _("Resend"), hidden=True)
     def resend_missive(self, request, obj, confirmed=False):
-        if not confirmed:
-            return {"confirm": _("Are you sure you want to resend this missive?")}
+        waiting = self.confirm_action(
+            request, obj, confirmed, _("Are you sure you want to resend this missive?")
+        )
+        if waiting:
+            return waiting
         new_missive = obj.resend_missive()
         new_missive.refresh_from_db()
         if new_missive.status == MissiveStatus.ERROR:
@@ -609,61 +629,81 @@ class MissiveAdmin(AdminBoostModel):
             )
         else:
             messages.success(request, _("Missive resent successfully."))
-        return redirect(reverse("admin:django_pymissive_missive_change", args=[new_missive.pk]))
+        return self.redirect_to_change(new_missive)
 
     def has_send_missive_permission(self, request, obj=None):
         if not obj or not obj.pk:
             return False
-        return obj.status in (MissiveStatus.DRAFT, MissiveStatus.ERROR) and obj.can_send()
+        return (
+            self.has_action_rights(request, obj)
+            and obj.status in (MissiveStatus.DRAFT, MissiveStatus.ERROR)
+            and obj.can_send()
+        )
 
     @admin_boost_action("send_missive", _("Send"))
     def handle_send_missive(self, request, object_id):
-        object_id = unquote(object_id)
-        obj = self.get_object(request, object_id)
-        return redirect(reverse("admin:django_pymissive_missive_send_missive", args=[obj.pk]))
+        return self.redirect_to_boost_view(request, object_id, "send_missive")
 
     @admin_boost_view("confirm", _("Send"), hidden=True)
     def send_missive(self, request, obj, confirmed=False):
-        if not confirmed:
-            return {"confirm": _("Are you sure you want to send this missive?")}
+        waiting = self.confirm_action(
+            request, obj, confirmed, _("Are you sure you want to send this missive?")
+        )
+        if waiting:
+            return waiting
         obj.send_missive()
         obj.refresh_from_db()
         if obj.status == MissiveStatus.ERROR:
             messages.error(request, obj.last_send_error() or _("Missive send failed."))
         else:
             messages.success(request, _("Missive sent successfully."))
-        return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
+        return self.redirect_to_change(obj)
 
     def has_cancel_missive_permission(self, request, obj=None):
-        return self.is_not_cancelled(obj) and self.provider_has_service(obj, "cancel") and obj.external_id
+        return (
+            self.has_action_rights(request, obj)
+            and self.is_not_cancelled(obj)
+            and self.provider_has_service(obj, "cancel")
+            and obj.external_id
+        )
 
     @admin_boost_action("cancel_missive", _("Cancel"))
     def handle_cancel_missive(self, request, object_id):
-        object_id = unquote(object_id)
-        obj = self.get_object(request, object_id)
-        obj.cancel_missive()
-        messages.success(request, _("Missive cancelled successfully."))
+        self.call_object_method(
+            request, object_id, "cancel_missive", _("Missive cancelled successfully.")
+        )
 
     def has_delete_missive_permission(self, request, obj=None):
-        return bool(obj and obj.pk and obj.external_id and self.provider_has_service(obj, "delete"))
+        return bool(
+            self.has_action_rights(request, obj)
+            and obj
+            and obj.pk
+            and obj.external_id
+            and self.provider_has_service(obj, "delete")
+        )
 
     @admin_boost_action("delete_missive", _("Delete sending"))
     def handle_delete_missive(self, request, object_id):
-        object_id = unquote(object_id)
-        obj = self.get_object(request, object_id)
-        return redirect(reverse("admin:django_pymissive_missive_delete_missive", args=[obj.pk]))
+        return self.redirect_to_boost_view(request, object_id, "delete_missive")
 
     @admin_boost_view("confirm", _("Delete sending"), hidden=True)
     def delete_missive(self, request, obj, confirmed=False):
-        if not confirmed:
-            return {"confirm": _("Delete this sending on the provider? This cannot be undone.")}
+        waiting = self.confirm_action(
+            request,
+            obj,
+            confirmed,
+            _("Delete this sending on the provider? This cannot be undone."),
+        )
+        if waiting:
+            return waiting
         obj.delete_missive()
         messages.success(request, _("Sending deleted on provider."))
-        return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
+        return self.redirect_to_change(obj)
 
     @admin_boost_view("adminform", _("Retrieve from provider"), requires_object=False)
     def retrieve_from_provider(self, request, form=None):
         """Create a missive from a provider partner ID or internal UID."""
+        self.require_action_rights(request)
         if form is None:
             return {
                 "form": RetrieveMissiveForm(),
@@ -688,71 +728,85 @@ class MissiveAdmin(AdminBoostModel):
                 "has_change_permission": True,
             }
         messages.success(request, _("Missive retrieved from provider."))
-        return redirect(reverse("admin:django_pymissive_missive_change", args=[missive.pk]))
+        return self.redirect_to_change(missive)
 
     def has_refresh_from_provider_permission(self, request, obj=None):
-        return bool(obj and obj.pk and self.provider_has_service(obj, "retrieve"))
+        return bool(
+            self.has_action_rights(request, obj)
+            and obj
+            and obj.pk
+            and self.provider_has_service(obj, "retrieve")
+        )
 
     @admin_boost_view("confirm", _("Retrieve from provider"))
     def refresh_from_provider(self, request, obj, confirmed=False):
         """Update this missive from the provider using its uid and external_id."""
-        if not confirmed:
-            return {
-                "confirm": _(
-                    "Retrieve this missive from the provider and replace local data "
-                    "(subject, body, sender, recipients, events)? "
-                    "The missive external ID is kept."
-                )
-            }
+        waiting = self.confirm_action(
+            request,
+            obj,
+            confirmed,
+            _(
+                "Retrieve this missive from the provider and replace local data "
+                "(subject, body, sender, recipients, events)? "
+                "The missive external ID is kept."
+            ),
+        )
+        if waiting:
+            return waiting
         try:
             do_retrieve_from_provider(missive=obj)
         except Exception as exc:
             messages.error(request, str(exc))
-            return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
+            return self.redirect_to_change(obj)
         messages.success(request, _("Missive updated from provider."))
-        return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
+        return self.redirect_to_change(obj)
 
     def has_retrieve_missive_permission(self, request, obj=None):
-        return self.is_not_cancelled(obj) and self.provider_has_service(obj, "retrieve") and obj.external_id
+        return (
+            self.has_action_rights(request, obj)
+            and self.is_not_cancelled(obj)
+            and self.provider_has_service(obj, "retrieve")
+            and obj.external_id
+        )
 
     @admin_boost_action("retrieve_missive", _("Status"))
     def handle_retrieve_missive(self, request, object_id):
-        object_id = unquote(object_id)
-        obj = self.get_object(request, object_id)
-        obj.retrieve_missive()
-        messages.success(request, _("Missive status updated successfully."))
+        self.call_object_method(
+            request, object_id, "retrieve_missive", _("Missive status updated successfully.")
+        )
 
     def has_retrieve_tracking_numbers_permission(self, request, obj=None):
-        return bool(obj and obj.can_tracking_numbers())
+        return bool(
+            self.has_action_rights(request, obj) and obj and obj.can_tracking_numbers()
+        )
 
     @admin_boost_action("retrieve_tracking_numbers", _("Tracking number"))
     def handle_retrieve_tracking_numbers(self, request, object_id):
-        object_id = unquote(object_id)
-        obj = self.get_object(request, object_id)
-        obj.retrieve_tracking_numbers()
-        messages.success(request, _("Tracking numbers updated successfully."))
+        self.call_object_method(
+            request,
+            object_id,
+            "retrieve_tracking_numbers",
+            _("Tracking numbers updated successfully."),
+        )
 
     def has_duplicate_missive_permission(self, request, obj=None):
-        return obj and obj.pk
+        return bool(self.has_action_rights(request, obj) and obj and obj.pk)
 
     @admin_boost_action("duplicate_missive", _("Duplicate"))
     def handle_duplicate_missive(self, request, object_id):
-        """Duplicate a missive by creating a copy."""
-        object_id = unquote(object_id)
-        missive = self.get_object(request, object_id)
+        missive = self.get_action_object(request, object_id)
         new_missive = missive.duplicate_missive()
         messages.success(request, _("Missive duplicated successfully."))
-        return redirect(reverse("admin:django_pymissive_missive_change", args=[new_missive.pk]))
+        return self.redirect_to_change(new_missive)
 
     def has_set_billed_permission(self, request, obj=None):
-        return obj and obj.is_billable
+        return bool(self.has_action_rights(request, obj) and obj and obj.is_billable)
 
     @admin_boost_action("set_billed", _("Mark as paid"))
     def handle_set_billed(self, request, object_id):
-        object_id = unquote(object_id)
-        obj = self.get_object(request, object_id)
-        obj.set_billed()
-        messages.success(request, _("Missive marked as paid successfully."))
+        self.call_object_method(
+            request, object_id, "set_billed", _("Missive marked as paid successfully.")
+        )
 
     def has_handle_history_permission(self, request, obj=None):
         return bool(obj and obj.pk and obj.count_history)
@@ -778,44 +832,79 @@ class MissiveAdmin(AdminBoostModel):
         }
         return url + "?" + urlencode(data)
 
+    def has_handle_proofs_permission(self, request, obj=None):
+        return bool(self.has_action_rights(request, obj) and obj and obj.can_proofs())
+
     @admin_boost_view("message", _("Show proofs"))
     def handle_proofs(self, request, obj):
         """Display proofs as admin list (items: filename, url)."""
+        self.require_action_rights(request, obj)
         proofs = obj.get_proofs()
         url_download = reverse("admin:django_pymissive_missive_download_proof", args=[obj.pk])
+        csrf = get_token(request)
+        # POST so a forged GET (img/src, prefetch) cannot spend provider quota.
         html_links = [
             format_html(
-                '<div><a href="{}" target="_blank">{}</a></div>',
-                f"{url_download}?filename={proof['filename']}&url={proof['url']}",
+                '<div><form method="post" action="{}" target="_blank">'
+                '<input type="hidden" name="csrfmiddlewaretoken" value="{}">'
+                '<input type="hidden" name="filename" value="{}">'
+                '<button type="submit">{}</button>'
+                '</form></div>',
+                url_download,
+                csrf,
+                proof["filename"],
                 proof["filename"],
             )
             for proof in proofs
         ]
         return {"message": mark_safe(" ".join(str(link) for link in html_links))}
 
+    def has_download_proof_permission(self, request, obj=None):
+        return bool(self.has_action_rights(request, obj) and obj and obj.can_proofs())
+
     @admin_boost_view("message", _("Download proofs"), hidden=True)
     def download_proof(self, request, obj):
-        filename = request.GET.get("filename")
-        url = request.GET.get("url")
-        if not filename or not url:
-            return HttpResponse(_("Missing filename or url"), status=400)
+        if request.method != "POST":
+            return HttpResponse(_("Method not allowed"), status=405)
+        self.require_action_rights(request, obj)
+        filename = request.POST.get("filename")
+        if not filename:
+            return HttpResponse(_("Missing filename"), status=400)
+        # The provider URL is resolved server-side from the proof listing and is
+        # never read from the body, so a forged url cannot be fetched.
+        proof = next(
+            (p for p in obj.get_proofs() if p.get("filename") == filename), None
+        )
+        if proof is None:
+            return HttpResponse(_("Unknown proof"), status=404)
         content = obj.download_proof(**{
             "filename": filename,
-            "url": url,
+            "url": proof["url"],
             "data": obj.get_serialized_data(attachments=False),
         })
         if content is None:
             messages.warning(request, _("Proof not available"))
-            return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
-        content_type, _ = mimetypes.guess_type(filename)
+            return self.redirect_to_change(obj)
+        content_type, _encoding = mimetypes.guess_type(filename)
         response = HttpResponse(content, content_type=content_type or "application/octet-stream")
         response["Content-Disposition"] = 'attachment; filename="%s"' % filename.replace('"', '\\"')
         return response
 
-    @admin_boost_view("redirect", _("Save proofs"))
-    def save_proofs(self, request, obj):
+    def has_save_proofs_permission(self, request, obj=None):
+        return bool(self.has_action_rights(request, obj) and obj and obj.can_proofs())
+
+    @admin_boost_view("confirm", _("Save proofs"))
+    def save_proofs(self, request, obj, confirmed=False):
         from django.core.files.base import ContentFile
         from ..models.choices import MissiveAttachmentType
+        waiting = self.confirm_action(
+            request,
+            obj,
+            confirmed,
+            _("Download proofs from the provider and store them as attachments?"),
+        )
+        if waiting:
+            return waiting
         proofs = obj.get_proofs()
         for proof in proofs:
             filename = proof["filename"]
@@ -833,18 +922,18 @@ class MissiveAdmin(AdminBoostModel):
                 defaults={
                     "attachment_file": ContentFile(content, name=filename),
                     "metadata": {"proof_filename": filename, "proof_url": url},
+                    "linked": False,
                 },
             )
         messages.success(request, _("Proofs saved successfully."))
-        return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
+        return self.redirect_to_change(obj)
 
     def has_get_billings_permission(self, request, obj=None):
-        return obj and obj.can_billings()
+        return bool(self.has_action_rights(request, obj) and obj and obj.can_billings())
 
     @admin_boost_action("get_billings", _("Get billings"))
     def handle_get_billings(self, request, object_id):
-        object_id = unquote(object_id)
-        obj = self.get_object(request, object_id)
-        obj.get_billings()
-        messages.success(request, _("Billings retrieved successfully."))
-        return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
+        obj = self.call_object_method(
+            request, object_id, "get_billings", _("Billings retrieved successfully.")
+        )
+        return self.redirect_to_change(obj)

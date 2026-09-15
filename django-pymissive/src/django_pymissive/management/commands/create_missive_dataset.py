@@ -22,7 +22,6 @@ Usage examples
   ./manage.py create_missive_dataset 100 --campaign --subject "My test campaign"
 """
 
-import uuid
 from math import ceil
 
 from django.core.management.base import BaseCommand, CommandError

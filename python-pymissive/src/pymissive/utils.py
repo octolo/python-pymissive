@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import os
 
+#: Default ``urlopen`` / ``requests`` timeout (seconds). ``None`` would wait forever.
+HTTP_TIMEOUT = 30
+#: Uploads and downloads of PDFs (Maileva LRE, deposit proofs).
+HTTP_DOCUMENT_TIMEOUT = 120
+
 
 def _truthy(value) -> bool:
     if isinstance(value, str):

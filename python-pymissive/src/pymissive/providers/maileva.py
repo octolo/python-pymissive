@@ -1,23 +1,78 @@
 import json
+import logging
 import re
+import time
 import zlib
 from datetime import datetime, timezone as dt_timezone
-from functools import cached_property
 from typing import Any
 
 import requests
 
-from pymissive.utils import _truthy, is_disable_send
+from pymissive.utils import HTTP_DOCUMENT_TIMEOUT, HTTP_TIMEOUT, _truthy, is_disable_send
 from .base import MissiveProviderBase
 
+logger = logging.getLogger(__name__)
 
-_ADDRESS_OFFSET_LRE_ACK = {
-    "top": "20mm",
-    "width": "70mm",
-    "height": "30mm",
-}
+#: Refresh this many seconds before Keycloak's ``expires_in``.
+_TOKEN_REFRESH_SKEW = 60
 
-_ADDRESS_OFFSET_LRE_NO_ACK = {
+#: Keys Maileva (and similar APIs) use for the *reason*, not the echoed payload.
+_HTTP_ERROR_REASON_KEYS = (
+    "code",
+    "error",
+    "error_code",
+    "error_description",
+    "message",
+    "detail",
+    "title",
+)
+
+
+def _compact_http_error_detail(body: str, *, limit: int = 400) -> str:
+    """Keep the validation reason; drop the sending/recipient echo.
+
+    The full body stays on ``HTTPError.response`` for a debugger. Putting it
+    in the exception message ships names and addresses to Sentry and Django
+    error mail.
+    """
+    if not body:
+        return ""
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return ""
+    parts: list[str] = []
+    if isinstance(payload, dict):
+        for key in _HTTP_ERROR_REASON_KEYS:
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+        errors = payload.get("errors")
+        if isinstance(errors, list):
+            for item in errors[:8]:
+                if not isinstance(item, dict):
+                    continue
+                field = str(item.get("field") or item.get("path") or "").strip()
+                msg = str(
+                    item.get("message") or item.get("code") or item.get("error") or ""
+                ).strip()
+                bit = ": ".join(piece for piece in (field, msg) if piece)
+                if bit:
+                    parts.append(bit)
+    seen: set[str] = set()
+    unique: list[str] = []
+    for part in parts:
+        if part not in seen:
+            seen.add(part)
+            unique.append(part)
+    summary = " — ".join(unique)
+    if len(summary) > limit:
+        return summary[: limit - 3] + "..."
+    return summary
+
+
+#: Envelope window. mail/v2 and registered_mail/v4 use the same placement.
+_ADDRESS_OFFSET_LRE = {
     "top": "20mm",
     "width": "70mm",
     "height": "30mm",
@@ -60,6 +115,33 @@ def _geoaddress_from_maileva_line_5(line: str) -> dict[str, str]:
     else:
         extra["locality"] = line
     return extra
+
+
+def _require_maileva_line_1_or_2(line_1, line_2, *, role: str) -> None:
+    """Maileva: société (line 1) or name (line 2), at least one.
+
+    https://www.maileva.com/changelog/ — ADDRESS_LINE_1_OR_ADDRESS_LINE_2_MANDATORY
+    """
+    if str(line_1 or "").strip() or str(line_2 or "").strip():
+        return
+    raise ValueError(f"Maileva {role} requires address_line_1 or address_line_2")
+
+
+def _maileva_address_line_6(address: dict[str, Any], *, role: str = "address") -> str:
+    """Build Maileva ``address_line_6`` (``75000 Paris``).
+
+    Both ``postal_code`` and ``city`` are required. An f-string of missing
+    keys would print ``None None`` on the envelope.
+    """
+    postal_code = str(address.get("postal_code") or "").strip()
+    city = str(address.get("city") or "").strip()
+    if not postal_code or not city:
+        raise ValueError(f"Maileva {role} requires postal_code and city")
+    line = f"{postal_code} {city}"
+    sorting_code = str(address.get("sorting_code") or "").strip()
+    if sorting_code:
+        line = f"{line} {sorting_code}"
+    return line
 
 
 def _parse_maileva_address_line_6(line: str) -> dict[str, str]:
@@ -343,8 +425,8 @@ class MailevaProvider(MissiveProviderBase):
     #########################################################
 
     @property
-    def address_offset_lre(self) -> str:
-        return _ADDRESS_OFFSET_LRE_ACK if self.is_acknowledgement_of_receipt() else _ADDRESS_OFFSET_LRE_NO_ACK
+    def address_offset_lre(self) -> dict[str, str]:
+        return _ADDRESS_OFFSET_LRE
 
     def get_lre_mode(self) -> str:
         return "registered_mail" if self.is_acknowledgement_of_receipt() else "mail"
@@ -369,34 +451,86 @@ class MailevaProvider(MissiveProviderBase):
             key = "BASE_URL_SANDBOX" if self.is_mode_sandbox() else "BASE_URL"
         return str(self._get_config_or_env(key)).rstrip("/")
 
-    @cached_property
-    def access_token(self) -> str:
-        url = self.get_endpoint('auth', prefix="connexion")
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    def _invalidate_access_token(self) -> None:
+        self._access_token = None
+        self._access_token_expires_at = 0.0
+
+    def _fetch_access_token(self) -> str:
+        url = self.get_endpoint("auth", prefix="connexion")
         data = {
-            'grant_type': 'password',
-            'username': self._get_config_or_env('USERNAME'),
-            'password': self._get_config_or_env('PASSWORD'),
-            'client_id': self._get_config_or_env('CLIENTID'),
-            'client_secret': self._get_config_or_env('SECRET'),
+            "grant_type": "password",
+            "username": self._get_config_or_env("USERNAME"),
+            "password": self._get_config_or_env("PASSWORD"),
+            "client_id": self._get_config_or_env("CLIENTID"),
+            "client_secret": self._get_config_or_env("SECRET"),
         }
-        response = requests.post(url, headers=headers, data=data, timeout=30)
+        response = requests.post(
+            url,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data=data,
+            timeout=HTTP_TIMEOUT,
+        )
         response.raise_for_status()
-        return response.json()['access_token']
+        payload = response.json()
+        token = payload["access_token"]
+        expires_in = int(payload.get("expires_in") or 300)
+        self._access_token = token
+        self._access_token_expires_at = time.monotonic() + max(
+            expires_in - _TOKEN_REFRESH_SKEW, 1
+        )
+        return token
+
+    @property
+    def access_token(self) -> str:
+        token = getattr(self, "_access_token", None)
+        expires_at = getattr(self, "_access_token_expires_at", 0.0)
+        if token and time.monotonic() < expires_at:
+            return token
+        return self._fetch_access_token()
 
     def _get_headers(self) -> dict[str, str]:
         return {
-            'Authorization': f'Bearer {self.access_token}',
-            'Content-Type': 'application/json',
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
         }
 
+    def _request(self, method: str, url: str, **kwargs) -> requests.Response:
+        """Authenticated call; refresh the token and retry once on 401."""
+        timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
+        headers = dict(kwargs.pop("headers", None) or {})
+        if "Authorization" not in headers:
+            headers.update(self._get_headers())
+        if "files" in kwargs:
+            headers.pop("Content-Type", None)
+        response = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
+        if response.status_code != 401:
+            return response
+        self._invalidate_access_token()
+        headers.update(self._get_headers())
+        if "files" in kwargs:
+            headers.pop("Content-Type", None)
+        return requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
+
     def _raise_for_response(self, response: requests.Response, context: str) -> None:
-        """Raise with Maileva response body so validation errors are visible."""
+        """Raise on HTTP errors with a compact Maileva reason.
+
+        The full body is on ``exc.response`` (and at DEBUG); it is not copied
+        into the exception message, which is what Sentry and error mail show.
+        """
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
             body = (response.text or "").strip()
-            detail = f" — {body}" if body else ""
+            summary = _compact_http_error_detail(body)
+            if body:
+                logger.debug(
+                    "%s: Maileva HTTP %s body (%s bytes): %s",
+                    context,
+                    response.status_code,
+                    len(body),
+                    body,
+                )
+            detail = f" — {summary}" if summary else ""
             raise requests.HTTPError(
                 f"{context}: {response.status_code} {response.reason}{detail}",
                 response=response,
@@ -407,7 +541,7 @@ class MailevaProvider(MissiveProviderBase):
         duration = int(value if value is not None else self._get_config_or_env("ARCHIVING_DURATION", 3))
         return duration if duration in (3, 6, 10) else 3
 
-    def get_resource_types(self, resource_type: str) -> str:
+    def get_resource_types(self, resource_type: str) -> list[str]:
         return [rt for rt, tp in self.resource_types.items() if tp == resource_type]
 
     def get_normalize_type(self, data: dict[str, Any]) -> str:
@@ -426,7 +560,7 @@ class MailevaProvider(MissiveProviderBase):
             if webhook.get("resource_type") in resource_types and webhook.get("callback_url") == url
         ]
 
-    def _create_webhook_api(self, webhook_url: str, events: list[str], resource_type: list[str]) -> bool:
+    def _create_webhook_api(self, webhook_url: str, events: list[str], resource_type: list[str]) -> str | None:
         url = self.get_endpoint('subscriptions')
         first_response = None
         for rt in resource_type:
@@ -436,14 +570,14 @@ class MailevaProvider(MissiveProviderBase):
                     "event_type": event,
                     "resource_type": rt,
                 }
-                response = requests.post(url, headers=self._get_headers(), json=data, timeout=30)
+                response = self._request("POST", url, json=data)
                 response.raise_for_status()
                 first_response = response.json() if first_response is None else first_response
         return self.get_normalize_webhook_id({"id": first_response.get("id")})
 
     def retrieve_webhooks(self) -> list[dict[str, Any]]:
         url = self.get_endpoint('subscriptions')
-        response = requests.get(url, headers=self._get_headers(), timeout=30)
+        response = self._request("GET", url)
         response.raise_for_status()
         return response.json().get("subscriptions", [])
 
@@ -453,7 +587,7 @@ class MailevaProvider(MissiveProviderBase):
         for webhook in webhooks:
             endpoint = self.get_endpoint('subscriptions') + "/" + webhook.get("id")
             data = {"callback_url": callback_url}
-            response = requests.patch(endpoint, headers=self._get_headers(), json=data, timeout=30)
+            response = self._request("PATCH", endpoint, json=data)
             response.raise_for_status()
         return True
 
@@ -461,7 +595,7 @@ class MailevaProvider(MissiveProviderBase):
         webhooks = self.get_webhooks_by_resource_type_and_url(resource_type, url)
         for webhook in webhooks:
             endpoint = self.get_endpoint('subscriptions') + "/" + webhook.get("id")
-            response = requests.delete(endpoint, headers=self._get_headers(), timeout=30)
+            response = self._request("DELETE", endpoint)
             response.raise_for_status()
         return True
 
@@ -483,14 +617,17 @@ class MailevaProvider(MissiveProviderBase):
                 or address.get("po_box")
                 or address.get("address_line3")
             ),
-            "address_line_6": f"{address.get('postal_code')} {address.get('city')}",
+            "address_line_6": _maileva_address_line_6(address, role="recipient address"),
             "country_code": (address.get("country_code") or "").upper() or None,
         }
+        _require_maileva_line_1_or_2(
+            data["address_line_1"],
+            data["address_line_2"],
+            role="recipient address",
+        )
         custom_id = _provider_custom_id(recipient)
         if custom_id:
             data["custom_id"] = custom_id
-        if address.get("sorting_code"):
-            data["address_line_6"] += " " + address.get("sorting_code")
         return data
 
     def _recipient_tracking_number(self, payload: dict[str, Any]) -> str | None:
@@ -527,28 +664,28 @@ class MailevaProvider(MissiveProviderBase):
             data["tracking_number"] = tracking_number
         return data
 
-    def _detail_recipients_lre(self, external_id: str) -> bool:
+    def _detail_recipients_lre(self, external_id: str) -> list[dict[str, Any]]:
         url = self.get_endpoint('recipients') % external_id
-        response = requests.get(url, headers=self._get_headers(), timeout=30)
+        response = self._request("GET", url)
         response.raise_for_status()
         response = response.json()
         return response.get("recipients", [])
 
-    def add_recipient_lre(self, recipient: dict[str, Any], external_id: str) -> bool:
+    def add_recipient_lre(self, recipient: dict[str, Any], external_id: str) -> dict[str, Any]:
         url = self.get_endpoint('recipients') % external_id
         data = self.get_recipient_lre_data(recipient)
-        response = requests.post(url, headers=self._get_headers(), json=data, timeout=30)
+        response = self._request("POST", url, json=data)
         self._raise_for_response(response, f"Maileva add recipient failed ({url})")
         return self._serialize_recipient_ref(recipient, response.json())
 
-    def update_recipient_lre(self, recipient: dict[str, Any], external_id: str) -> bool:
+    def update_recipient_lre(self, recipient: dict[str, Any], external_id: str) -> dict[str, Any]:
         url = self.get_endpoint('recipients') % external_id + "/" + recipient.get("external_id")
         data = self.get_recipient_lre_data(recipient)
-        response = requests.patch(url, headers=self._get_headers(), json=data, timeout=30)
+        response = self._request("PATCH", url, json=data)
         self._raise_for_response(response, f"Maileva update recipient failed ({url})")
         return self._serialize_recipient_ref(recipient, response.json())
 
-    def _add_recipients_lre(self, recipients: list[dict[str, Any]], external_id: str) -> bool:
+    def _add_recipients_lre(self, recipients: list[dict[str, Any]], external_id: str) -> list[dict[str, Any]]:
         external_ids = []
         for recipient in recipients:
             if recipient.get("external_id"):
@@ -558,15 +695,15 @@ class MailevaProvider(MissiveProviderBase):
             external_ids.append(response)
         return external_ids
 
-    def delete_recipient_lre(self, recipient, external_id: str) -> bool:
+    def delete_recipient_lre(self, recipient, external_id: str) -> Any:
         url = self.get_endpoint('recipients') % external_id + "/" + recipient.get("external_id")
-        response = requests.delete(url, headers=self._get_headers(), timeout=30)
+        response = self._request("DELETE", url)
         response.raise_for_status()
         return response.json()
 
-    def delete_recipients_lre(self, external_id: str) -> bool:
+    def delete_recipients_lre(self, external_id: str) -> Any:
         url = self.get_endpoint('recipients') % external_id
-        response = requests.delete(url, headers=self._get_headers(), timeout=30)
+        response = self._request("DELETE", url)
         response.raise_for_status()
         return response.json()
 
@@ -576,7 +713,13 @@ class MailevaProvider(MissiveProviderBase):
     #########################################################
 
     def is_acknowledgement_of_receipt(self, **kwargs: Any) -> bool:
-        if not self.ack_level:
+        """Whether this call is registered-mail (v4), not the previous missive.
+
+        ``get_endpoint`` / ``get_version`` read the value set by the last
+        public method that passed ``**kwargs``. A reused provider instance
+        (ProviderKit) must not keep the first missive's product.
+        """
+        if kwargs:
             self.ack_level = kwargs.get("acknowledgement")
         return self.ack_level == "acknowledgement_of_receipt"
 
@@ -608,17 +751,22 @@ class MailevaProvider(MissiveProviderBase):
                 or sender_address.get("po_box")
                 or sender_address.get("address_line3")
             )
-            data["sender_address_line_6"] = f"{sender_address.get('postal_code')} {sender_address.get('city')}"
+            data["sender_address_line_6"] = _maileva_address_line_6(
+                sender_address, role="sender address"
+            )
+            _require_maileva_line_1_or_2(
+                data["sender_address_line_1"],
+                data["sender_address_line_2"],
+                role="sender address",
+            )
             code = sender_address.get("country_code")
             data["sender_country_code"] = code.upper() if code else code
-            if sender_address.get("sorting_code"):
-                data["sender_address_line_6"] += " " + sender_address.get("sorting_code")
 
         if kwargs.get("notification_email"):
             data["notification_email"] = kwargs.get("notification_email", self._get_config_or_env("NOTIFICATION_EMAIL", ""))
             data["notification_types"] = self._get_config_or_env("NOTIFICATION_TYPES", ["ALL_MAILEVA", "ALL_LAPOSTE"])
 
-        if self.is_acknowledgement_of_receipt():
+        if self.is_acknowledgement_of_receipt(**kwargs):
             # registered_mail/v4 — do not send mail/v2-only fields (postage_type, envelope_windows_type, …)
             data["acknowledgement_of_receipt"] = True
             if kwargs.get("returned_mail_scanning", self._get_config_or_env("RETURNED_MAIL_SCANNING", False)):
@@ -642,22 +790,23 @@ class MailevaProvider(MissiveProviderBase):
             data["custom_data"] = kwargs["custom_data"]
         return data
 
-    def _detail_lre(self, external_id: str) -> bool:
+    def _detail_lre(self, external_id: str) -> dict[str, Any]:
         url = self.get_endpoint('sendings')
-        response = requests.get(url + "/" + external_id, headers=self._get_headers(), timeout=30)
+        response = self._request("GET", url + "/" + external_id)
         response.raise_for_status()
         return response.json()
 
-    def _create_lre(self, **kwargs: Any) -> bool:
+    def _create_lre(self, **kwargs: Any) -> dict[str, Any]:
+        self.is_acknowledgement_of_receipt(**kwargs)
         if kwargs.get("external_id"):
             return self._detail_lre(kwargs.get("external_id"))
         url = self.get_endpoint('sendings')
         data = self.get_lre_data(**kwargs)
-        response = requests.post(url, headers=self._get_headers(), json=data, timeout=30)
+        response = self._request("POST", url, json=data)
         self._raise_for_response(response, f"Maileva create sending failed ({url})")
         return response.json()
 
-    def create_lre(self, **kwargs: Any) -> bool:
+    def create_lre(self, **kwargs: Any) -> dict[str, Any]:
         """Create sending and add recipients on the provider (used by prepare_missive)."""
         self.is_acknowledgement_of_receipt(**kwargs)
         response = self._create_lre(**kwargs)
@@ -665,22 +814,22 @@ class MailevaProvider(MissiveProviderBase):
         response["recipients"] = self._add_recipients_lre(kwargs.get("recipients"), external_id)
         return response
 
-    def prepare_lre(self, **kwargs: Any) -> bool:
+    def prepare_lre(self, **kwargs: Any) -> dict[str, Any]:
         """Alias for create_lre (deprecated, use create_lre)."""
         return self.create_lre(**kwargs)
 
-    def update_lre(self, **kwargs: Any) -> bool:
+    def update_lre(self, **kwargs: Any) -> dict[str, Any]:
         self.is_acknowledgement_of_receipt(**kwargs)
         response = self._create_lre(**kwargs)
         external_id = response.get("id")
         response["recipients"] = self._add_recipients_lre(kwargs.get("recipients"), external_id)
         return response
 
-    def delete_lre(self, **kwargs: Any) -> bool:
+    def delete_lre(self, **kwargs: Any) -> dict[str, Any]:
         """DELETE sending on Maileva (draft or submitted); not the same as cancel semantics elsewhere."""
         self.is_acknowledgement_of_receipt(**kwargs)
         url = self.get_endpoint('sendings') + "/" + kwargs.get("external_id")
-        response = requests.delete(url, headers=self._get_headers(), timeout=30)
+        response = self._request("DELETE", url)
         return {"code": response.status_code, "message": response.text}
 
     def _stage_lre_before_submit(self, **kwargs: Any) -> tuple[str, list[Any], list[Any]]:
@@ -709,7 +858,7 @@ class MailevaProvider(MissiveProviderBase):
             "recipients": recipients,
         }
 
-    def send_lre(self, **kwargs: Any) -> bool:
+    def send_lre(self, **kwargs: Any) -> dict[str, Any]:
         external_id, recipients, attachments = self._stage_lre_before_submit(**kwargs)
         if is_disable_send():
             return self._disabled_send_response(
@@ -719,11 +868,11 @@ class MailevaProvider(MissiveProviderBase):
                 attachments=attachments,
             )
         url = self.get_endpoint('submit') % external_id
-        response = requests.post(url, headers=self._get_headers(), timeout=30)
+        response = self._request("POST", url)
         response.raise_for_status()
         data = {
             "id": external_id,
-            "event": "request" if response.status_code == 200 else "error",
+            "event": "request",
             "code": response.status_code,
             "message": response.text,
             "event_date": datetime.now(dt_timezone.utc).isoformat(),
@@ -736,7 +885,7 @@ class MailevaProvider(MissiveProviderBase):
     # LRE - Attachments
     #########################################################
 
-    def _add_attachments_lre(self, attachments: list[dict[str, Any]], external_id: str) -> bool:
+    def _add_attachments_lre(self, attachments: list[dict[str, Any]], external_id: str) -> list[dict[str, Any]]:
         external_ids = []
         for priority, attachment in enumerate(attachments, start=1):
             external_ids.append(self.add_attachment_lre(
@@ -755,14 +904,11 @@ class MailevaProvider(MissiveProviderBase):
         content = attachment.get("content", b"")
         url = self.get_endpoint('documents') % external_id
         metadata = {"priority": priority, "name": doc_name, "shrink": True}
-        headers = {
-            'Authorization': f'Bearer {self.access_token}',
-        }
         files = {
             'document': (doc_name, content, 'application/pdf'),
             'metadata': ('metadata', json.dumps(metadata), 'application/json'),
         }
-        response = requests.post(url, headers=headers, files=files, timeout=60)
+        response = self._request("POST", url, files=files, timeout=HTTP_DOCUMENT_TIMEOUT)
         response.raise_for_status()
         response = response.json()
         return {"internal_id": attachment.get("id"), "external_id": response.get("id")}
@@ -771,7 +917,7 @@ class MailevaProvider(MissiveProviderBase):
         self.is_acknowledgement_of_receipt(**kwargs)
         external_id = kwargs.get("external_id")
         url = self.get_endpoint('documents') % external_id
-        response = requests.get(url, headers=self._get_headers(), timeout=30)
+        response = self._request("GET", url)
         response.raise_for_status()
         return response.json()
 
@@ -780,7 +926,7 @@ class MailevaProvider(MissiveProviderBase):
         external_id = kwargs.get("external_id")
         document_id = kwargs.get("document_id")
         url = self.get_endpoint('documents') % external_id + "/" + document_id
-        response = requests.delete(url, headers=self._get_headers(), timeout=30)
+        response = self._request("DELETE", url)
         response.raise_for_status()
         return True
 
@@ -999,9 +1145,7 @@ class MailevaProvider(MissiveProviderBase):
                 for key, value in page_params.items()
                 if value not in (None, "")
             }
-            response = requests.get(
-                url, headers=self._get_headers(), timeout=30, params=page_params
-            )
+            response = self._request("GET", url, params=page_params)
             self._raise_for_response(response, f"Maileva billing failed ({url})")
             data = response.json()
             inv = data.get("invoice")
@@ -1108,13 +1252,13 @@ class MailevaProvider(MissiveProviderBase):
 
     def _download_proof_bytes(self, url: str) -> bytes:
         download_url = self.get_endpoint("proofdownload") % url
-        response = requests.get(
-            download_url, stream=True, headers=self._get_headers(), timeout=30
+        response = self._request(
+            "GET", download_url, stream=True, timeout=HTTP_DOCUMENT_TIMEOUT
         )
         response.raise_for_status()
         return response.content
 
-    def download_proof_lre(self, **kwargs: Any) -> bool:
+    def download_proof_lre(self, **kwargs: Any) -> bytes:
         self.is_acknowledgement_of_receipt(**kwargs.get("data", {}))
         return self._download_proof_bytes(kwargs.get("url"))
 

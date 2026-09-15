@@ -3,6 +3,7 @@
 from .billing import BillingFilterForm, ExportBillingsForm, RetrieveBillingsForm
 from .event import RetrieveEventsForm
 from .missive import RetrieveMissiveForm
+from .webhook import GenerateWebhookSecretForm
 
 __all__ = [
     "BillingFilterForm",
@@ -10,4 +11,5 @@ __all__ = [
     "RetrieveBillingsForm",
     "RetrieveEventsForm",
     "RetrieveMissiveForm",
+    "GenerateWebhookSecretForm",
 ]

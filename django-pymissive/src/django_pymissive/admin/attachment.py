@@ -9,7 +9,6 @@ from ..models.attachment import (
     MissiveBaseAttachment,
     MissiveAttachment,
     MissiveVirtualAttachment,
-    CampaignAttachment,
     CampaignVirtualAttachment,
     MissiveProof,
 )
@@ -30,8 +29,8 @@ class MissiveAttachmentAdmin(AdminBoostModel):
     ]
     search_fields = [
         "missive__subject",
-        "missive__recipient_name",
-        "campaign__name",
+        "missive__to_missiverecipient__name",
+        "campaign__subject",
     ]
     readonly_fields = [
         "attachment_object",

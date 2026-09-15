@@ -16,6 +16,14 @@ from django.conf import settings
 
 
 @pytest.fixture(autouse=True)
+def _isolate_media_root(settings, tmp_path):
+    """Keep generated attachments out of the repo ``pymissive/`` tree."""
+    media = tmp_path / "media"
+    media.mkdir()
+    settings.MEDIA_ROOT = str(media)
+
+
+@pytest.fixture(autouse=True)
 def _disable_dry_run(settings):
     """Make sure tests never enter the dry-run / disable-send branches implicitly."""
     settings.PYMISSIVE_DRY_RUN = False
@@ -69,4 +77,8 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "needs_pdf: tests that need pypdf+reportlab+weasyprint at runtime",
+    )
+    config.addinivalue_line(
+        "markers",
+        "deposit_proof: Maileva tracking extraction; needs private PDFs in tests/fixtures/",
     )

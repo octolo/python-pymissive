@@ -6,11 +6,16 @@ import uuid
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
+from django.db.models.deletion import ProtectedError
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from ..managers.campaign import MissiveCampaignManager, count_annotation_names
+from ..managers.campaign import (
+    MissiveCampaignManager,
+    MissiveCampaignQuerySet,
+    count_annotation_names,
+)
 from ..models.mixins import CommentTimestampedModel, ConfigMixin, ProcessorsMixin
 from ..models.choices import (
     AcknowledgementLevel,
@@ -184,8 +189,9 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     )
 
     objects = MissiveCampaignManager()
-    # Plain manager for select_for_update (PostgreSQL rejects FOR UPDATE with GROUP BY)
-    objects_plain = models.Manager()
+    # Same queryset (so ``delete()`` is protected) but no default annotations —
+    # PostgreSQL rejects ``FOR UPDATE`` with those extra columns / GROUP BY.
+    objects_plain = MissiveCampaignQuerySet.as_manager()
 
     class Meta:
         verbose_name = _("Campaign")
@@ -220,11 +226,10 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         super().save(*args, **kwargs)
 
     def get_browser_preview_path(self, *, preview_kind: str = "email") -> str:
-        """Relative URL for the staff preview of this campaign.
+        """Relative URL for the preview of this campaign (unauthenticated, see ``PreviewView``).
 
         ``preview_kind`` selects which template will be rendered server-side
-        (email, sms, postal — see ``PreviewView``). Returns ``""`` for an
-        unsaved campaign.
+        (email, sms, postal). Returns ``""`` for an unsaved campaign.
         """
         if not self.pk:
             return ""
@@ -363,9 +368,10 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     @property
     def can_remove(self) -> bool:
-        """True while no live missive of the campaign has been sent.
+        """True while no live missive of the campaign has left the draft state.
 
-        Uses the ``has_sent_missives`` annotation when the queryset carries it
+        Enforced by :meth:`delete` and the campaign queryset. Uses the
+        ``has_sent_missives`` annotation when the queryset carries it
         (``MissiveCampaignManager`` adds it by default), else falls back to a
         single ``EXISTS``, memoised under the annotation name like
         :pyattr:`is_processing` does.
@@ -377,6 +383,19 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             ).exists()
             self.__dict__["has_sent_missives"] = annotated
         return not annotated
+
+    def delete(self, using=None, keep_parents=False):
+        if not self.can_remove:
+            protected = set(
+                self.to_missive.filter(
+                    sent_missive_q(), thread_type=MissiveThreadType.MISSIVE,
+                )
+            )
+            raise ProtectedError(
+                _("Cannot delete a campaign that has missives which left the draft state."),
+                protected or {self},
+            )
+        return super().delete(using=using, keep_parents=keep_parents)
 
     def pending_send_queryset(self):
         """The missives a send would push out right now.
@@ -540,10 +559,36 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "runs": runs,
         }
 
+    def release_stale_processing(self) -> None:
+        """End crashed runs and reopen their unsent ``PROCESSING`` missives.
+
+        ``ended_at`` is only written in ``run_with_tracking``'s ``finally``.
+        A SIGKILL leaves ``is_running`` true and ``metadata['processing']``
+        set, so the next ``start_campaign`` would raise forever. After the
+        heartbeat timeout those runs are finalized and leftover flags cleared.
+        """
+        from .missive import Missive
+
+        for run in self.to_missivecampaignsend.filter(ended_at__isnull=True):
+            if run.is_stale:
+                run._finalize_run(
+                    str(_("Stale run: timed out waiting for a heartbeat."))
+                )
+        Missive.reclaim_stale_processing(campaign=self)
+        still_open = self.to_missivecampaignsend.filter(ended_at__isnull=True).exists()
+        if still_open:
+            return
+        if (self.metadata or {}).get("processing"):
+            metadata = dict(self.metadata or {})
+            metadata.pop("processing", None)
+            self.metadata = metadata
+            self.save(update_fields=["metadata"])
+
     def start_campaign(self):
         """Start the campaign."""
         with transaction.atomic():
             campaign = MissiveCampaign.objects_plain.select_for_update().get(pk=self.pk)
+            campaign.release_stale_processing()
             if campaign.metadata.get("processing"):
                 raise ValidationError(_("Campaign is already being processed."))
             campaign.metadata = {**dict(campaign.metadata), "processing": True}

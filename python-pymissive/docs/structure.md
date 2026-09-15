@@ -11,13 +11,10 @@ python-missive/
 │       ├── __init__.py       # Package exports
 │       ├── providers/        # Message provider implementations
 │       │   ├── __init__.py   # Base provider classes
-│       │   ├── base/         # Base provider mixins
-│       │   │   ├── email.py           # Email base provider
-│       │   │   ├── sms.py             # SMS base provider
-│       │   │   ├── notification.py    # Push notification base
-│       │   │   ├── postal.py          # Postal mail base
-│       │   │   ├── voice_call.py      # Voice call base
-│       │   │   └── branded.py         # Branded messaging base
+│       │   ├── base/         # Shared mixins + MissiveProviderBase
+│       │   │   ├── acknowledgement.py
+│       │   │   ├── attachments.py
+│       │   │   └── branded.py
 │       │   ├── django_email.py        # Django email backend
 │       │   ├── smtp.py                # SMTP provider
 │       │   ├── sendgrid.py            # SendGrid
@@ -40,7 +37,7 @@ python-missive/
 │       │   ├── maileva.py             # Maileva
 │       │   ├── ar24.py                # AR24
 │       │   └── certeurope.py          # Certeurope
-│       ├── helpers.py        # Helper functions
+│       ├── utils.py          # Framework-agnostic helpers
 │       ├── config.py         # Configuration utilities
 │       ├── cli.py            # CLI interface
 │       └── __main__.py       # Entry point for package execution
@@ -66,15 +63,11 @@ python-missive/
 The `providers/` directory contains message provider implementations:
 
 - **`__init__.py`**: Imports and exports all provider classes
-- **`base/`**: Base provider classes and mixins for different message types
-  - `email.py`: Base class for email providers
-  - `sms.py`: Base class for SMS providers
-  - `notification.py`: Base class for push notification providers
-  - `postal.py`: Base class for postal mail providers
-  - `voice_call.py`: Base class for voice call providers
-  - `branded.py`: Base class for branded messaging (Slack, Teams, etc.)
-- Each provider file (e.g., `sendgrid.py`, `twilio.py`) implements a specific messaging service
-- All providers inherit from appropriate base classes which extend `ProviderBase` from ProviderKit
+- **`base/`**: `MissiveProviderBase` plus the mixins that hold real behaviour
+  (`acknowledgement`, `attachments`, `branded`). Channel types (`email`, `sms`,
+  `lre`, …) are services in the config; ProviderKit raises if the method is missing.
+- Each shipped provider file implements a specific messaging service
+- All providers inherit from `MissiveProviderBase` (which extends ProviderKit's `ProviderBase`)
 
 ### Available Providers by Category
 
@@ -112,15 +105,14 @@ The `providers/` directory contains message provider implementations:
 
 ### Helper Functions
 
-The `helpers.py` module provides:
-- `get_missive_providers()`: Get available missive providers
-- Utility functions for provider management and discovery
+Provider discovery lives in ProviderKit (`providerkit.helpers.get_providers`).
+`pymissive.utils` holds the few framework-agnostic helpers that belong here
+(for example `is_disable_send`).
 
 ### Package Exports
 
 The public API is defined in `src/pymissive/__init__.py`:
 - Provider classes
-- Helper functions
 - Configuration utilities
 
 ### ProviderKit Integration

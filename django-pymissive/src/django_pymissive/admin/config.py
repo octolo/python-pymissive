@@ -10,17 +10,23 @@ from django_boosted import AdminBoostModel
 from django_boosted.decorators import admin_boost_action, admin_boost_view
 
 from ..models.config import MissiveConfig
+from .permissions import ActionRightsMixin
 
 
 @admin.register(MissiveConfig)
-class MissiveConfigAdmin(AdminBoostModel):
+class MissiveConfigAdmin(ActionRightsMixin, AdminBoostModel):
     list_display = ["missive_type", "default_provider"]
     list_editable = ["default_provider"]
     ordering = ["missive_type"]
 
     def has_sync_provider_permission(self, request, obj=None):
         """Show the sync button only when a default provider is configured."""
-        return bool(obj and obj.pk and obj.default_provider)
+        return bool(
+            self.has_action_rights(request, obj)
+            and obj
+            and obj.pk
+            and obj.default_provider
+        )
 
     @admin_boost_action("sync_provider", _("Sync provider"))
     def handle_sync_provider(self, request, object_id):

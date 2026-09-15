@@ -12,7 +12,6 @@ from django.utils.safestring import mark_safe
 from django.urls import reverse
 from django_geoaddress.fields import GeoaddressField
 from phonenumber_field.modelfields import PhoneNumberField
-from django.conf import settings
 from .choices import (
     AcknowledgementLevel,
     MissiveSupport,
@@ -20,6 +19,8 @@ from .choices import (
     MissivePriority,
     MissiveStatus,
     status_from_event_counts,
+    PENDING_STATUSES,
+    TERMINAL_STATUSES,
     MissiveType,
     get_missive_support_from_type,
     MissiveRecipientType,
@@ -297,6 +298,18 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         verbose_name = _("Missive")
         verbose_name_plural = _("Missives")
         ordering = ["-created_at"]
+        indexes = [
+            # Join key of every webhook, retrieve and billing lookup. Not
+            # unique: duplicates are legitimate, see get_by_external_id.
+            models.Index(fields=["external_id"]),
+            # Default scope plus Meta ordering shared by every changelist and
+            # by the history/message managers.
+            models.Index(fields=["thread_type", "-created_at"]),
+            # Per-row correlated subquery counting the sibling threads.
+            models.Index(fields=["thread_id", "thread_type"]),
+            # Campaign progress: counts grouped by status over the live sends.
+            models.Index(fields=["campaign", "thread_type", "status"]),
+        ]
 
     def __str__(self):
         recipient = self.first_recipient or _("Unknown")
@@ -350,9 +363,17 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             apply_default_sender_fields(self, fields)
 
     def save(self, *args, **kwargs):
-        """Save the missive with auto-filled defaults (provider, support, acknowledgement, etc.)."""
-        self._ensure_default_provider()
-        self._ensure_missive_defaults()
+        """Save the missive, filling defaults on a full write only.
+
+        ``set_status`` and other targeted updates pass ``update_fields``.
+        Running ``_ensure_*`` there would query ``MissiveConfig`` on every
+        write and mutate provider/support/sender on the instance without
+        persisting them — the next ``refresh_from_db`` dropped those
+        defaults, or the in-memory copy diverged from the row.
+        """
+        if kwargs.get("update_fields") is None:
+            self._ensure_default_provider()
+            self._ensure_missive_defaults()
         super().save(*args, **kwargs)
 
     @property
@@ -384,6 +405,77 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     @property
     def last_event_display(self):
         return dict(MissiveEventType.choices).get(self.last_event, self.last_event)
+
+    # ------------------------------------------------------------------
+    # Counters (annotated by with_counts(), fetched on demand otherwise)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _count_fields(cls) -> frozenset:
+        """Every name ``with_counts()`` produces — read from its source."""
+        from ..managers.missive import count_annotation_names
+
+        return count_annotation_names()
+
+    def _annotation_default(self, name: str):
+        if name.startswith("count_"):
+            return 0
+        if name.startswith("is_"):
+            return False
+        return None
+
+    def _annotation(self, name: str):
+        """One counter, from the annotation when present, from the database else.
+
+        The whole set is fetched and cached in one query, so reading a second
+        counter on the same instance is free.
+        """
+        if name in self.__dict__:
+            value = self.__dict__[name]
+            if value is None and name.startswith("count_"):
+                return 0
+            return value
+        cache = self.__dict__.get("_counts_cache")
+        if cache is None:
+            if not self.pk:
+                return self._annotation_default(name)
+            annotated = (
+                type(self)._default_manager.with_counts().filter(pk=self.pk).first()
+            )
+            fields = self._count_fields()
+            cache = {
+                field: (
+                    getattr(annotated, field, self._annotation_default(field))
+                    if annotated is not None
+                    else self._annotation_default(field)
+                )
+                for field in fields
+            }
+            self.__dict__["_counts_cache"] = cache
+        return cache.get(name, self._annotation_default(name))
+
+    def __getattr__(self, name):
+        """Serve a counter of ``with_counts()`` the queryset did not annotate.
+
+        The counters are opt-in — they force a ``GROUP BY`` that every plain
+        lookup would otherwise pay — but a template or a report reading
+        ``missive.count_recipient`` must keep working. It costs one query per
+        missive, so annotate with ``with_counts()`` when a list displays them.
+        """
+        # Prefix first: this runs on every missing attribute, and Django probes a
+        # few (``get_absolute_url``, dunders), which have no business building the
+        # annotation set.
+        if name != "sent_at" and not name.startswith(
+            ("count_", "last_", "total_", "is_bill")
+        ):
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute {name!r}"
+            )
+        if name not in self._count_fields():
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute {name!r}"
+            )
+        return self._annotation(name)
 
     # Missive field → campaign field when names differ (per support).
     _CAMPAIGN_FIELD_MAP: dict[str, dict[str, str]] = {
@@ -652,14 +744,40 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def can_send(self):
         if not self.has_service("send"):
             return False
-        if self.status == MissiveStatus.ERROR:
-            sendable = True
-        elif not self.external_id or self.status == MissiveStatus.DRAFT:
-            sendable = True
-        else:
+        is_sendable_state = (
+            self.status in (MissiveStatus.ERROR, MissiveStatus.DRAFT)
+            or not self.external_id
+        )
+        if not is_sendable_state:
             return False
         service_method = f"check_{self.missive_type}"
         return getattr(self, service_method)() if hasattr(self, service_method) else True
+
+    @classmethod
+    def reclaim_stale_processing(cls, *, campaign=None, scheduler=None) -> int:
+        """Reset timed-out ``PROCESSING`` rows that never reached the provider.
+
+        A worker crash leaves the claim (``DRAFT`` → ``PROCESSING``) behind.
+        Those rows are in neither ``PENDING_STATUSES`` nor ``ERROR_STATUSES``,
+        so nothing would retry them. After the heartbeat timeout they go back
+        to ``DRAFT``. Rows that already have an ``external_id`` are left
+        alone — the provider already accepted the send.
+        """
+        from ..utils import stale_processing_cutoff
+
+        cutoff = stale_processing_cutoff()
+        if cutoff is None:
+            return 0
+        qs = cls._base_manager.filter(
+            status=MissiveStatus.PROCESSING,
+            thread_type=MissiveThreadType.MISSIVE,
+            updated_at__lt=cutoff,
+        ).filter(models.Q(external_id__isnull=True) | models.Q(external_id=""))
+        if campaign is not None:
+            qs = qs.filter(campaign=campaign)
+        if scheduler is not None:
+            qs = qs.filter(scheduler=scheduler)
+        return qs.update(status=MissiveStatus.DRAFT)
 
     def can_resend(self):
         if self.has_service("send"):
@@ -735,8 +853,11 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         return "email"
 
     def get_browser_preview_path(self) -> str:
-        """Staff preview URL, or campaign preview when unsaved, else ``""``."""
-        from django.urls import reverse
+        """Public "view in browser" URL, or campaign preview when unsaved, else ``""``.
+
+        Embedded in outgoing emails by ``add_preview_browser``, so it is
+        recipient-facing, not staff-only.
+        """
         from ..views.preview import POSTAL_PREVIEW_MISSIVE_TYPES
 
         if not self.is_persisted:
@@ -791,7 +912,18 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         Per content type: ``<ct>`` (first object) and ``<ct>_list`` (always a list).
         Related objects: missive ∪ campaign, deduped by ``(content_type, pk)``,
         missive first so ``<ct>`` is the most-specific row.
+
+        Cached on the instance for the send/preview: ``subject`` / ``body_rich``
+        / ``body_text`` each compile through here. Returns a shallow copy so a
+        processor cannot leak mutations into the next field.
         """
+        cached = getattr(self, "_missive_context_cache", None)
+        if cached is None:
+            cached = self._build_missive_context()
+            self._missive_context_cache = cached
+        return dict(cached)
+
+    def _build_missive_context(self):
         context = dict(getattr(self.campaign, "additional_context", {}) or {})
         context.update(self.additional_context or {})
 
@@ -825,7 +957,9 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         seen: set,
     ) -> None:
         """Group by content type; skip deleted rows; dedup via ``seen``."""
-        for ro in manager.select_related("content_type").all():
+        for ro in manager.select_related("content_type").prefetch_related(
+            "content_object"
+        ):
             obj = ro.content_object
             if obj is None:
                 continue
@@ -842,10 +976,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """CSS for ``.a4-address-provider`` from provider ``address_offset_lre`` or legacy string."""
         provider = getattr(self, "provider", None)
         if provider and hasattr(provider._provider, "address_offset_lre"):
-            print("offset", provider._provider.address_offset_lre)
-            css =  _address_offset_lre_dict_to_css(provider._provider.address_offset_lre)
-            print(css)
-            return css
+            return _address_offset_lre_dict_to_css(provider._provider.address_offset_lre)
         return ""
 
     def get_postal_letter_render_context(self, post_data=None, postal_recipient_pk=None):
@@ -1062,9 +1193,13 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     # Services
     #########################################################
 
-    @transaction.atomic
     def resend_missive(self, *, sync_campaign: bool = False):
         """Resend the missive: original becomes HISTORY, new duplicate is MISSIVE and gets sent.
+
+        The archive + duplicate commit before the provider call. Sending
+        inside the same ``atomic()`` would roll back ``external_id`` and the
+        ``REQUEST`` event if anything failed afterwards, while the mail had
+        already left.
 
         Args:
             sync_campaign: When ``True`` and a campaign is attached, overwrite
@@ -1079,14 +1214,15 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """
         if not self.can_resend():
             raise ValidationError(_("Missive cannot be resend"))
-        self.thread_type = MissiveThreadType.HISTORY
-        self.save(update_fields=["thread_type"])
-        new_missive = self.duplicate_missive(
-            thread_type=MissiveThreadType.MISSIVE,
-            thread_id=self.thread_id,
-            resend=True,
-            sync_campaign=sync_campaign,
-        )
+        with transaction.atomic():
+            self.thread_type = MissiveThreadType.HISTORY
+            self.save(update_fields=["thread_type"])
+            new_missive = self.duplicate_missive(
+                thread_type=MissiveThreadType.MISSIVE,
+                thread_id=self.thread_id,
+                resend=True,
+                sync_campaign=sync_campaign,
+            )
         new_missive.send_missive(old_missive=self)
         return new_missive
 
@@ -1113,6 +1249,9 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             recipient.external_id = None
             recipient.substitute_id = None
             recipient.tracking_number = None
+            recipient.status = MissiveStatus.DRAFT
+            recipient.sent_at = None
+            recipient.delivered_at = None
             recipient.missive = new_missive
             recipient.save()
 
@@ -1336,12 +1475,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         if self.external_id:
             self.external_id = response.get("external_id")
             self.save(update_fields=["external_id", "status"])
-            self.to_missiveevent.create(
-                event=MissiveEventType.REQUEST,
-                trace=response,
-                client_initiated=True,
-                occurred_at=occurred_at,
-            )
+            self._record_request_event(occurred_at=occurred_at, trace=response)
             events = response.get("events")
             if events:
                 self.handle_events(events)
@@ -1370,8 +1504,8 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             return
         self.external_id = f"dry-run:{self.thread_id}"
         self.save(update_fields=["external_id", "status"])
-        self.to_missiveevent.create(
-            event=MissiveEventType.REQUEST,
+        self._record_request_event(
+            occurred_at=occurred_at,
             trace={
                 "dry_run": True,
                 "missive_id": str(self.pk),
@@ -1380,8 +1514,6 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                 "subject": self.subject_compiled,
                 "recipients": [str(r) for r in self.recipients],
             },
-            client_initiated=True,
-            occurred_at=occurred_at,
         )
         self.refresh_from_db()
         missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
@@ -1405,12 +1537,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             self.external_id = external_id
             update_fields.append("external_id")
         self.save(update_fields=update_fields)
-        self.to_missiveevent.create(
-            event=MissiveEventType.REQUEST,
-            trace=response,
-            client_initiated=True,
-            occurred_at=occurred_at,
-        )
+        self._record_request_event(occurred_at=occurred_at, trace=response)
         self.refresh_from_db()
         missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
 
@@ -1453,11 +1580,42 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             recipient.set_status()
         self.set_status()
 
+    def _record_request_event(self, *, occurred_at, trace):
+        """Write the client-initiated ``REQUEST`` so ``set_status`` can see it.
+
+        ``get_event_counts`` ignores recipient-less rows (a missive-level
+        ``request`` would otherwise look like a phantom in-progress recipient
+        on a fully delivered missive). The webhook path already fans
+        ``FANOUT_EVENTS`` out to every recipient; ``send_missive`` used to
+        write a single recipient-less row, so retrieve / « Statut » fell
+        back to ``DRAFT`` and the send button came back.
+        """
+        recipients = list(self.recipients) or [None]
+        for recipient in recipients:
+            self.to_missiveevent.create(
+                event=MissiveEventType.REQUEST,
+                recipient=recipient,
+                trace=trace,
+                client_initiated=True,
+                occurred_at=occurred_at,
+            )
+
     def set_status(self):
         from ..models.event import MissiveEvent
 
-        success_count, processing_count, failed_count = MissiveEvent.objects.get_event_counts(missive=self)
-        status = status_from_event_counts(success_count, processing_count, failed_count)
+        if self.status in TERMINAL_STATUSES:
+            return
+        success_count, processing_count, failed_count, cancelled_count = (
+            MissiveEvent.objects.get_event_counts(missive=self)
+        )
+        status = status_from_event_counts(
+            success_count, processing_count, failed_count, cancelled_count
+        )
+        # Counts of 0 mean "no recipient event yet", not "never sent".
+        # A just-sent missive with only a leftover recipient-less REQUEST
+        # must not return to DRAFT (that re-enables Send and the campaign).
+        if status == MissiveStatus.DRAFT and self.status not in PENDING_STATUSES:
+            return
         if status != self.status:
             self.status = status
             self.save(update_fields=["status"])
@@ -1509,9 +1667,11 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     # Proofs
     #########################################################
 
-    def can_proofs(self):
-        """Return True if provider supports get_proofs for this missive type."""
-        return self
+    def can_proofs(self) -> bool:
+        """True if the provider can list proofs for this sent missive."""
+        return bool(
+            self.has_service("retrieve_proofs") and self.external_id and not is_dry_run()
+        )
 
     def get_proofs(self):
         """Get proofs (filename, url) from provider. Returns [] if not supported."""

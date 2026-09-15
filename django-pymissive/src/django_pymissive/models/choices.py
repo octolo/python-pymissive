@@ -18,7 +18,6 @@ from pymissive.config import (
     PRIORITIES,
     missive_support_for_type,
     missive_types_for_support,
-    normalize_support,
 )
 
 
@@ -86,6 +85,14 @@ ERROR_STATUSES = (
     MissiveStatus.PARTIALLY_FAILED,
     MissiveStatus.ERROR,
 )
+
+#: Statuses ``set_status()`` must not leave. A cancel is a user/provider
+#: decision; recounting last delivery events would silently restore
+#: DRAFT/PROCESSING/SUCCESS and put the send button back.
+TERMINAL_STATUSES = (MissiveStatus.CANCELLED,)
+
+#: Last-event value that means the send was cancelled (see FAILED_EVENTS).
+CANCELLED_EVENT = "cancelled"
 
 
 def _status_field(prefix: str) -> str:
@@ -182,6 +189,7 @@ MISSIVE_STYLE_MAP = {
     "partially_success": "info",
     "partially_failed": "warning",
     "error": "danger",
+    "cancelled": "secondary",
     "low": "info",
     "normal": "secondary",
     "high": "warning",
@@ -213,11 +221,19 @@ def event_to_status(event: Optional[str]) -> str:
     return MissiveStatus.PROCESSING
 
 
-def status_from_event_counts(success_count: int, processing_count: int, failed_count: int) -> str:
+def status_from_event_counts(
+    success_count: int,
+    processing_count: int,
+    failed_count: int,
+    cancelled_count: int = 0,
+) -> str:
     """Derive MissiveStatus from counts of last events per recipient/missive."""
-    total = success_count + processing_count + failed_count
+    total = success_count + processing_count + failed_count + cancelled_count
     if total == 0:
         return MissiveStatus.DRAFT
+    if cancelled_count == total:
+        return MissiveStatus.CANCELLED
+    failed_count += cancelled_count
     if failed_count == total:
         return MissiveStatus.FAILED
     if failed_count > 0 and success_count > 0:

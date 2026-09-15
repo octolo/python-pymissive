@@ -89,17 +89,19 @@ def template_for_missive(missive: Missive) -> str:
 
 
 def build_preview_context(missive: Missive, post_data=None, postal_recipient_pk=None) -> dict:
-    """Type-specific template context (email headers, SMS sender, postal meta)."""
-    try:
-        mt = (missive.missive_type or "").lower()
-        if mt in ("email", "email_marketing", "ere"):
-            return _build_email_context(missive)
-        if mt in ("sms", "rcs"):
-            return _build_sms_context(missive, post_data)
-        if mt in POSTAL_PREVIEW_MISSIVE_TYPES:
-            return _build_lre_context(missive, post_data, postal_recipient_pk)
-    except Exception:
-        pass
+    """Type-specific template context (email headers, SMS sender, postal meta).
+
+    Unknown types return ``{}``. A builder that fails raises: this context is
+    also the postal PDF chrome, and swallowing the error used to render an
+    empty preview instead of the real fault.
+    """
+    mt = (missive.missive_type or "").lower()
+    if mt in ("email", "email_marketing", "ere"):
+        return _build_email_context(missive)
+    if mt in ("sms", "rcs"):
+        return _build_sms_context(missive, post_data)
+    if mt in POSTAL_PREVIEW_MISSIVE_TYPES:
+        return _build_lre_context(missive, post_data, postal_recipient_pk)
     return {}
 
 
@@ -244,17 +246,14 @@ def _build_lre_context(instance, post_data=None, postal_recipient_pk=None):
     recipients = []
     recipient_manager = getattr(instance, "to_missiverecipient", None)
     if recipient_manager and getattr(instance, "is_persisted", False):
-        try:
-            for r in recipient_manager.filter(
-                recipient_type=MissiveRecipientType.RECIPIENT
-            ).order_by("name", "pk"):
-                recipients.append({
-                    "pk": r.pk,
-                    "name": r.name or "",
-                    "address":  r.address,
-                })
-        except Exception:
-            pass
+        for r in recipient_manager.filter(
+            recipient_type=MissiveRecipientType.RECIPIENT
+        ).order_by("name", "pk"):
+            recipients.append({
+                "pk": r.pk,
+                "name": r.name or "",
+                "address": r.address,
+            })
 
     letter_rec = None
     letter_pk = None
@@ -273,24 +272,9 @@ def _build_lre_context(instance, post_data=None, postal_recipient_pk=None):
         letter_rec = recipients[0]
         letter_pk = recipients[0]["pk"]
 
-    acknowledgement_display = ""
-    delivery_mode_display = ""
-    priority_display = ""
-    if hasattr(instance, "get_acknowledgement_display"):
-        try:
-            acknowledgement_display = instance.get_acknowledgement_display() or ""
-        except Exception:
-            pass
-    if hasattr(instance, "get_delivery_mode_display"):
-        try:
-            delivery_mode_display = instance.get_delivery_mode_display() or ""
-        except Exception:
-            pass
-    if hasattr(instance, "get_priority_display"):
-        try:
-            priority_display = instance.get_priority_display() or ""
-        except Exception:
-            pass
+    acknowledgement_display = instance.get_acknowledgement_display() or ""
+    delivery_mode_display = instance.get_delivery_mode_display() or ""
+    priority_display = instance.get_priority_display() or ""
 
     return {
         "sender": sender,
@@ -323,28 +307,33 @@ def _build_email_context(instance):
     }
 
     recipient_manager = getattr(instance, "to_missiverecipient", None)
-    if recipient_manager is None or not getattr(instance, "pk", None):
+    # UUID pk is set at init; only a persisted row has recipients to load.
+    if recipient_manager is None or not getattr(instance, "is_persisted", False):
         return context
 
-    try:
-        for r in recipient_manager.all():
-            if r.recipient_type == MissiveRecipientType.RECIPIENT:
-                email = _format_recipient_email(r)
-                context["to_recipients"].append({"name": r.name or "", "email": email})
-            elif r.recipient_type == MissiveRecipientType.CC:
-                email = _format_recipient_email(r)
-                context["cc_recipients"].append({"name": r.name or "", "email": email})
-            elif r.recipient_type == MissiveRecipientType.BCC:
-                email = _format_recipient_email(r)
-                context["bcc_recipients"].append({"name": r.name or "", "email": email})
-    except Exception:
-        pass
+    for r in recipient_manager.all():
+        if r.recipient_type == MissiveRecipientType.RECIPIENT:
+            email = _format_recipient_email(r)
+            context["to_recipients"].append({"name": r.name or "", "email": email})
+        elif r.recipient_type == MissiveRecipientType.CC:
+            email = _format_recipient_email(r)
+            context["cc_recipients"].append({"name": r.name or "", "email": email})
+        elif r.recipient_type == MissiveRecipientType.BCC:
+            email = _format_recipient_email(r)
+            context["bcc_recipients"].append({"name": r.name or "", "email": email})
 
     return context
 
 
 class PreviewView(DetailView):
-    """GET preview: ``missive`` URL uses the saved row; ``campaign`` builds an unsaved missive."""
+    """GET preview: ``missive`` URL uses the saved row; ``campaign`` builds an unsaved missive.
+
+    Deliberately unauthenticated: this is the "view in browser" link that
+    ``processors.body.add_preview_browser`` embeds in outgoing emails, so
+    recipients must be able to open it. The unguessable UUID pk is what keeps it
+    private. Being recipient-facing, it must also stay side-effect free — it
+    must never regenerate the first-document PDF of an already sent missive.
+    """
 
     context_object_name = "missive"
 
@@ -432,11 +421,7 @@ class PreviewView(DetailView):
         if extra:
             context.update(extra)
         context["provider_address_css_lre"] = missive.get_provider_address_css_lre()
-        # For postal-like missives the preview shows the same PDF as the one
-        # sent to the provider — regenerate it so processors / body changes
-        # are reflected. No-op for unsaved missives (campaign preview).
-        if missive_is_postal_like(missive):
-            missive.ensure_first_document()
+        context["sandbox_compiled_body"] = True
         return context
 
 
@@ -505,6 +490,7 @@ class PreviewFormView(View):
         if extra:
             context.update(extra)
         context["provider_address_css_lre"] = missive.get_provider_address_css_lre()
+        context["sandbox_compiled_body"] = True
         return TemplateResponse(request, template_name, context)
 
 

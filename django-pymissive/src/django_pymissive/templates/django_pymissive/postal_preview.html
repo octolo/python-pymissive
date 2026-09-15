@@ -102,7 +102,7 @@
 {% trans "PDF.js unavailable." as pdfjs_msg_unavailable %}
 {% trans "Open attachment" as pdfjs_msg_open %}
 {% trans "Could not render document" as pdfjs_msg_error %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="{% static 'django_pymissive/js/pdfjs/pdf.min.js' %}"></script>
 <script>
 (function () {
     var MSG_UNAVAILABLE = '{{ pdfjs_msg_unavailable|escapejs }}';
@@ -122,14 +122,14 @@
     }
 
     pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        '{% static "django_pymissive/js/pdfjs/pdf.worker.min.js" %}';
 
     async function renderAttachment(wrapper) {
         var url = wrapper.dataset.pdfUrl;
         var pagesEl = wrapper.querySelector('.pdf-pages');
 
         try {
-            var resp = await fetch(url, { credentials: 'include' });
+            var resp = await fetch(url, { credentials: 'same-origin' });
             if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
             var buffer = await resp.arrayBuffer();
 

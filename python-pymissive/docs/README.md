@@ -21,7 +21,7 @@ For detailed information, refer to:
 
 ### Missive-Specific Guidelines
 
-- **Provider development**: All providers must inherit from the appropriate base class (EmailProvider, SMSProvider, etc.)
+- **Provider development**: All providers inherit from `MissiveProviderBase` and implement the services they support
 - **ProviderKit integration**: Use ProviderKit for provider management, discovery, and configuration
 - **API keys**: Never hardcode API keys, use environment variables with provider-specific prefixes
 - **Error handling**: Handle API rate limits and failures gracefully with retry logic and fallback mechanisms
@@ -29,7 +29,7 @@ For detailed information, refer to:
 ### Provider Implementation Checklist
 
 When creating a new provider:
-- [ ] Inherit from the appropriate base provider class
+- [ ] Inherit from `MissiveProviderBase`
 - [ ] Define `name`, `display_name`, and `description`
 - [ ] Set `required_packages` if needed
 - [ ] Configure `config_keys` and `config_defaults`

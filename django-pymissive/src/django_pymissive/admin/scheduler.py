@@ -14,6 +14,7 @@ from pymissive.config import MISSIVE_TYPES
 
 from ..models.choices import MissiveStatus, get_missive_style
 from ..models.scheduler import MissiveScheduledCampaign
+from .permissions import ActionRightsMixin
 
 
 _SCHEDULED_CAMPAIGN_INLINE_FIELDSETS = (
@@ -59,7 +60,7 @@ _SCHEDULED_CAMPAIGN_INLINE_FIELDSETS = (
 
 
 @admin.register(MissiveScheduledCampaign)
-class MissiveScheduledCampaignAdmin(AdminBoostModel):
+class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
     """Admin for missive scheduled campaign model."""
 
     view_on_site = True
@@ -148,35 +149,31 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
     # -- permissions --
 
     def has_start_campaign_permission(self, request, obj=None):
-        return bool(obj and obj.pk and obj.can_send)
+        return bool(self.has_action_rights(request, obj) and obj and obj.pk and obj.can_send)
 
     def has_reschedule_permission(self, request, obj=None):
-        return bool(obj and obj.pk and not obj.can_send)
+        return bool(
+            self.has_action_rights(request, obj) and obj and obj.pk and not obj.can_send
+        )
 
     def has_duplicate_permission(self, request, obj=None):
-        return bool(obj and obj.pk)
+        return bool(self.has_action_rights(request, obj) and obj and obj.pk)
 
     # -- actions --
 
     @admin_boost_action("start_campaign", _("Start campaign"))
     def handle_start_campaign(self, request, object_id):
-        return redirect(
-            reverse(
-                "admin:django_pymissive_missivescheduledcampaign_start_campaign",
-                args=[object_id],
-            )
-        )
+        return self.redirect_to_boost_view(request, object_id, "start_campaign")
 
     @admin_boost_view("confirm", _("Start campaign"), hidden=True)
     def start_campaign(self, request, obj, confirmed=False):
+        self.require_action_rights(request, obj)
         if not obj.can_send:
             messages.error(
                 request,
                 _("This scheduled campaign cannot be started (already sent or not yet due)."),
             )
-            return redirect(
-                reverse("admin:django_pymissive_missivescheduledcampaign_change", args=[obj.pk])
-            )
+            return self.redirect_to_change(obj)
         if not confirmed:
             return {"confirm": _("Are you sure you want to start this scheduled campaign?")}
         obj.start_scheduled_campaign()
@@ -185,17 +182,18 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
 
     @admin_boost_action("reschedule", _("Reschedule"))
     def handle_reschedule(self, request, object_id):
-        return redirect(
-            reverse(
-                "admin:django_pymissive_missivescheduledcampaign_reschedule",
-                args=[object_id],
-            )
-        )
+        return self.redirect_to_boost_view(request, object_id, "reschedule")
 
     @admin_boost_view("confirm", _("Reschedule"), hidden=True)
     def reschedule(self, request, obj, confirmed=False):
-        if not confirmed:
-            return {"confirm": _("Create a new scheduled send now (duplicating this configuration)?")}
+        waiting = self.confirm_action(
+            request,
+            obj,
+            confirmed,
+            _("Create a new scheduled send now (duplicating this configuration)?"),
+        )
+        if waiting:
+            return waiting
         new_scheduled = MissiveScheduledCampaign.objects.create(
             campaign=obj.campaign,
             scheduled_send_date=timezone.now(),
@@ -217,17 +215,18 @@ class MissiveScheduledCampaignAdmin(AdminBoostModel):
 
     @admin_boost_action("duplicate", _("Duplicate"))
     def handle_duplicate(self, request, object_id):
-        return redirect(
-            reverse(
-                "admin:django_pymissive_missivescheduledcampaign_duplicate",
-                args=[object_id],
-            )
-        )
+        return self.redirect_to_boost_view(request, object_id, "duplicate")
 
     @admin_boost_view("confirm", _("Duplicate"), hidden=True)
     def duplicate(self, request, obj, confirmed=False):
-        if not confirmed:
-            return {"confirm": _("Duplicate this scheduled send? The copy will not be started automatically.")}
+        waiting = self.confirm_action(
+            request,
+            obj,
+            confirmed,
+            _("Duplicate this scheduled send? The copy will not be started automatically."),
+        )
+        if waiting:
+            return waiting
         new_scheduled = MissiveScheduledCampaign.objects.create(
             campaign=obj.campaign,
             scheduled_send_date=obj.scheduled_send_date,

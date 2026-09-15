@@ -45,6 +45,9 @@ class _AckProvider(MailevaProvider):
     def __init__(self):
         self.ack_level = None
 
+    def _get_config_or_env(self, key, default=None):
+        return MailevaProvider.config_defaults.get(key, default)
+
 
 def test_acknowledgement_of_receipt_uses_registered_mail_v4():
     provider = _AckProvider()
@@ -60,3 +63,36 @@ def test_basic_delivery_uses_mail_v2():
     assert provider.is_acknowledgement_of_receipt(acknowledgement="basic_delivery") is False
     assert provider.get_lre_mode() == "mail"
     assert provider.get_version() == "v2"
+
+
+def test_address_offset_lre_is_the_same_for_both_products():
+    provider = _AckProvider()
+    provider.is_acknowledgement_of_receipt(acknowledgement="acknowledgement_of_receipt")
+    with_ack = dict(provider.address_offset_lre)
+    provider.is_acknowledgement_of_receipt(acknowledgement="basic_delivery")
+    assert provider.address_offset_lre == with_ack
+    assert with_ack == {"top": "20mm", "width": "70mm", "height": "30mm"}
+
+
+def test_reused_instance_follows_the_current_missive_acknowledgement():
+    """ProviderKit may keep one Maileva instance; the first missive must not stick."""
+    provider = _AckProvider()
+    assert provider.is_acknowledgement_of_receipt(
+        acknowledgement="acknowledgement_of_receipt"
+    )
+    assert provider.get_lre_mode() == "registered_mail"
+    assert provider.get_version() == "v4"
+
+    assert provider.is_acknowledgement_of_receipt(acknowledgement="basic_delivery") is False
+    assert provider.get_lre_mode() == "mail"
+    assert provider.get_version() == "v2"
+
+    data = provider.get_lre_data(
+        subject="Letter", acknowledgement="acknowledgement_of_receipt"
+    )
+    assert data.get("acknowledgement_of_receipt") is True
+    assert "postage_type" not in data
+
+    data = provider.get_lre_data(subject="Letter", acknowledgement="basic_delivery")
+    assert "acknowledgement_of_receipt" not in data
+    assert data.get("postage_type") == "FAST"

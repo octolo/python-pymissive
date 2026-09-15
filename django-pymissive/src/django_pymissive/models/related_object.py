@@ -72,6 +72,9 @@ class MissiveRelatedObject(BaseRelatedObject):
         verbose_name = _("Missive Related Object")
         verbose_name_plural = _("Missive Related Objects")
         ordering = ["-created_at"]
+        # The generic FK is only ever queried the other way round: "which
+        # missives point at this object?".
+        indexes = [models.Index(fields=["content_type", "object_id"])]
 
     def __str__(self):
         if self.content_object:
@@ -97,6 +100,7 @@ class CampaignRelatedObject(BaseRelatedObject):
         verbose_name = _("Campaign Related Object")
         verbose_name_plural = _("Campaign Related Objects")
         ordering = ["-created_at"]
+        indexes = [models.Index(fields=["content_type", "object_id"])]
     
     def __str__(self):
         if self.content_object:

@@ -8,6 +8,28 @@ on:
   workflow_dispatch:
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Pinned so a new ruff release cannot turn a green branch red on its own.
+      - name: Install ruff
+        run: python -m pip install ruff==0.15.18
+
+      - name: Check
+        run: ruff check python-pymissive/src django-pymissive/src
+
   tests:
     name: ${{ matrix.package_name }} tests py${{ matrix.python_version }} ${{ matrix.django_version }}
     runs-on: ubuntu-latest
@@ -31,10 +53,10 @@ jobs:
         include:
           - package_name: pymissive
             working_directory: python-pymissive
-            test_command: python -c "import pymissive; print(pymissive.__name__)"
+            test_command: python -m pytest
           - package_name: django-pymissive
             working_directory: django-pymissive
-            test_command: python -m pytest --ignore=tests/test_maileva_deposit_proof_tracking.py
+            test_command: python -m pytest
 
     steps:
       - name: Checkout repository
@@ -44,6 +66,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python_version }}
+
+      # WeasyPrint wheels need Pango/HarfBuzz on the runner; without them the
+      # [pdf] extra installs but 20 watermark/PDF tests stay silently skipped.
+      - name: Install WeasyPrint system libraries
+        if: ${{ matrix.package_name == 'django-pymissive' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0 libharfbuzz-subset0
 
       - name: Install dependencies
         working-directory: ${{ matrix.working_directory }}
@@ -55,8 +86,9 @@ jobs:
             # pip never tries to fetch it from PyPI.
             python -m pip install -e ../python-pymissive
             python -m pip install -e ".[test]"
+            python -c "import pypdf, reportlab, weasyprint"
           else
-            python -m pip install -e .
+            python -m pip install -e ".[test]"
           fi
 
       - name: Install Django
@@ -73,9 +105,51 @@ jobs:
         working-directory: ${{ matrix.working_directory }}
         run: ${{ matrix.test_command }}
 
+  pymissive-install:
+    name: pymissive non-editable import
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install from the local sdist, not editable
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ./python-pymissive
+          python - <<'PY'
+          from pymissive.providers.brevo import BrevoAPIProvider
+          from pymissive.providers.scaleway import ScalewayProvider
+          from pymissive.providers.maileva import MailevaProvider
+          from pymissive.providers.partner import PartnerProvider
+          from pymissive.providers.slack import SlackProvider
+          from pymissive.providers.teams import TeamsProvider
+          from pymissive.providers.discord import DiscordProvider
+          from pymissive.providers.hand_delivery import HandDeliveryProvider
+
+          for cls in (
+              BrevoAPIProvider,
+              ScalewayProvider,
+              MailevaProvider,
+              PartnerProvider,
+              SlackProvider,
+              TeamsProvider,
+              DiscordProvider,
+              HandDeliveryProvider,
+          ):
+              cls()
+              print(cls.__name__)
+          PY
+
   build:
     name: Build ${{ matrix.package_name }}
-    needs: tests
+    needs: [tests, pymissive-install]
     runs-on: ubuntu-latest
     permissions:
       contents: read

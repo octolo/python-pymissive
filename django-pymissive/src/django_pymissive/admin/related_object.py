@@ -3,7 +3,7 @@
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 from django_boosted import AdminBoostModel
-from django.utils.safestring import mark_safe
+from django.utils.html import format_html
 from django.urls import reverse
 
 from ..models.related_object import MissiveRelatedObject, CampaignRelatedObject
@@ -31,7 +31,7 @@ class BaseRelatedObjectAdmin:
         url = self.object_url_change(obj)
         if not url:
             return label
-        return mark_safe(f'<a href="{url}">{label}</a>')
+        return format_html('<a href="{}">{}</a>', url, label)
 
 
 class MissiveRelatedObjectInline(admin.TabularInline, BaseRelatedObjectAdmin):
@@ -63,10 +63,10 @@ class MissiveRelatedObjectAdmin(AdminBoostModel, BaseRelatedObjectAdmin):
     ]
     search_fields = [
         "missive__subject",
-        "missive__recipients__name",
-        "missive__recipients__email",
-        "missive__recipients__phone",
-        "missive__recipients__address",
+        "missive__to_missiverecipient__name",
+        "missive__to_missiverecipient__email",
+        "missive__to_missiverecipient__phone",
+        "missive__to_missiverecipient__address",
     ]
     readonly_fields = [
         "object_url_link_display",
@@ -115,7 +115,7 @@ class CampaignRelatedObjectAdmin(AdminBoostModel, BaseRelatedObjectAdmin):
         "created_at",
     ]
     search_fields = [
-        "campaign__name",
+        "campaign__subject",
     ]
     readonly_fields = [
         "object_url_link_display",

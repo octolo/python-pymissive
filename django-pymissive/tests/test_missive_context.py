@@ -174,6 +174,17 @@ def test_missive_context_falls_back_to_campaign_when_missive_has_none_for_type()
 # ---------------------------------------------------------------------------
 
 
+def test_missive_context_is_cached_on_the_instance(django_assert_num_queries):
+    missive = _make_email_missive()
+    _attach_related(missive, PdfDocument.objects.create(name="alpha"))
+    missive.missive_context()
+    with django_assert_num_queries(0):
+        again = missive.missive_context()
+    assert again["pdfdocument"]["name"] == "alpha"
+    again["pdfdocument"] = {"name": "mutated"}
+    assert missive.missive_context()["pdfdocument"]["name"] == "alpha"
+
+
 def test_missive_context_singular_is_always_first_of_list():
     """Invariant under any cardinality / source: ``context[ct] == context[ct + '_list'][0]``."""
     campaign = MissiveCampaign.objects.create(subject="camp")

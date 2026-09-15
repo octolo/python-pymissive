@@ -7,7 +7,7 @@ Covers:
   / ``_error``, thread scoping, ``has_sent_missives`` / ``has_open_run``
 - ``MissiveCampaign``: ``is_processing``, ``can_remove``,
   ``send_preview_payload``, draft reclaim in ``start_campaign``
-- ``BaseMissiveManager.sent_at``
+- ``MissiveQuerySet.with_counts`` / ``BaseMissiveManager.sent_at``
 - ``MissiveRecipientManager.targets_by_missive``
 - ``MissiveRelatedQuerySetMixin`` on a model of the integration (fakeapp), and
   its batch counterpart ``missive_summaries_by_object``
@@ -590,7 +590,7 @@ def test_start_campaign_leaves_drafts_of_a_running_run_alone():
 
 
 # ---------------------------------------------------------------------------
-# Missive.sent_at
+# Missive.sent_at / with_counts
 # ---------------------------------------------------------------------------
 
 def test_sent_at_comes_from_the_oldest_send_event():
@@ -601,14 +601,85 @@ def test_sent_at_comes_from_the_oldest_send_event():
     missive.to_missiveevent.create(event="sent", occurred_at=sent)
     missive.to_missiveevent.create(event="delivered", occurred_at=timezone.now())
 
-    assert Missive.objects.get(pk=missive.pk).sent_at == sent
+    assert Missive.objects.with_counts().get(pk=missive.pk).sent_at == sent
 
 
 def test_sent_at_is_null_while_nothing_left():
     missive = _missive()
     missive.to_missiveevent.create(event="request", occurred_at=timezone.now())
 
-    assert Missive.objects.get(pk=missive.pk).sent_at is None
+    assert Missive.objects.with_counts().get(pk=missive.pk).sent_at is None
+
+
+def test_missive_default_queryset_aggregates_nothing():
+    """Doctrine: the counters are opt-in, a plain lookup stays a plain lookup."""
+    default_sql = str(Missive.objects.all().query)
+    assert "COUNT(" not in default_sql
+    assert "GROUP BY" not in default_sql
+    assert default_sql.count("JOIN") == 0
+    assert Missive.objects.all().query.annotations == {}
+
+    opted_in = str(Missive.objects.with_counts().query)
+    assert "GROUP BY" in opted_in
+    assert "COUNT(" in opted_in
+
+
+def test_reverse_missive_relation_stays_a_plain_lookup():
+    """``campaign.to_missive`` inherits the lean manager, not the admin annotations."""
+    campaign = _campaign()
+    _missive(campaign)
+    sql = str(campaign.to_missive.all().query)
+    assert "GROUP BY" not in sql
+    assert "COUNT(" not in sql
+
+
+def test_a_missive_counter_read_without_with_counts_costs_one_query_for_all():
+    """Opt-in does not mean unreadable: the fallback fetches the whole set once."""
+    missive = _missive()
+    missive.to_missiverecipient.create(name="Alice", email="alice@example.com")
+    missive.to_missiveevent.create(event="sent", occurred_at=timezone.now())
+    plain = Missive.objects.get(pk=missive.pk)
+
+    with CaptureQueriesContext(connection) as first:
+        assert plain.count_recipient == 1
+        assert plain.last_event == "sent"
+    assert len(first.captured_queries) == 1
+
+    with CaptureQueriesContext(connection) as more:
+        assert plain.count_event == 1
+        assert plain.sent_at is not None
+        assert plain.is_billable is False
+    assert len(more.captured_queries) == 0
+
+    with CaptureQueriesContext(connection) as annotated:
+        loaded = Missive.objects.with_counts().get(pk=missive.pk)
+        assert loaded.count_recipient == 1
+        assert loaded.last_event == "sent"
+    assert len(annotated.captured_queries) == 1
+
+
+def test_the_missive_fallback_only_answers_for_known_counters():
+    missive = Missive.objects.get(pk=_missive().pk)
+
+    with pytest.raises(AttributeError):
+        missive.count_recipients  # noqa: B018
+    with pytest.raises(AttributeError):
+        missive.does_not_exist  # noqa: B018
+
+
+def test_missive_changelist_still_renders_the_opt_in_counters():
+    missive = _missive()
+    missive.to_missiverecipient.create(name="Alice", email="alice@example.com")
+    missive.to_missiveevent.create(event="sent", occurred_at=timezone.now())
+    user = get_user_model().objects.create_superuser(
+        username="missive-admin", email="missive-admin@example.com", password="x",
+    )
+    client = Client()
+    client.force_login(user)
+
+    response = client.get(reverse("admin:django_pymissive_missive_changelist"))
+    assert response.status_code == 200
+    assert b"1 event(s)" in response.content
 
 
 # ---------------------------------------------------------------------------

@@ -1,14 +1,48 @@
 """Scaleway Transactional Email provider."""
 
 import json
+import logging
+import os
+import re
 from functools import cached_property
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
-from pymissive.utils import is_disable_send
+from pymissive.utils import HTTP_DOCUMENT_TIMEOUT, HTTP_TIMEOUT, is_disable_send
 
 from .base import MissiveProviderBase
+
+logger = logging.getLogger(__name__)
+
+#: ConfirmSubscription hosts: ``https://sns.mnq.<region>.scaleway.com/?Action=ConfirmSubscription&…``
+_SNS_SUBSCRIBE_HOST_RE = re.compile(
+    r"^sns\.mnq\.[a-z0-9-]+\.scaleway\.com$",
+    re.IGNORECASE,
+)
+
+
+def is_scaleway_sns_subscribe_url(url: str) -> bool:
+    """True when ``url`` is an HTTPS ConfirmSubscription on Scaleway SNS.
+
+    A forged ``SubscribeURL`` must not make the worker fetch an arbitrary host
+    (SSRF). See https://www.scaleway.com/en/docs/topics-and-events/how-to/create-manage-subscriptions/
+    """
+    if not url or not isinstance(url, str):
+        return False
+    parsed = urlparse(url.strip())
+    if parsed.scheme != "https":
+        return False
+    if parsed.username or parsed.password:
+        return False
+    if parsed.port not in (None, 443):
+        return False
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if not _SNS_SUBSCRIBE_HOST_RE.fullmatch(host):
+        return False
+    action = parse_qs(parsed.query).get("Action", [""])[0]
+    return action == "ConfirmSubscription"
 
 
 class ScalewayProvider(MissiveProviderBase):
@@ -28,6 +62,8 @@ class ScalewayProvider(MissiveProviderBase):
         "SNS_ACCESS_KEY",
         "SNS_SECRET_KEY",
         "SUFFIX_SENDER_EMAIL",
+        "SCALEWAY_SNS_SAVE_METHOD",
+        "SCALEWAY_SNS_CREDENTIALS_PATH",
     ]
     config_defaults = {
         "BASE_URL": "https://api.scaleway.com",
@@ -92,18 +128,24 @@ class ScalewayProvider(MissiveProviderBase):
         """Build URL from endpoint key."""
         return self.ENDPOINTS[url_key].format(base_url=self._base_url, region=self._region)
 
-    def get_subscription_id(self, sub_arn: str) -> str:
-        return sub_arn.split(":")[-1]
+    def get_subscription_id(self, sub_arn: str | None) -> str | None:
+        if not sub_arn:
+            return None
+        return str(sub_arn).split(":")[-1]
 
-    def get_normalize_id(self, data: dict[str, Any]) -> str:
+    def get_normalize_id(self, data: dict[str, Any]) -> str | None:
         """Get normalized ID."""
         return self.get_subscription_id(data.get("sub_id"))
 
-    def get_normalize_webhook_id(self, data: dict[str, Any]) -> str:
+    def get_normalize_webhook_id(self, data: dict[str, Any]) -> str | None:
         """Get normalized webhook ID."""
-        wbh_id = data.get('id')
-        sub_id = self.get_subscription_id(data.get('sub_id'))
-        return f"{self.name}-{wbh_id}_{sub_id}"
+        wbh_id = data.get("id")
+        sub_id = self.get_subscription_id(data.get("sub_id"))
+        if not wbh_id:
+            return None
+        if sub_id:
+            return f"{self.name}-{wbh_id}_{sub_id}"
+        return f"{self.name}-{wbh_id}"
 
     def get_domains(self):
         """Get domains."""
@@ -257,7 +299,7 @@ class ScalewayProvider(MissiveProviderBase):
             self._build_url("email"),
             headers=self._get_headers(),
             json=self._email_data,
-            timeout=30,
+            timeout=HTTP_DOCUMENT_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -376,9 +418,11 @@ class ScalewayProvider(MissiveProviderBase):
         self.delete_subscription(sns, webhook, webhook_url)
 
     def _handle_webhook_email_confirm(self, payload: dict[str, Any]) -> None:
-        """Handle a webhook confirm email."""
+        """Confirm the SNS subscription. Required or the topic stays pending."""
         subscription_url = payload.get("SubscribeURL")
-        requests.get(subscription_url, timeout=30)
+        if not is_scaleway_sns_subscribe_url(subscription_url):
+            raise ValueError("SubscribeURL is not a Scaleway SNS ConfirmSubscription URL")
+        requests.get(subscription_url, timeout=HTTP_TIMEOUT, allow_redirects=False)
         return None
 
     def handle_webhook_email(self, payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -438,28 +482,29 @@ class ScalewayProvider(MissiveProviderBase):
         return response.json()
 
     def log_sns_credentials(self, access_key: str, secret_key: str):
-        scaleway_sns_save_method = self._get_config_or_env("SCALEWAY_SNS_SAVE_METHOD")
+        """Show newly created SNS keys. File write is opt-in (explicit path, 0600)."""
         separator = "--------------- sns credentials ---------------"
-        if scaleway_sns_save_method == "logger":
-            import logging
-            logger = logging.getLogger(__name__)
+        path = self._get_config_or_env("SCALEWAY_SNS_CREDENTIALS_PATH")
+        if path:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a") as handle:
+                handle.write(f"SNS_ACCESS_KEY = {access_key}\n")
+                handle.write(f"SNS_SECRET_KEY = {secret_key}\n")
+            os.chmod(path, 0o600)
+            print(separator)
+            print(f"Saving SNS credentials to {path}")
+            print(separator)
+            return
+        if self._get_config_or_env("SCALEWAY_SNS_SAVE_METHOD") == "logger":
             logger.info(separator)
-            logger.info("SNS_ACCESS_KEY =", access_key)
-            logger.info("SNS_SECRET_KEY =", secret_key)
+            logger.info("SNS_ACCESS_KEY = %s", access_key)
+            logger.info("SNS_SECRET_KEY = %s", secret_key)
             logger.info(separator)
-        elif scaleway_sns_save_method == "print":
-            print(separator)
-            print("SNS_ACCESS_KEY =", access_key)
-            print("SNS_SECRET_KEY =", secret_key)
-            print(separator)
-        else:
-            filename = f"sns_credentials_{self._project_id}.txt"
-            print(separator)
-            print(f"Saving SNS credentials to {filename}")
-            print(separator)
-            with open(filename, "a") as f:
-                f.write("SNS_ACCESS_KEY = " + access_key + "\n")
-                f.write("SNS_SECRET_KEY = " + secret_key + "\n")
+            return
+        print(separator)
+        print(f"SNS_ACCESS_KEY = {access_key}")
+        print(f"SNS_SECRET_KEY = {secret_key}")
+        print(separator)
 
     def create_sns_credentials(self, name: str = "missive-webhook-email"):
         """Create SNS credentials."""

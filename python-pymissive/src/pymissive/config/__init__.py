@@ -1,4 +1,11 @@
-"""Config for pymissive."""
+"""Canonical key/value maps for missive types, events, fields and supports.
+
+Keys are the values stored by consumers (Django ``CharField``, webhooks,
+provider payloads). Labels and descriptions are display-only. django-pymissive
+builds ``TextChoices`` from these maps at import: adding or renaming a key is
+supposed to produce an ``AlterField``. That is not a schema change — the
+column stays a string holding the key.
+"""
 
 from . import address
 from . import email
@@ -252,11 +259,18 @@ MISSIVE_SERVICES = {
 }
 
 
+_SUPPORT_FIELDS = {
+    "email": EMAIL_FIELDS,
+    "phone": PHONE_FIELDS,
+    "address": ADDRESS_FIELDS,
+}
+
+
 def get_config_by_support(missive_type: str) -> dict:
     """Return fields dict for the support category that contains missive_type."""
-    support_key = next((k for k, types in GENERIC_SUPPORT.items() if missive_type in types), None)
+    support_key = missive_support_for_type(missive_type)
     if support_key:
-        return getattr(globals(), f"{support_key.upper()}_FIELDS", MISSIVE_FIELDS)
+        return _SUPPORT_FIELDS.get(support_key, MISSIVE_FIELDS)
     return MISSIVE_FIELDS
 
 

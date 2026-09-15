@@ -64,12 +64,12 @@ def _make_lre_missive() -> Missive:
     )
 
 
-def _attach_pdf(missive, *, name="doc.pdf", content=b"raw payload"):
+def _attach_pdf(missive, *, name="doc.pdf", content=b"raw payload", linked=True):
     return MissiveBaseAttachment.objects.create(
         missive=missive,
         attachment_type=MissiveAttachmentType.ATTACHMENT,
         attachment_file=ContentFile(content, name=name),
-        linked=False,
+        linked=linked,
     )
 
 
@@ -163,7 +163,7 @@ def test_download_virtual_attachment_runs_chain(client, settings, tmp_path):
         attachment_content_type=ContentType.objects.get_for_model(PdfDocument),
         attachment_object_id=doc.pk,
         attachment_object_arguments={"method": "retrieve_attachment"},
-        linked=False,
+        linked=True,
     )
 
     response = _download(client, virtual)
@@ -189,7 +189,7 @@ def test_download_virtual_attachment_with_raw(client, settings, tmp_path):
         attachment_content_type=ContentType.objects.get_for_model(PdfDocument),
         attachment_object_id=doc.pk,
         attachment_object_arguments={"method": "retrieve_attachment"},
-        linked=False,
+        linked=True,
     )
 
     response = _download(client, virtual, raw=True)

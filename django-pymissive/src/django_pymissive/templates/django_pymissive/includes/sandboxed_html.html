@@ -1,0 +1,10 @@
+{% if srcdoc %}
+<iframe
+    class="sandboxed-html-preview"
+    sandbox
+    frameborder="0"
+    referrerpolicy="no-referrer"
+    srcdoc="{{ srcdoc }}"
+    {% if title %}title="{{ title }}"{% endif %}
+></iframe>
+{% endif %}

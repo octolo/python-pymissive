@@ -22,6 +22,7 @@ def test_retrieve_billings_paginates_and_maps_user_reference():
     class FakeResponse:
         def __init__(self, payload):
             self._payload = payload
+            self.status_code = 200
 
         def raise_for_status(self):
             return None
@@ -57,11 +58,11 @@ def test_retrieve_billings_paginates_and_maps_user_reference():
     }
     pages = [first_page, second_page]
 
-    def fake_get(url, headers=None, timeout=None, params=None):
+    def fake_request(method, url, headers=None, timeout=None, params=None, **kwargs):
         captured.append({"url": url, "params": params})
         return FakeResponse(pages[len(captured) - 1])
 
-    with patch("pymissive.providers.maileva.requests.get", fake_get):
+    with patch("pymissive.providers.maileva.requests.request", fake_request):
         result = MailevaProvider.retrieve_billings(
             _provider(), date(2026, 8, 1), date(2026, 8, 31)
         )
