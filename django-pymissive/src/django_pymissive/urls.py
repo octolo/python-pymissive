@@ -32,6 +32,11 @@ urlpatterns: List[URLPattern] = [
         name="missive_webhook",
     ),
     path(
+        "webhook/<str:provider>/<str:missive_type>/<str:token>/",
+        WebhookView.as_view(),
+        name="missive_webhook_token",
+    ),
+    path(
         "attachment/<str:campaign_or_missive>/<uuid:pk>/download/",
         MissiveAttachmentDownloadView.as_view(),
         name="missive_attachment_download",

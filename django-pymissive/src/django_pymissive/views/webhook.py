@@ -39,6 +39,13 @@ class WebhookView(DetailView):
             # an unknown provider name in the URL would answer 500.
             raise Http404("Unknown provider") from exc
         missive_type = kwargs.get("missive_type")
+        inner = getattr(provider, "_provider", None)
+        verify = getattr(inner, "verify_inbound_webhook", None)
+        if callable(verify) and verify(
+            authorization=request.headers.get("Authorization", ""),
+            url_token=kwargs.get("token") or "",
+        ) is False:
+            return HttpResponse(status=403)
         try:
             lost = handle_events(
                 request.body, provider=provider, missive_type=missive_type

@@ -8,7 +8,12 @@ from virtualqueryset.models import VirtualModel
 from .choices import MissiveType, WebhookScheme
 
 from pymissive.config import WEBHOOK_FIELDS
-from ..utils import get_default_domain, get_default_scheme, build_webhook_url
+from ..utils import (
+    get_default_domain,
+    get_default_scheme,
+    build_webhook_url,
+    webhook_url_token_for,
+)
 from django_providerkit import fields_associations, ProviderField
 from ..managers.webhook import MissiveWebhookManager
 
@@ -94,7 +99,12 @@ class MissiveWebhook(VirtualModel):
         domain = getattr(self, "domain", None)
         if domain:
             base = f"{scheme}://{(domain or '').strip().lstrip('/')}"
-            return build_webhook_url(base, self.provider_name, self.type)
+            token = ""
+            try:
+                token = webhook_url_token_for(self.get_provider())
+            except Exception:
+                token = ""
+            return build_webhook_url(base, self.provider_name, self.type, token=token)
         return ""
 
     def get_webhook_data(self):

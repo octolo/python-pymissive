@@ -117,14 +117,34 @@ def get_base_url(domain=None, scheme=None, trailing_slash=True):
     return f"{base}/" if trailing_slash else base
 
 
-def build_webhook_url(domain: str, provider_name: str, missive_type: str) -> str:
-    """Build full webhook URL from domain, provider and missive type."""
+def build_webhook_url(
+    domain: str, provider_name: str, missive_type: str, token: str = ""
+) -> str:
+    """Build full webhook URL from domain, provider and missive type.
+
+    ``token`` is the path secret for providers that cannot send an
+    Authorization header (Scaleway SNS).
+    """
     domain = (domain or "").rstrip("/")
-    path = reverse(
-        "django_pymissive:missive_webhook",
-        kwargs={"provider": provider_name, "missive_type": missive_type},
-    )
+    kwargs = {"provider": provider_name, "missive_type": missive_type}
+    name = "django_pymissive:missive_webhook"
+    if token:
+        kwargs["token"] = token
+        name = "django_pymissive:missive_webhook_token"
+    path = reverse(name, kwargs=kwargs)
     return f"{domain}{path}"
+
+
+def webhook_url_token_for(provider) -> str:
+    """Path token when the provider requires one and a secret is set."""
+    inner = getattr(provider, "_provider", provider)
+    uses_token = getattr(inner, "webhook_uses_url_token", None)
+    if not callable(uses_token) or not uses_token():
+        return ""
+    getter = getattr(inner, "get_webhook_secret", None)
+    if not callable(getter):
+        return ""
+    return getter() or ""
 
 
 def _recipient_lookup(qs, **kwargs):

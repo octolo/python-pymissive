@@ -341,6 +341,8 @@ class MailevaProvider(MissiveProviderBase):
     required_packages = ["requests"]
     config_keys = [
         "CLIENTID", "SECRET", "USERNAME", "PASSWORD", "SANDBOX",
+        "WEBHOOK_SECRET",
+        "WEBHOOK_BASIC_LOGIN",
         "ARCHIVING_DURATION",
         "PRINT_SENDER_ADDRESS",
         "DUPLEX_PRINTING",
@@ -354,6 +356,7 @@ class MailevaProvider(MissiveProviderBase):
         "DUPLEX_PRINTING": True,
         "COLOR_PRINTING": False,
         "POSTAGE_TYPE": "FAST",
+        "WEBHOOK_BASIC_LOGIN": "pymissive",
         "BASE_URL_SANDBOX": "https://api.sandbox.maileva.net",
         "BASE_URL": "https://api.maileva.com",
         "BASE_TOKEN_URL_SANDBOX": "https://connexion.sandbox.maileva.net",
@@ -497,19 +500,25 @@ class MailevaProvider(MissiveProviderBase):
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         """Authenticated call; refresh the token and retry once on 401."""
         timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
-        headers = dict(kwargs.pop("headers", None) or {})
-        if "Authorization" not in headers:
-            headers.update(self._get_headers())
-        if "files" in kwargs:
-            headers.pop("Content-Type", None)
-        response = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
+        extra_headers = dict(kwargs.pop("headers", None) or {})
+
+        def _headers() -> dict[str, str]:
+            headers = dict(extra_headers)
+            if "Authorization" not in headers:
+                headers.update(self._get_headers())
+            if "files" in kwargs:
+                headers.pop("Content-Type", None)
+            return headers
+
+        response = requests.request(
+            method, url, headers=_headers(), timeout=timeout, **kwargs
+        )
         if response.status_code != 401:
             return response
         self._invalidate_access_token()
-        headers.update(self._get_headers())
-        if "files" in kwargs:
-            headers.pop("Content-Type", None)
-        return requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
+        return requests.request(
+            method, url, headers=_headers(), timeout=timeout, **kwargs
+        )
 
     def _raise_for_response(self, response: requests.Response, context: str) -> None:
         """Raise on HTTP errors with a compact Maileva reason.
@@ -552,6 +561,19 @@ class MailevaProvider(MissiveProviderBase):
     # Webhooks (generic)
     #########################################################
 
+    def _webhook_authentication(self) -> dict | None:
+        secret = self.get_webhook_secret()
+        if not secret:
+            return None
+        from pymissive.webhook_auth import (
+            get_webhook_basic_login,
+            maileva_subscription_authentication,
+        )
+
+        return maileva_subscription_authentication(
+            secret, login=get_webhook_basic_login(self)
+        )
+
     def get_webhooks_by_resource_type_and_url(self, resource_type: str, url: str) -> list[dict[str, Any]]:
         webhooks = self.retrieve_webhooks()
         resource_types = self.get_resource_types(resource_type)
@@ -570,6 +592,9 @@ class MailevaProvider(MissiveProviderBase):
                     "event_type": event,
                     "resource_type": rt,
                 }
+                auth = self._webhook_authentication()
+                if auth:
+                    data["authentication"] = auth
                 response = self._request("POST", url, json=data)
                 response.raise_for_status()
                 first_response = response.json() if first_response is None else first_response
@@ -587,6 +612,9 @@ class MailevaProvider(MissiveProviderBase):
         for webhook in webhooks:
             endpoint = self.get_endpoint('subscriptions') + "/" + webhook.get("id")
             data = {"callback_url": callback_url}
+            auth = self._webhook_authentication()
+            if auth:
+                data["authentication"] = auth
             response = self._request("PATCH", endpoint, json=data)
             response.raise_for_status()
         return True
