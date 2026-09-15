@@ -64,12 +64,17 @@ class ScalewayProvider(MissiveProviderBase):
         "SUFFIX_SENDER_EMAIL",
         "SCALEWAY_SNS_SAVE_METHOD",
         "SCALEWAY_SNS_CREDENTIALS_PATH",
+        "WEBHOOK_SECRET",
     ]
     config_defaults = {
         "BASE_URL": "https://api.scaleway.com",
         "REGION": "fr-par",
         "WEBHOOK_ID": "default",
     }
+
+    def webhook_uses_url_token(self) -> bool:
+        return True
+
     ENDPOINTS = {
         "email": "{base_url}/transactional-email/v1alpha1/regions/{region}/emails",
         "webhooks": "{base_url}/transactional-email/v1alpha1/regions/{region}/webhooks",

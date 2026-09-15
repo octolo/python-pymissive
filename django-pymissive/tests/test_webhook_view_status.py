@@ -120,6 +120,16 @@ def test_a_batch_keeps_the_good_events_and_still_asks_for_a_retry():
     assert MissiveEvent.objects.filter(missive=missive, event="delivered").exists()
 
 
+def test_a_rejected_secret_answers_403():
+    provider = _provider([_event()])
+    provider._provider.verify_inbound_webhook.return_value = False
+
+    response = _post(provider)
+
+    assert response.status_code == 403
+    assert MissiveEvent.objects.count() == 0
+
+
 def test_an_unknown_provider_answers_404():
     response = Client().post(
         reverse("django_pymissive:missive_webhook", args=["nope", "email"]),

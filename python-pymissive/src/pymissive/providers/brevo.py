@@ -35,7 +35,7 @@ class BrevoAPIProvider(MissiveProviderBase):
     site_url = "https://www.brevo.com"
     brands = ["WhatsApp"]
     required_packages = ["brevo-python>=4.0"]
-    config_keys = ["EMAIL_API_KEY", "SMS_API_KEY", "WHATSAPP_API_KEY"]
+    config_keys = ["EMAIL_API_KEY", "SMS_API_KEY", "WHATSAPP_API_KEY", "WEBHOOK_SECRET"]
 
     fields_associations = {
         "webhook_id": "id",
@@ -100,6 +100,14 @@ class BrevoAPIProvider(MissiveProviderBase):
         self._sms_client = None
         self._whatsapp_client = None
         self._webhooks_client = None
+
+    def _webhook_auth_kwargs(self) -> dict:
+        secret = self.get_webhook_secret()
+        if not secret:
+            return {}
+        from pymissive.webhook_auth import brevo_webhook_auth
+
+        return {"auth": brevo_webhook_auth(secret)}
 
     #########################################################
     # API clients
@@ -513,6 +521,7 @@ class BrevoAPIProvider(MissiveProviderBase):
             events=events,
             channel="email",
             type="transactional",
+            **self._webhook_auth_kwargs(),
         )
         webhook_id = getattr(response, "id", response)
         return self.get_normalize_webhook_id({"id": webhook_id})
@@ -521,7 +530,9 @@ class BrevoAPIProvider(MissiveProviderBase):
         """Update a Brevo email webhook."""
         client = self._get_webhooks_client()
         webhook_id = int(webhook_data.get("id"))
-        client.webhooks.update_webhook(webhook_id, url=webhook_data.get("url"))
+        client.webhooks.update_webhook(
+            webhook_id, url=webhook_data.get("url"), **self._webhook_auth_kwargs()
+        )
         return self.get_normalize_webhook_id({"id": webhook_id})
 
     def delete_webhook_email(self, webhook_data: dict[str, Any]) -> bool:
@@ -621,6 +632,7 @@ class BrevoAPIProvider(MissiveProviderBase):
             events=list(self.events_association.keys()),
             channel="sms",
             type="transactional",
+            **self._webhook_auth_kwargs(),
         )
         return self.get_normalize_webhook_id({"id": getattr(response, "id", response)})
 
@@ -628,7 +640,9 @@ class BrevoAPIProvider(MissiveProviderBase):
         """Update a Brevo SMS webhook."""
         client = self._get_webhooks_client()
         webhook_id = int(webhook_data.get("id"))
-        client.webhooks.update_webhook(webhook_id, url=webhook_data.get("url"))
+        client.webhooks.update_webhook(
+            webhook_id, url=webhook_data.get("url"), **self._webhook_auth_kwargs()
+        )
         return self.get_normalize_webhook_id({"id": webhook_id})
 
     def delete_webhook_sms(self, webhook_data: dict[str, Any]) -> bool:
@@ -696,6 +710,7 @@ class BrevoAPIProvider(MissiveProviderBase):
             events=list(self.events_association.keys()),
             channel="whatsapp",
             type="transactional",
+            **self._webhook_auth_kwargs(),
         )
         return self.get_normalize_webhook_id({"id": getattr(response, "id", response)})
 
@@ -703,7 +718,9 @@ class BrevoAPIProvider(MissiveProviderBase):
         """Update a Brevo WhatsApp webhook."""
         client = self._get_webhooks_client()
         webhook_id = int(webhook_data.get("id"))
-        client.webhooks.update_webhook(webhook_id, url=webhook_data.get("url"))
+        client.webhooks.update_webhook(
+            webhook_id, url=webhook_data.get("url"), **self._webhook_auth_kwargs()
+        )
         return self.get_normalize_webhook_id({"id": webhook_id})
 
     def delete_webhook_whatsapp(self, webhook_data: dict[str, Any]) -> bool:

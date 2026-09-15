@@ -45,6 +45,7 @@ from ..utils import (
     apply_default_sender_fields,
     build_webhook_url,
     get_base_url,
+    webhook_url_token_for,
     get_default_domain,
     get_default_scheme,
     is_dry_run,
@@ -683,7 +684,12 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             provider_name = provider if isinstance(provider, str) else ""
         if not provider_name:
             return ""
-        return build_webhook_url(base, provider_name, self.missive_type)
+        return build_webhook_url(
+            base,
+            provider_name,
+            self.missive_type,
+            token=webhook_url_token_for(provider),
+        )
 
     def is_serializable_field(self, field):
         return (not field.is_relation

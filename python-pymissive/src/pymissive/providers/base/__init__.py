@@ -43,6 +43,26 @@ class MissiveProviderBase(
         super().__init__(**kwargs)
         self.attachments: list[Any] = []
 
+    def get_webhook_secret(self) -> str:
+        """Return ``WEBHOOK_SECRET`` or empty when inbound auth is off."""
+        from pymissive.webhook_auth import get_webhook_secret
+
+        return get_webhook_secret(self)
+
+    def webhook_uses_url_token(self) -> bool:
+        """True when the provider cannot send an Authorization header (SNS)."""
+        return False
+
+    def verify_inbound_webhook(
+        self, *, authorization: str = "", url_token: str = ""
+    ) -> bool:
+        """Opt-in inbound check. See ``pymissive.webhook_auth``."""
+        from pymissive.webhook_auth import verify_inbound_webhook
+
+        return verify_inbound_webhook(
+            self, authorization=authorization, url_token=url_token
+        )
+
     def _to_base64(self, content):
         if isinstance(content, bytes):
             return base64.b64encode(content).decode("ascii")
