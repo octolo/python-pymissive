@@ -183,3 +183,28 @@ def test_scaleway_asks_for_a_url_token():
     assert S().webhook_uses_url_token() is True
     assert B().webhook_uses_url_token() is False
     assert M().webhook_uses_url_token() is False
+
+
+def test_create_webhook_email_subscribes_only_to_transactional_events():
+    from unittest.mock import MagicMock
+
+    from pymissive.providers.brevo import BrevoAPIProvider
+
+    class _NoConfig:
+        def _get_config_or_env(self, key, default=None):
+            return default
+
+    class B(_NoConfig, BrevoAPIProvider):
+        pass
+
+    provider = B()
+    client = MagicMock()
+    client.webhooks.create_webhook.return_value = MagicMock(id=42)
+    provider._get_webhooks_client = lambda: client
+    provider.create_webhook_email({"url": "https://example.com/hook"})
+    events = client.webhooks.create_webhook.call_args.kwargs["events"]
+    assert "sent" in events
+    assert "delivered" in events
+    assert "accepted" not in events
+    assert "loadedByProxy" not in events
+    assert "error" not in events

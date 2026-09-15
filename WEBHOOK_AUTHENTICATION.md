@@ -140,8 +140,9 @@ pymissive webhook secret --provider maileva --seconds 8
 
 ### Django admin
 
-`extra` is `settings.SECRET_KEY`. Webhook changelist → **Generate webhook
-secret**. Staff-only. Not stored in the database.
+`extra` is `settings.SECRET_KEY`, plus an optional **Salt** field to mint a
+new token. Webhook changelist → **Generate webhook secret**. Staff-only. Not
+stored in the database.
 
 ---
 

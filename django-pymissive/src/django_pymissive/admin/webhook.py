@@ -2,7 +2,6 @@
 
 from urllib.parse import unquote
 
-from django import forms
 from django.conf import settings
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
@@ -13,7 +12,26 @@ from pymissive.webhook_secret import generate_webhook_secret as make_webhook_sec
 
 from ..forms.webhook import GenerateWebhookSecretForm
 from ..models.webhook import MissiveWebhook
+from ..utils import build_webhook_url, get_base_url
 from .permissions import ActionRightsMixin
+
+
+def _admin_secret_extra(salt: str) -> str:
+    """SECRET_KEY plus optional salt so staff can rotate the token."""
+    extra = settings.SECRET_KEY
+    salt = (salt or "").strip()
+    if salt:
+        extra = f"{extra}\n{salt}"
+    return extra
+
+
+def _generated_webhook_urls(provider_name: str, missive_type: str, token: str) -> tuple[str, str]:
+    """Plain callback URL and the same path with the secret as last segment."""
+    base = get_base_url(trailing_slash=False)
+    return (
+        build_webhook_url(base, provider_name, missive_type),
+        build_webhook_url(base, provider_name, missive_type, token=token),
+    )
 
 
 def _webhook_provider_name(webhook) -> str:
@@ -141,29 +159,28 @@ class MissiveWebhookAdmin(ActionRightsMixin, AdminBoostModel):
     def generate_webhook_secret(self, request, form=None):
         """Show a secret seeded by provider name, UTC date, and SECRET_KEY."""
         self.require_action_rights(request)
-        if form is None:
-            return {
-                "form": GenerateWebhookSecretForm(),
-                "save_label": _("Generate"),
-                "has_change_permission": True,
-            }
-        provider = str(form.cleaned_data["provider"])
-        token = make_webhook_secret(provider, settings.SECRET_KEY)
-        result = GenerateWebhookSecretForm(initial={"provider": provider})
-        result.fields["secret"] = forms.CharField(
-            initial=token,
-            label=_("Webhook secret"),
-            help_text=_(
-                "Copy into WEBHOOK_SECRET for this provider, then re-create "
-                "the webhook."
-            ),
-            widget=forms.TextInput(
-                attrs={"readonly": "readonly", "style": "font-family:monospace"}
-            ),
-        )
-        result.order_fields(["provider", "secret"])
-        return {
-            "form": result,
+        payload = {
             "save_label": _("Generate"),
             "has_change_permission": True,
+            "readonly_fields": ["secret", "webhook_url", "webhook_url_token"],
+        }
+        if form is None:
+            return {**payload, "form": GenerateWebhookSecretForm()}
+        provider = str(form.cleaned_data["provider"])
+        missive_type = str(form.cleaned_data["missive_type"])
+        salt = str(form.cleaned_data.get("salt") or "").strip()
+        token = make_webhook_secret(provider, _admin_secret_extra(salt))
+        url, url_token = _generated_webhook_urls(provider, missive_type, token)
+        return {
+            **payload,
+            "form": GenerateWebhookSecretForm(
+                initial={
+                    "provider": provider,
+                    "missive_type": missive_type,
+                    "salt": salt,
+                    "secret": token,
+                    "webhook_url": url,
+                    "webhook_url_token": url_token,
+                }
+            ),
         }

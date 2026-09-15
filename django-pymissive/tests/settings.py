@@ -100,12 +100,22 @@ GEOADDRESS_PROVIDERVIEW_AUTH = True
 GEOADDRESS_ADDRESSVIEW = True
 GEOADDRESS_ADDRESSVIEW_AUTH = True
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.ngrok-free.app",
+    "https://*.ngrok.app",
+    "https://*.ngrok.io",
+]
+
 NGROK_PUBLIC_URL = os.getenv("NGROK_PUBLIC_URL")
 if NGROK_PUBLIC_URL:
     from urllib.parse import urlparse
-    url_data = urlparse(NGROK_PUBLIC_URL)
+    url_data = urlparse(NGROK_PUBLIC_URL.rstrip("/"))
     MISSIVE_DOMAIN = url_data.netloc
     MISSIVE_SCHEME = url_data.scheme
+    if url_data.scheme and url_data.netloc:
+        origin = f"{url_data.scheme}://{url_data.netloc}"
+        if origin not in CSRF_TRUSTED_ORIGINS:
+            CSRF_TRUSTED_ORIGINS.append(origin)
 
 
 
@@ -228,6 +238,7 @@ PROVIDERKIT_PROVIDERS_CONFIG = {
     "brevo": {
         "EMAIL_API_KEY": os.getenv("BREVO_EMAIL_API_KEY"),
         "SMS_API_KEY": os.getenv("BREVO_SMS_API_KEY"),
+        "WEBHOOK_SECRET": os.getenv("BREVO_WEBHOOK_SECRET"),
     },
     "scaleway": {
         "ACCESS_KEY": os.getenv("SCALEWAY_ACCESS_KEY"),
@@ -242,6 +253,7 @@ PROVIDERKIT_PROVIDERS_CONFIG = {
         "PASSWORD": os.getenv("MAILEVA_PASSWORD"),
         "CLIENTID": os.getenv("MAILEVA_CLIENTID"),
         "SECRET": os.getenv("MAILEVA_SECRET"),
+        "WEBHOOK_SECRET": os.getenv("MAILEVA_WEBHOOK_SECRET"),
         # os.getenv default True is a test safety net. Env strings like "0"/"False"
         # must be parsed: a non-empty string is otherwise always truthy.
         "SANDBOX": (
