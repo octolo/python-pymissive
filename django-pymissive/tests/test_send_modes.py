@@ -5,7 +5,7 @@ Covers the branching introduced for ``PYMISSIVE_DRY_RUN`` vs
 
 - dry_run     → provider is NOT called, synthetic ``dry-run:`` external_id.
 - disable_send→ provider IS called; a ``disabled_send`` response is persisted
-                as a REQUEST event (never ERROR), like a real send.
+                as a SUBMITTED event (never ERROR), like a real send.
 - real send   → provider IS called and the response drives external_id/events.
 
 The provider layer is mocked (``call_provider_service`` / ``get_serialized_data``)
@@ -62,7 +62,7 @@ def test_dry_run_skips_provider(settings):
     assert missive.external_id == f"dry-run:{missive.thread_id}"
     events = _events(missive)
     assert len(events) == 1
-    assert events[0].event == MissiveEventType.REQUEST
+    assert events[0].event == MissiveEventType.SUBMITTED
     assert events[0].trace.get("dry_run") is True
 
 
@@ -93,7 +93,7 @@ def test_disable_send_calls_provider_and_records_request(settings):
     assert missive.status == MissiveStatus.PROCESSING
     events = _events(missive)
     assert len(events) == 1
-    assert events[0].event == MissiveEventType.REQUEST
+    assert events[0].event == MissiveEventType.SUBMITTED
     assert events[0].trace.get("disabled_send") is True
     assert not any(e.event == MissiveEventType.ERROR for e in events)
 
@@ -147,7 +147,8 @@ def test_real_send_uses_provider_response(settings):
     assert missive.external_id == "ext-123"
     events = _events(missive)
     assert len(events) == 1
-    assert events[0].event == MissiveEventType.REQUEST
+    assert events[0].event == MissiveEventType.SUBMITTED
+    assert events[0].client_initiated is True
     assert not events[0].trace.get("dry_run")
     assert not events[0].trace.get("disabled_send")
 

@@ -39,10 +39,10 @@ def trigger_billings(missive):
 
 @receiver(post_save, sender=MissiveEvent)
 def trigger_billings_on_event(sender, instance, created, **kwargs):
-    """Queue get_billings after a new non-REQUEST event is saved."""
+    """Queue get_billings after a new billable event is saved."""
     if not created or _suppress_event_billings.get():
         return
-    if instance.event == MissiveEventType.REQUEST:
+    if instance.event in (MissiveEventType.SUBMITTED, MissiveEventType.REQUEST):
         return
     if instance.missive_id:
         trigger_billings(instance.missive)

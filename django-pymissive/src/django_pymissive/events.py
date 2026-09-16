@@ -69,7 +69,7 @@ def _save_untreated(event, provider) -> bool:
 # stay ``DRAFT``. We fan these out to every recipient instead. Only early
 # lifecycle events are fanned out: terminal/per-recipient events (delivered,
 # undelivered, archived, proofs, ...) always carry their own recipient.
-FANOUT_EVENTS = {"request", "accepted", "processed", "queued", "processing"}
+FANOUT_EVENTS = {"submitted", "request", "accepted", "processed", "queued", "processing"}
 
 
 def _upsert_event(event, missive, recipient, occurred_at, pk=None):

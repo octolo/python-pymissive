@@ -442,7 +442,7 @@ def is_dry_run() -> bool:
       first_document PDF generation, ``get_serialized_data``);
     - skip the provider call entirely;
     - persist a synthetic ``external_id`` prefixed with ``dry-run:``;
-    - record a ``REQUEST`` event with ``trace={"dry_run": True, ...}`` so
+    - record a ``SUBMITTED`` event with ``trace={"dry_run": True, ...}`` so
       tests can assert the missive went through the pipeline.
     """
     return bool(getattr(settings, "PYMISSIVE_DRY_RUN", False))

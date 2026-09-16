@@ -48,5 +48,5 @@ def test_resend_keeps_history_and_external_id_if_post_send_fails():
     clone = Missive.objects.exclude(pk=original.pk).get()
     assert clone.external_id == "new-1"
     assert MissiveEvent.objects.filter(
-        missive=clone, event=MissiveEventType.REQUEST
+        missive=clone, event=MissiveEventType.SUBMITTED
     ).exists()

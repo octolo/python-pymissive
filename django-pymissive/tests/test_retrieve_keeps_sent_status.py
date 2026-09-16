@@ -26,17 +26,17 @@ def _missive(**kwargs) -> Missive:
 
 
 def test_set_status_does_not_regress_sent_missive_to_draft():
-    """The send REQUEST used to be recipient-less → counts (0,0,0,0) → DRAFT."""
+    """The send SUBMITTED used to be recipient-less → counts (0,0,0,0) → DRAFT."""
     missive = _missive()
     MissiveEvent.objects.create(
-        missive=missive, event=MissiveEventType.REQUEST, client_initiated=True
+        missive=missive, event=MissiveEventType.SUBMITTED, client_initiated=True
     )
     missive.set_status()
     missive.refresh_from_db()
     assert missive.status == MissiveStatus.PROCESSING
 
 
-def test_send_fans_request_out_to_recipients_so_retrieve_stays_processing(settings):
+def test_send_fans_submitted_out_to_recipients_so_retrieve_stays_processing(settings):
     settings.PYMISSIVE_DRY_RUN = False
     settings.PYMISSIVE_DISABLE_SEND = False
     missive = _missive(status=MissiveStatus.DRAFT, external_id=None)
@@ -57,7 +57,7 @@ def test_send_fans_request_out_to_recipients_so_retrieve_stays_processing(settin
 
     assert (
         MissiveEvent.objects.filter(
-            missive=missive, event=MissiveEventType.REQUEST, recipient__isnull=False
+            missive=missive, event=MissiveEventType.SUBMITTED, recipient__isnull=False
         ).count()
         == 2
     )
