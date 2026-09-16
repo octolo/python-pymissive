@@ -1243,7 +1243,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
         The archive + duplicate commit before the provider call. Sending
         inside the same ``atomic()`` would roll back ``external_id`` and the
-        ``REQUEST`` event if anything failed afterwards, while the mail had
+        ``SUBMITTED`` event if anything failed afterwards, while the mail had
         already left.
 
         Args:
@@ -1483,7 +1483,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         When ``settings.PYMISSIVE_DRY_RUN`` is True the full local pipeline
         runs (body processors, attachments, ``first_document`` PDF, signal
         ``missive_pre_send``) but the provider call is skipped: ``external_id``
-        is set to ``dry-run:<thread_id>``, a ``REQUEST`` event with
+        is set to ``dry-run:<thread_id>``, a ``SUBMITTED`` event with
         ``trace={"dry_run": True, ...}`` is recorded, and ``missive_post_send``
         is dispatched. Useful for Django tests asserting that campaigns and
         missives are generated correctly without hitting the provider.
@@ -1527,7 +1527,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             from ..signals import suppress_event_billings
 
             with suppress_event_billings():
-                self._record_request_event(occurred_at=occurred_at, trace=response)
+                self._record_submitted_event(occurred_at=occurred_at, trace=response)
                 events = response.get("events")
                 if events:
                     self.handle_events(events)
@@ -1540,7 +1540,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """Run the local send pipeline without calling the provider.
 
         Triggered when ``settings.PYMISSIVE_DRY_RUN`` is True. Generates a
-        synthetic ``external_id``, records a ``REQUEST`` event flagged as a
+        synthetic ``external_id``, records a ``SUBMITTED`` event flagged as a
         dry-run, and dispatches ``missive_post_send`` like a real send would.
         """
         try:
@@ -1556,7 +1556,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             return
         self.external_id = f"dry-run:{self.thread_id}"
         self.save(update_fields=["external_id", "status"])
-        self._record_request_event(
+        self._record_submitted_event(
             occurred_at=occurred_at,
             trace={
                 "dry_run": True,
@@ -1576,7 +1576,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         The provider ran the full pipeline (sending creation, recipients,
         attachments) but skipped the final confirmation network call. We persist
         whatever it produced (``external_id``, recipients, attachments), record a
-        ``REQUEST`` event flagged as a disabled send, and dispatch
+        ``SUBMITTED`` event flagged as a disabled send, and dispatch
         ``missive_post_send`` like a real send would. No ``ERROR`` event is
         recorded even when no ``external_id`` was produced.
         """
@@ -1589,7 +1589,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             self.external_id = external_id
             update_fields.append("external_id")
         self.save(update_fields=update_fields)
-        self._record_request_event(occurred_at=occurred_at, trace=response)
+        self._record_submitted_event(occurred_at=occurred_at, trace=response)
         self.refresh_from_db()
         missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
 
@@ -1632,14 +1632,18 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             recipient.set_status()
         self.set_status()
 
-    def _record_request_event(self, *, occurred_at, trace):
-        """Write the client-initiated ``REQUEST`` so ``set_status`` can see it.
+    def _record_submitted_event(self, *, occurred_at, trace):
+        """Write the local ``SUBMITTED`` so ``set_status`` can see it.
+
+        Distinct from the provider ``request`` (webhook / retrieve): same
+        second would otherwise collide on the business key
+        ``(missive, event, occurred_at, recipient)``.
 
         ``get_event_counts`` ignores recipient-less rows (a missive-level
-        ``request`` would otherwise look like a phantom in-progress recipient
-        on a fully delivered missive). The webhook path already fans
-        ``FANOUT_EVENTS`` out to every recipient; ``send_missive`` used to
-        write a single recipient-less row, so retrieve / « Statut » fell
+        ``submitted`` would otherwise look like a phantom in-progress
+        recipient on a fully delivered missive). The webhook path already
+        fans ``FANOUT_EVENTS`` out to every recipient; ``send_missive`` used
+        to write a single recipient-less row, so retrieve / « Statut » fell
         back to ``DRAFT`` and the send button came back.
         """
         from ..signals import suppress_event_billings
@@ -1648,7 +1652,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         with suppress_event_billings():
             for recipient in recipients:
                 self.to_missiveevent.create(
-                    event=MissiveEventType.REQUEST,
+                    event=MissiveEventType.SUBMITTED,
                     recipient=recipient,
                     trace=trace,
                     client_initiated=True,
@@ -1667,7 +1671,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             success_count, processing_count, failed_count, cancelled_count
         )
         # Counts of 0 mean "no recipient event yet", not "never sent".
-        # A just-sent missive with only a leftover recipient-less REQUEST
+        # A just-sent missive with only a leftover recipient-less SUBMITTED
         # must not return to DRAFT (that re-enables Send and the campaign).
         if status == MissiveStatus.DRAFT and self.status not in PENDING_STATUSES:
             return

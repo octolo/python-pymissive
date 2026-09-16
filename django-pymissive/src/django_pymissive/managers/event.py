@@ -14,8 +14,8 @@ class MissiveEventManager(models.Manager):
     def get_event_counts(self, missive=None, recipient=None):
         """Return (success, processing, failed, cancelled) from last event per recipient.
 
-        Missive-level events (``recipient_id`` is NULL, e.g. the ``REQUEST``
-        event created by ``send_missive``) are intentionally excluded: the
+        Missive-level events (``recipient_id`` is NULL, e.g. a leftover
+        recipient-less ``submitted``) are intentionally excluded: the
         status is derived from the latest event of each *recipient*. Without
         this filter a fully-delivered missive ends up as ``PARTIALLY_SUCCESS``
         because the missive-level ``request`` event is counted as a phantom

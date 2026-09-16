@@ -216,3 +216,41 @@ def test_upsert_recovers_from_integrity_error(monkeypatch):
     row = MissiveEvent.objects.get(missive=missive, event="accepted")
     assert row.reason == "replay"
     assert row.trace == {"ok": True}
+
+
+def test_submitted_and_provider_request_can_share_occurred_at():
+    """Local submit and provider request are distinct business keys."""
+    missive, recipients = _missive_with_recipients(1)
+    occurred = _get_occurred_at("2026-06-12T09:30:16Z")
+    MissiveEvent.objects.create(
+        missive=missive,
+        recipient=recipients[0],
+        event="submitted",
+        occurred_at=occurred,
+        client_initiated=True,
+        trace={"local": True},
+    )
+    MissiveEvent.objects.create(
+        missive=missive,
+        recipient=recipients[0],
+        event="request",
+        occurred_at=occurred,
+        trace={"provider": True},
+    )
+
+    assert MissiveEvent.objects.filter(missive=missive).count() == 2
+    assert MissiveEvent.objects.get(event="submitted").trace == {"local": True}
+    assert MissiveEvent.objects.get(event="request").trace == {"provider": True}
+
+
+def test_submitted_sending_level_event_fans_out_to_all_recipients():
+    missive, recipients = _missive_with_recipients(2)
+
+    _process_event(_event("submitted"), missive)
+
+    for recipient in recipients:
+        assert MissiveEvent.objects.filter(
+            missive=missive, recipient=recipient, event="submitted"
+        ).exists()
+    missive.refresh_from_db()
+    assert missive.status == MissiveStatus.PROCESSING

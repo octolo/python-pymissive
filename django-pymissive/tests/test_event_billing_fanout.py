@@ -88,7 +88,11 @@ def test_nothing_is_billed_when_the_provider_has_no_billing_service():
     get_billings.assert_not_called()
 
 
-def test_request_event_does_not_fetch_billings():
+@pytest.mark.parametrize(
+    "event",
+    [MissiveEventType.SUBMITTED, MissiveEventType.REQUEST],
+)
+def test_early_lifecycle_events_do_not_fetch_billings(event):
     missive = _missive_with_recipients(1)
 
     with patch.object(Missive, "can_billings", return_value=True), patch.object(
@@ -96,8 +100,8 @@ def test_request_event_does_not_fetch_billings():
     ) as get_billings:
         MissiveEvent.objects.create(
             missive=missive,
-            event=MissiveEventType.REQUEST,
-            client_initiated=True,
+            event=event,
+            client_initiated=event == MissiveEventType.SUBMITTED,
         )
 
     get_billings.assert_not_called()

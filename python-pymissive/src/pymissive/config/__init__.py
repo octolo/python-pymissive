@@ -73,6 +73,7 @@ INFO_EVENTS = {
         "Proxy",
         "Intermediary progress (privacy proxy, in transit, or similar). Not a confirmed human action or final delivery.",
     ),
+    "submitted": ("Submitted", "The missive was submitted for sending."),
     "request": ("Request", "A request to send the missive has been received."),
     "deferred": ("Deferred", "Temporary delivery failure, will retry later."),
     "scheduled": ("Scheduled", "Scheduled to be sent at a future time."),

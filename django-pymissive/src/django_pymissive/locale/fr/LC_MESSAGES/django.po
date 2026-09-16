@@ -1560,6 +1560,12 @@ msgstr "E-mail de réponse"
 msgid "Request"
 msgstr "Demande"
 
+msgid "Submitted"
+msgstr "Soumis"
+
+msgid "The missive was submitted for sending."
+msgstr "La missive a été soumise à l'envoi."
+
 msgid "Saved as draft, not yet sent."
 msgstr "Enregistré comme brouillon, pas encore envoyé."
 
