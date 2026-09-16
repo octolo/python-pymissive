@@ -25,7 +25,7 @@ pytestmark = pytest.mark.django_db
 
 def test_form_requires_dates():
     form = RetrieveBillingsForm(
-        data={"provider": "maileva", "missive_type": MissiveType.LRE}
+        data={"provider": "maileva", "missive_type": MissiveType.REGISTERED_LETTER}
     )
     assert form.is_valid() is False
 
@@ -34,7 +34,7 @@ def test_form_rejects_end_before_start():
     form = RetrieveBillingsForm(
         data={
             "provider": "maileva",
-            "missive_type": MissiveType.LRE,
+            "missive_type": MissiveType.REGISTERED_LETTER,
             "start_date": "2026-02-01",
             "end_date": "2026-01-01",
         }
@@ -46,7 +46,7 @@ def test_form_accepts_range_and_as_task():
     form = RetrieveBillingsForm(
         data={
             "provider": "maileva",
-            "missive_type": MissiveType.LRE,
+            "missive_type": MissiveType.REGISTERED_LETTER,
             "start_date": "2026-01-01",
             "end_date": "2026-01-31",
             "as_task": "on",
@@ -60,9 +60,9 @@ def test_form_accepts_range_and_as_task():
 
 def test_process_billing_updates_amount_on_the_same_invoice():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         external_id="send-amt",
-        subject="LRE",
+        subject="registered letter",
     )
     _process_billing(
         missive,
@@ -90,9 +90,9 @@ def test_process_billing_updates_amount_on_the_same_invoice():
 
 def test_process_billing_keeps_distinct_invoices():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         external_id="send-two",
-        subject="LRE",
+        subject="registered letter",
     )
     _process_billing(missive, {"invoice": "A", "billing_amount": 1.0})
     _process_billing(missive, {"invoice": "B", "billing_amount": 2.0})
@@ -101,10 +101,10 @@ def test_process_billing_keeps_distinct_invoices():
 
 def test_retrieve_billings_calls_provider_and_upserts():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         external_id="send-1",
         substitute_id="sub-1",
-        subject="LRE",
+        subject="registered letter",
     )
     provider = MagicMock()
     provider._provider = MagicMock()
@@ -116,7 +116,7 @@ def test_retrieve_billings_calls_provider_and_upserts():
                 "billing_amount": 1.23,
                 "estimate_amount": 1.23,
                 "currency": "EUR",
-                "invoice": "LRE",
+                "invoice": "registered letter",
                 "raw": {"amount": 1.23},
             }
         ]
@@ -127,25 +127,25 @@ def test_retrieve_billings_calls_provider_and_upserts():
         ProviderModel.objects.get.return_value = provider
         retrieve_billings(
             provider="maileva",
-            missive_type=MissiveType.LRE,
+            missive_type=MissiveType.REGISTERED_LETTER,
             start_date=date(2026, 8, 1),
             end_date=date(2026, 8, 31),
         )
     provider._provider.call_service.assert_called_once_with(
-        "retrieve_billings_lre",
+        "retrieve_billings_registered_letter",
         start_date=date(2026, 8, 1),
         end_date=date(2026, 8, 31),
     )
     billing = MissiveBilling.objects.get(missive=missive)
     assert float(billing.billing_amount) == 1.23
-    assert billing.invoice == "LRE"
+    assert billing.invoice == "registered letter"
 
 
 def test_retrieve_billings_matches_substitute_id_when_no_external_id():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         substitute_id="sub-imported",
-        subject="LRE",
+        subject="registered letter",
     )
     provider = MagicMock()
     provider._provider = MagicMock()
@@ -164,7 +164,7 @@ def test_retrieve_billings_matches_substitute_id_when_no_external_id():
         ProviderModel.objects.get.return_value = provider
         retrieve_billings(
             provider="maileva",
-            missive_type=MissiveType.LRE,
+            missive_type=MissiveType.REGISTERED_LETTER,
             start_date=date(2026, 8, 1),
             end_date=date(2026, 8, 31),
         )
@@ -176,13 +176,13 @@ def test_delay_retrieve_billings_uses_sync_backend(settings):
     with patch("django_pymissive.billings.retrieve_billings") as retrieve:
         delay_retrieve_billings(
             provider="maileva",
-            missive_type=MissiveType.LRE,
+            missive_type=MissiveType.REGISTERED_LETTER,
             start_date=date(2026, 8, 1),
             end_date=date(2026, 8, 31),
         )
     retrieve.assert_called_once_with(
         provider="maileva",
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         start_date=date(2026, 8, 1),
         end_date=date(2026, 8, 31),
     )
@@ -193,7 +193,7 @@ def test_delay_retrieve_billings_uses_thread_backend(settings):
     with patch("django_pymissive.task.thread.Thread") as thread_cls:
         delay_retrieve_billings(
             provider="maileva",
-            missive_type=MissiveType.LRE,
+            missive_type=MissiveType.REGISTERED_LETTER,
             start_date=date(2026, 8, 1),
             end_date=date(2026, 8, 31),
         )
@@ -228,7 +228,7 @@ def test_admin_retrieve_billings_post_sync():
             url,
             {
                 "provider": "maileva",
-                "missive_type": MissiveType.LRE,
+                "missive_type": MissiveType.REGISTERED_LETTER,
                 "start_date": "2026-08-01",
                 "end_date": "2026-08-31",
             },
@@ -250,7 +250,7 @@ def test_admin_retrieve_billings_post_as_task():
             url,
             {
                 "provider": "maileva",
-                "missive_type": MissiveType.LRE,
+                "missive_type": MissiveType.REGISTERED_LETTER,
                 "start_date": "2026-08-01",
                 "end_date": "2026-08-31",
                 "as_task": "on",

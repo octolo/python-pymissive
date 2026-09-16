@@ -101,7 +101,7 @@ class MissiveProviderBase(
     def retrieve_billings(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
         """Retrieve billings in bulk between ``start_date`` and ``end_date``.
 
-        Typed services (``retrieve_billings_lre``, ``retrieve_billings_email``, …)
+        Typed services (``retrieve_billings_registered_letter``, ``retrieve_billings_email``, …)
         delegate here. Named ``retrieve_billings`` so it does not collide with
         ``get_billings`` (per-missive) during providerkit service dispatch.
 

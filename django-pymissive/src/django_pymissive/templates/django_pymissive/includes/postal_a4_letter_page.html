@@ -1,7 +1,7 @@
 {% load i18n django_pymissive_preview %}
 {# Single source for postal first page: browser preview + PDF (via body_to_pdf). #}
-{% if provider_address_css_lre %}
-<style>{{ provider_address_css_lre|safe }}</style>
+{% if provider_address_css %}
+<style>{{ provider_address_css|safe }}</style>
 {% endif %}
 <div class="a4-page">
     <div class="a4-header">

@@ -1,6 +1,6 @@
 # pymissive
 
-Lightweight, framework-agnostic Python library for multi-channel message sending: email, SMS, WhatsApp, registered electronic mail (LRE) and team messaging.
+Lightweight, framework-agnostic Python library for multi-channel message sending: email, SMS, WhatsApp, registered electronic mail (registered letter) and team messaging.
 
 ## Overview
 
@@ -17,7 +17,7 @@ The PyPI name is `pymissive`; the directory holding it in this monorepo is
 - 📧 **Email**: Brevo, Scaleway
 - 📱 **SMS**: Brevo, SMSPartner
 - 💬 **WhatsApp**: Brevo
-- 📮 **Registered electronic mail (LRE)**: Maileva
+- 📮 **Postal letters**: Maileva (simple letter and electronic registered letter)
 - 👥 **Team messaging**: Slack, Microsoft Teams, Discord
 - ✋ **Hand delivery**: tracks an in-person hand-over, no external API
 - 🏗️ **Modular architecture** based on ProviderKit
@@ -61,7 +61,7 @@ environment, so exporting `SLACK_BOT_TOKEN` instead works the same way.
 
 ## Available providers
 
-Services are named `<verb>_<missive_type>` — `send_email`, `retrieve_lre`,
+Services are named `<verb>_<missive_type>` — `send_email`, `retrieve_registered_letter`,
 `handle_webhook_sms`, and so on. `branded` is the missive type used by the team
 messaging platforms, where the sender identity is the bot rather than an address.
 
@@ -69,7 +69,7 @@ messaging platforms, where the sender identity is the bot rather than an address
 |---|---|---|---|
 | Brevo | `BrevoAPIProvider` | `email`, `sms`, `whatsapp`, `branded` | `[brevo]` |
 | Scaleway | `ScalewayProvider` | `email`, `branded` | `[scaleway]` |
-| Maileva | `MailevaProvider` | `lre`, `branded` | — |
+| Maileva | `MailevaProvider` | `letter`, `registered_letter`, `branded` | — |
 | SMSPartner | `PartnerProvider` | `sms`, `branded` | — |
 | Slack | `SlackProvider` | `branded` | — |
 | Microsoft Teams | `TeamsProvider` | `branded` | — |

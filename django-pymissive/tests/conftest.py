@@ -13,14 +13,27 @@ from __future__ import annotations
 
 import pytest
 from django.conf import settings
+from django.core.files.storage import default_storage
+from django.utils.functional import empty
 
 
 @pytest.fixture(autouse=True)
 def _isolate_media_root(settings, tmp_path):
-    """Keep generated attachments out of the repo ``pymissive/`` tree."""
+    """Keep generated attachments out of the repo ``pymissive/`` tree.
+
+    ``FileSystemStorage.base_location`` and ``ConfigurableAttachmentStorage``
+    cache the backend on first use, so changing ``MEDIA_ROOT`` alone is not
+    enough once a file has been saved in the process.
+    """
     media = tmp_path / "media"
     media.mkdir()
     settings.MEDIA_ROOT = str(media)
+    default_storage._wrapped = empty
+    from django_pymissive.models.attachment import MissiveBaseAttachment
+
+    field = MissiveBaseAttachment._meta.get_field("attachment_file")
+    if hasattr(field.storage, "_storage"):
+        field.storage._storage = None
 
 
 @pytest.fixture(autouse=True)

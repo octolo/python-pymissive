@@ -117,13 +117,13 @@ def test_maileva_create_sends_basic_when_secret_is_set():
             return data.get("id")
 
     _Maileva()._create_webhook_api(
-        "https://app.test/missive/webhook/maileva/lre/",
+        "https://app.test/missive/webhook/maileva/registered_letter/",
         ["ON_STATUS_ACCEPTED"],
         ["registered_mail/v4/sendings"],
     )
     assert posted[0]["authentication"]["basic"]["password"] == "s3cret"
     assert posted[0]["authentication"]["basic"]["login"] == "pymissive"
-    assert posted[0]["callback_url"].endswith("/maileva/lre/")
+    assert posted[0]["callback_url"].endswith("/maileva/registered_letter/")
 
 
 def test_maileva_create_uses_configured_basic_login():

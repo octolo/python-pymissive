@@ -132,9 +132,9 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
                 "sender_address",
                 "reply_to_address_name",
                 "reply_to_address",
-                "acknowledgement_lre",
-                "delivery_mode_lre",
-                "priority_lre",
+                "acknowledgement_letter",
+                "delivery_mode_letter",
+                "priority_letter",
                 "first_document",
             ],
         )

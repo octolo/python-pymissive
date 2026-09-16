@@ -30,11 +30,8 @@ MISSIVE_TEMPLATE_MAP = {
     "ere": "django_pymissive/email_preview.html",
     "sms": "django_pymissive/sms_preview.html",
     "rcs": "django_pymissive/sms_preview.html",
-    "postal": "django_pymissive/postal_preview.html",
-    "postal_registered": "django_pymissive/postal_preview.html",
-    "postal_signature": "django_pymissive/postal_preview.html",
-    "lre": "django_pymissive/postal_preview.html",
-    "lre_qualified": "django_pymissive/postal_preview.html",
+    "letter": "django_pymissive/postal_preview.html",
+    "registered_letter": "django_pymissive/postal_preview.html",
     "hand_delivery": "django_pymissive/postal_preview.html",
 }
 
@@ -61,8 +58,10 @@ def _campaign_preview_kind_to_missive_type(kind: str) -> str:
     k = (kind or "email").lower()
     if k == "sms":
         return str(MissiveType.SMS)
-    if k in ("postal", "postal_registered", "postal_signature", "lre", "lre_qualified"):
-        return str(MissiveType.LRE)
+    if k in ("postal", "letter", "hand_delivery"):
+        return str(MissiveType.LETTER)
+    if k == "registered_letter":
+        return str(MissiveType.REGISTERED_LETTER)
     return str(MissiveType.EMAIL)
 
 
@@ -101,7 +100,7 @@ def build_preview_context(missive: Missive, post_data=None, postal_recipient_pk=
     if mt in ("sms", "rcs"):
         return _build_sms_context(missive, post_data)
     if mt in POSTAL_PREVIEW_MISSIVE_TYPES:
-        return _build_lre_context(missive, post_data, postal_recipient_pk)
+        return _build_postal_context(missive, post_data, postal_recipient_pk)
     return {}
 
 
@@ -229,8 +228,8 @@ def _geoaddress_lines(addr):
     return [str(addr)]
 
 
-def _build_lre_context(instance, post_data=None, postal_recipient_pk=None):
-    """LRE sender/recipient/delivery context."""
+def _build_postal_context(instance, post_data=None, postal_recipient_pk=None):
+    """Postal sender/recipient/delivery context."""
     sender = getattr(instance, "sender", None) or {}
     sender_address = sender.get("address") if isinstance(sender, dict) else None
     if not sender_address:
@@ -420,7 +419,7 @@ class PreviewView(DetailView):
         extra = build_preview_context(missive, postal_recipient_pk=rp)
         if extra:
             context.update(extra)
-        context["provider_address_css_lre"] = missive.get_provider_address_css_lre()
+        context["provider_address_css"] = missive.get_provider_address_css()
         context["sandbox_compiled_body"] = True
         return context
 
@@ -489,7 +488,7 @@ class PreviewFormView(View):
         extra = build_preview_context(missive, post_data=request.POST, postal_recipient_pk=None)
         if extra:
             context.update(extra)
-        context["provider_address_css_lre"] = missive.get_provider_address_css_lre()
+        context["provider_address_css"] = missive.get_provider_address_css()
         context["sandbox_compiled_body"] = True
         return TemplateResponse(request, template_name, context)
 

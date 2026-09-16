@@ -11,7 +11,7 @@ from clicommands.utils import print_header, print_separator
 from providerkit.commands.provider import _PROVIDER_COMMAND_CONFIG
 from providerkit.helpers import get_providers
 
-from pymissive.config import get_missive_send_arg_config
+from pymissive.config import get_missive_send_arg_config, provider_service_name
 
 _SEND_ARG_CONFIG = get_missive_send_arg_config()
 _COMMAND_ARG_CONFIG = {
@@ -83,7 +83,7 @@ def _missive_command(args: list[str]) -> bool:
 
     if subcommand == "send":
         if not missive_type:
-            print("Error: --missive-type required (e.g. email, sms, lre)", file=sys.stderr)
+            print("Error: --missive-type required (e.g. email, sms, registered_letter)", file=sys.stderr)
             return False
         recipients_raw = parsed.get("recipients") or ""
         recipients = _parse_json(recipients_raw) if recipients_raw else None
@@ -128,7 +128,7 @@ def _missive_command(args: list[str]) -> bool:
             "sender_name": sender_name,
         }
         payload = {k: v for k, v in payload.items() if v}
-        service = f"send_{missive_type}"
+        service = provider_service_name("send", missive_type)
         if not hasattr(provider, service):
             print(f"Error: Provider does not support {service}", file=sys.stderr)
             return False
@@ -152,7 +152,7 @@ def _missive_command(args: list[str]) -> bool:
             path = f"/webhook/{provider_name}/{missive_type}/"
             url = f"{scheme}://{domain.rstrip('/')}{path}"
             webhook_data = {"id": "", "type": missive_type, "url": url}
-            service = f"create_webhook_{missive_type}"
+            service = provider_service_name("create_webhook", missive_type)
             if not hasattr(provider, service):
                 print(f"Error: Provider does not support {service}", file=sys.stderr)
                 return False
@@ -176,7 +176,7 @@ def _missive_command(args: list[str]) -> bool:
             path = f"/webhook/{provider_name}/{missive_type}/"
             url = f"{scheme}://{domain.rstrip('/')}{path}"
             webhook_data = {"id": webhook_id, "type": missive_type, "url": url}
-            service = f"update_webhook_{missive_type}"
+            service = provider_service_name("update_webhook", missive_type)
             if not hasattr(provider, service):
                 print(f"Error: Provider does not support {service}", file=sys.stderr)
                 return False
@@ -196,8 +196,8 @@ def _missive_command(args: list[str]) -> bool:
                 )
                 return False
             if not missive_type:
-                missive_type = "lre"
-            service = f"delete_{missive_type}"
+                missive_type = "registered_letter"
+            service = provider_service_name("delete", missive_type)
             if not hasattr(provider, service):
                 print(f"Error: Provider does not support {service}", file=sys.stderr)
                 return False
@@ -216,7 +216,7 @@ def _missive_command(args: list[str]) -> bool:
                 print("Error: --webhook-id and --type required for webhook delete", file=sys.stderr)
                 return False
             webhook_data = {"id": webhook_id, "type": missive_type}
-            service = f"delete_webhook_{missive_type}"
+            service = provider_service_name("delete_webhook", missive_type)
             if not hasattr(provider, service):
                 print(f"Error: Provider does not support {service}", file=sys.stderr)
                 return False
@@ -243,12 +243,13 @@ def _missive_command(args: list[str]) -> bool:
                 return False
             provider.call_service("retrieve_email")
             data = provider.get_service_normalize("retrieve_email")
-        elif retrieve_resource == "lre":
-            if not hasattr(provider, "retrieve_lre"):
-                print("Error: Provider does not support retrieve_lre", file=sys.stderr)
+        elif retrieve_resource in ("registered_letter", "letter"):
+            service = provider_service_name("retrieve", retrieve_resource)
+            if not hasattr(provider, service):
+                print(f"Error: Provider does not support {service}", file=sys.stderr)
                 return False
-            provider.call_service("retrieve_lre")
-            data = provider.get_service_normalize("retrieve_lre")
+            provider.call_service(service)
+            data = provider.get_service_normalize(service)
         elif retrieve_resource == "sms":
             if not hasattr(provider, "retrieve_sms"):
                 print("Error: Provider does not support retrieve_sms", file=sys.stderr)
@@ -257,14 +258,14 @@ def _missive_command(args: list[str]) -> bool:
             data = provider.get_service_normalize("retrieve_sms")
         elif retrieve_resource == "events":
             if not missive_type:
-                print("Error: --type required for retrieve events (e.g. email, sms, lre)", file=sys.stderr)
+                print("Error: --type required for retrieve events (e.g. email, sms, registered_letter)", file=sys.stderr)
                 return False
             start_date = parsed.get("start_date") or ""
             end_date = parsed.get("end_date") or ""
             if not start_date or not end_date:
                 print("Error: --start-date and --end-date required for retrieve events", file=sys.stderr)
                 return False
-            service = f"retrieve_events_{missive_type}"
+            service = provider_service_name("retrieve_events", missive_type)
             if not hasattr(provider, service):
                 print(f"Error: Provider does not support {service}", file=sys.stderr)
                 return False
@@ -272,14 +273,14 @@ def _missive_command(args: list[str]) -> bool:
             data = provider.get_service_normalize(service)
         elif retrieve_resource in ("billings", "billing"):
             if not missive_type:
-                print("Error: --type required for retrieve billings (e.g. lre, email)", file=sys.stderr)
+                print("Error: --type required for retrieve billings (e.g. registered_letter, email)", file=sys.stderr)
                 return False
             start_date = parsed.get("start_date") or ""
             end_date = parsed.get("end_date") or ""
             if not start_date or not end_date:
                 print("Error: --start-date and --end-date required for retrieve billings", file=sys.stderr)
                 return False
-            service = f"retrieve_billings_{missive_type}"
+            service = provider_service_name("retrieve_billings", missive_type)
             if not hasattr(provider, service):
                 print(f"Error: Provider does not support {service}", file=sys.stderr)
                 return False
@@ -287,20 +288,20 @@ def _missive_command(args: list[str]) -> bool:
             data = provider.get_service_normalize(service)
         elif retrieve_resource == "tracking_number":
             if not missive_type:
-                print("Error: --type required for retrieve tracking_number (e.g. lre)", file=sys.stderr)
+                print("Error: --type required for retrieve tracking_number (e.g. registered_letter)", file=sys.stderr)
                 return False
             external_id = parsed.get("external_id", "")
             if not external_id:
                 print("Error: --external-id required for retrieve tracking_number", file=sys.stderr)
                 return False
-            service = f"tracking_number_{missive_type}"
+            service = provider_service_name("tracking_number", missive_type)
             if not hasattr(provider, service):
                 print(f"Error: Provider does not support {service}", file=sys.stderr)
                 return False
             provider.call_service(service, external_id=external_id)
             data = provider.get_service_normalize(service)
         else:
-            print("Error: Use webhooks, email, lre, sms, events, billings, tracking_number (e.g. missive retrieve webhooks --provider X)", file=sys.stderr)
+            print("Error: Use webhooks, email, registered_letter, letter, sms, events, billings, tracking_number (e.g. missive retrieve webhooks --provider X)", file=sys.stderr)
             return False
         print_separator()
         print_header(f"{provider_name} - {retrieve_resource}")
@@ -313,8 +314,8 @@ def _missive_command(args: list[str]) -> bool:
             print("Error: --external-id required for cancel", file=sys.stderr)
             return False
         if not missive_type:
-            missive_type = "lre"
-        service = f"cancel_{missive_type}"
+            missive_type = "registered_letter"
+        service = provider_service_name("cancel", missive_type)
         if not hasattr(provider, service):
             print(f"Error: Provider does not support {service}", file=sys.stderr)
             return False

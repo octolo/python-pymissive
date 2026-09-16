@@ -17,9 +17,17 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from django.utils import timezone
 
-from django_pymissive.models import Missive, MissiveEvent, MissiveEventType, MissiveStatus
+from django_pymissive.models import (
+    Missive,
+    MissiveEvent,
+    MissiveEventType,
+    MissiveRecipientApplication,
+    MissiveStatus,
+)
 from django_pymissive.models.choices import MissiveType
+from django_pymissive.models.missive import MissiveAlreadySending
 
 pytestmark = pytest.mark.django_db
 
@@ -254,4 +262,110 @@ def test_can_send_allows_error_retry_without_resend():
     with patch.object(Missive, "has_service", return_value=True), patch.object(
         missive, "check_email", return_value=True
     ):
+        assert missive.can_send() is True
+
+
+def test_send_does_not_fetch_billings_and_survives_a_billing_outage(settings):
+    settings.PYMISSIVE_DRY_RUN = False
+    settings.PYMISSIVE_DISABLE_SEND = False
+    missive = _email_missive()
+
+    with patch.object(Missive, "can_send", return_value=True), patch.object(
+        Missive, "get_serialized_data", return_value={}
+    ), patch.object(
+        Missive,
+        "call_provider_service",
+        return_value={"external_id": "prov-1"},
+    ), patch.object(
+        Missive, "get_billings", side_effect=RuntimeError("billing down")
+    ) as get_billings:
+        missive.send_missive()
+
+    get_billings.assert_not_called()
+    missive.refresh_from_db()
+    assert missive.external_id == "prov-1"
+    assert missive.status != MissiveStatus.ERROR
+
+
+def test_can_send_rejects_processing_even_without_external_id():
+    missive = _email_missive()
+    missive.status = MissiveStatus.PROCESSING
+    missive.external_id = ""
+    missive.save(update_fields=["status", "external_id"])
+
+    with patch.object(Missive, "has_service", return_value=True), patch.object(
+        missive, "check_email", return_value=True
+    ):
+        assert missive.can_send() is False
+
+
+def test_claim_for_send_wins_once_and_stamps_updated_at():
+    missive = _email_missive()
+    before = missive.updated_at
+
+    assert missive.claim_for_send() is True
+    missive.refresh_from_db()
+    assert missive.status == MissiveStatus.PROCESSING
+    assert missive.updated_at >= before
+
+    other = Missive.objects.get(pk=missive.pk)
+    assert other.claim_for_send() is False
+    other.refresh_from_db()
+    assert other.status == MissiveStatus.PROCESSING
+
+
+def test_claim_then_immediate_reclaim_does_not_release_a_prepared_missive():
+    """A draft last saved hours ago must not look dead the instant it is claimed."""
+    missive = _email_missive()
+    past = timezone.now() - timezone.timedelta(hours=2)
+    Missive.objects.filter(pk=missive.pk).update(updated_at=past)
+
+    assert missive.claim_for_send() is True
+    assert Missive.reclaim_stale_processing() == 0
+    missive.refresh_from_db()
+    assert missive.status == MissiveStatus.PROCESSING
+    assert missive.updated_at > past
+
+
+def test_claim_for_send_retries_from_error():
+    missive = _email_missive()
+    missive.status = MissiveStatus.ERROR
+    missive.save(update_fields=["status"])
+
+    assert missive.claim_for_send() is True
+    missive.refresh_from_db()
+    assert missive.status == MissiveStatus.PROCESSING
+
+
+def test_send_missive_second_caller_does_not_hit_provider(settings):
+    settings.PYMISSIVE_DRY_RUN = False
+    settings.PYMISSIVE_DISABLE_SEND = False
+    missive = _email_missive()
+    other = Missive.objects.get(pk=missive.pk)
+
+    with patch.object(Missive, "can_send", return_value=True), patch.object(
+        Missive, "get_serialized_data", return_value={}
+    ), patch.object(
+        Missive,
+        "call_provider_service",
+        return_value={"external_id": "prov-1"},
+    ) as call_provider:
+        missive.send_missive()
+        with pytest.raises(MissiveAlreadySending):
+            other.send_missive()
+
+    assert call_provider.call_count == 1
+    other.refresh_from_db()
+    assert other.external_id == "prov-1"
+
+
+def test_can_send_without_a_type_check_requires_recipients():
+    missive = Missive.objects.create(
+        missive_type=MissiveType.BRANDED,
+        subject="hey",
+        status=MissiveStatus.DRAFT,
+    )
+    with patch.object(Missive, "has_service", return_value=True):
+        assert missive.can_send() is False
+        MissiveRecipientApplication.objects.create(missive=missive, name="chan")
         assert missive.can_send() is True

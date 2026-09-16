@@ -58,8 +58,8 @@ class WebhookView(DetailView):
             return HttpResponse(status=400)
         if lost:
             # Ask for a retry. Ingestion is idempotent (``_upsert_event`` keys on
-            # missive + event + occurred_at), so redelivering the whole batch
-            # does not duplicate the events that did go through.
+            # missive + event + occurred_at + recipient), so redelivering the
+            # whole batch does not duplicate the events that did go through.
             logger.warning("Webhook: %s event(s) lost, asking for a retry", lost)
             return HttpResponse(status=503)
         return HttpResponse(status=200)

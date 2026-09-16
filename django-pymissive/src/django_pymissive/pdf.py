@@ -1,7 +1,7 @@
 """Default PDF generator for django-pymissive.
 
 Compiles the missive body template and converts it to PDF using weasyprint.
-Postal / LRE first-page layout CSS lives in ``static/django_pymissive/css/letter_page.css``;
+Postal first-page layout CSS lives in ``static/django_pymissive/css/letter_page.css``;
 WeasyPrint loads that file via staticfiles and appends PDF-specific ``@page`` / sheet resets.
 
 Override by setting MISSIVEPDF_GENERATOR in your Django settings.
@@ -32,13 +32,11 @@ HTML_WRAPPER = """<!DOCTYPE html>
 </body>
 </html>"""
 
-# Missive types that use the postal/LRE letter layout (header + body) in preview and PDF.
+# Missive types that use the postal letter layout (header + body) in preview and PDF.
 _POSTAL_LETTER_TYPES = frozenset({
-    "postal",
-    "postal_registered",
-    "postal_signature",
-    "lre",
-    "lre_qualified",
+    "letter",
+    "registered_letter",
+    "hand_delivery",
 })
 
 _DEFAULT_PDF_CSS = """

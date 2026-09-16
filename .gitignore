@@ -40,8 +40,5 @@ poetry.lock
 *.sqlite3
 db.sqlite3
 db.sqlite3-journal
-/pymissive/
 python-pymissive/missive/
 python-pymissive/pymissive/
-django-pymissive/missive/
-django-pymissive/pymissive/

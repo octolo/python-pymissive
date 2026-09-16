@@ -39,3 +39,14 @@ def test_recipient_validate_requires_recipients(capsys):
 def test_billing_without_provider_explains_the_flag(capsys):
     assert billing._billing_command(["retrieve"]) is False
     assert "--provider" in capsys.readouterr().err
+
+
+def test_billing_rejects_an_unknown_type(capsys, monkeypatch):
+    monkeypatch.setattr(billing, "get_providers", lambda **kwargs: [object()])
+    assert (
+        billing._billing_command(
+            ["retrieve", "--provider", "maileva", "--type", "lre", "--external-id", "1"]
+        )
+        is False
+    )
+    assert "Unknown missive type" in capsys.readouterr().err

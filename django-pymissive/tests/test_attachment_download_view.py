@@ -56,10 +56,10 @@ def _make_email_missive() -> Missive:
     )
 
 
-def _make_lre_missive() -> Missive:
+def _make_registered_letter_missive() -> Missive:
     return Missive.objects.create(
-        missive_type="lre",
-        subject="LRE",
+        missive_type="registered_letter",
+        subject="registered letter",
         body_rich="<p>letter body</p>",
     )
 
@@ -129,7 +129,7 @@ def test_download_first_document_skips_attachment_chain(client, settings):
     settings.PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS = [
         "tests.test_attachment_download_view._stamp_with_marker",
     ]
-    missive = _make_lre_missive()
+    missive = _make_registered_letter_missive()
     first_doc = missive.generate_first_document()
 
     response = _download(client, first_doc)

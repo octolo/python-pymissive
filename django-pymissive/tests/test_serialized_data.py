@@ -50,9 +50,9 @@ def test_get_serialized_data_attachments_false_compiled_true_still_compiles():
 @override_settings(PYMISSIVE_DEFAULT_BODY_PROCESSORS=SIGNATURE_CHAIN)
 def test_get_serialized_data_without_attachments_skips_first_document_generation():
     missive = Missive.objects.create(
-        missive_type="lre",
+        missive_type="registered_letter",
         body_rich="<p>letter</p>",
-        external_id="ext-lre",
+        external_id="ext-registered_letter",
     )
     with patch.object(missive, "get_webhook_url", return_value="https://example.com/hook"):
         with patch.object(

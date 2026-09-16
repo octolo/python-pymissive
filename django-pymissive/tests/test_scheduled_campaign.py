@@ -241,6 +241,23 @@ def test_process_missives_default_send_fn_uses_send_missive():
     assert m.pk in called
 
 
+def test_process_missives_lost_claim_is_not_a_failure():
+    """A concurrent sender already claimed the row — skip, do not mark ERROR."""
+    from django_pymissive.models.missive import MissiveAlreadySending
+
+    c = _campaign()
+    sched = _scheduled(c)
+    m = _missive(c)
+
+    with patch.object(Missive, "send_missive", side_effect=MissiveAlreadySending("taken")):
+        failures = sched.process_missives()
+
+    m.refresh_from_db()
+    assert m.status == MissiveStatus.DRAFT
+    assert failures == []
+    assert not MissiveEvent.objects.filter(missive=m).exists()
+
+
 # ---------------------------------------------------------------------------
 # run_with_tracking
 # ---------------------------------------------------------------------------
@@ -933,4 +950,43 @@ def test_future_scheduled_run_is_not_stale():
     sched = _scheduled(_campaign(), scheduled_send_date=future)
     _age(sched)
     assert sched.is_stale is False
+
+
+def test_run_claim_stamps_updated_at_so_prepared_run_is_not_stale():
+    """A campaign prepared hours ago must not look dead the instant it is claimed."""
+    c = _campaign()
+    sched = _scheduled(c)
+    _age(sched)
+    assert sched.is_stale is True
+
+    def _assert_live(*_args, **_kwargs):
+        sched.refresh_from_db()
+        assert sched.send_date is not None
+        assert sched.is_stale is False
+
+    with patch.object(
+        MissiveScheduledCampaign, "run_campaign", side_effect=_assert_live
+    ):
+        sched.run_with_tracking()
+
+
+def test_second_worker_does_not_finalize_a_just_claimed_run():
+    """Losing the claim on a live run must not treat leftover updated_at as a crash."""
+    c = _campaign(metadata={"processing": True})
+    live = _scheduled(c)
+    _age(live)
+    now = timezone.now()
+    type(live).objects.filter(pk=live.pk).update(send_date=now)
+    live.refresh_from_db()
+    assert live.updated_at <= now - timezone.timedelta(hours=1)
+    assert live.is_stale is False
+
+    other = MissiveScheduledCampaign.objects.get(pk=live.pk)
+    with patch.object(MissiveScheduledCampaign, "run_campaign") as run_campaign:
+        other.run_with_tracking()
+
+    run_campaign.assert_not_called()
+    other.refresh_from_db()
+    assert other.ended_at is None
+    assert other.send_date is not None
 

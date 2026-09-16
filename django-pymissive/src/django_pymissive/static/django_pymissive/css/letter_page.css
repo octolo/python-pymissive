@@ -1,5 +1,5 @@
 /*
- * First page of a postal / LRE letter (document layout, not preview chrome).
+ * First page of a postal letter (document layout, not preview chrome).
  * - Browser: link before postal_preview.css (see postal_preview.html).
  * - PDF: embedded by django_pymissive.pdf (static file django_pymissive/css/letter_page.css).
  */
@@ -24,7 +24,7 @@
     margin-bottom: 10mm;
 }
 
-/* Provider hook: get_provider_address_css_lre (offset dict → CSS); neutral default */
+/* Provider hook: get_provider_address_css (offset dict → CSS); neutral default */
 .a4-address-provider {
     display: flex;
     flex-direction: column;

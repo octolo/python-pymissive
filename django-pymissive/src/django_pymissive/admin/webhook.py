@@ -8,6 +8,7 @@ from django.utils.translation import gettext_lazy as _
 from django_boosted import AdminBoostModel
 from django_boosted.decorators import admin_boost_view
 
+from pymissive.config import provider_service_name
 from pymissive.webhook_secret import generate_webhook_secret as make_webhook_secret
 
 from ..forms.webhook import GenerateWebhookSecretForm
@@ -101,16 +102,23 @@ class MissiveWebhookAdmin(ActionRightsMixin, AdminBoostModel):
     def has_add_permission(self, request):
         return True
 
+    def _provider_has_webhook_service(self, obj, service: str) -> bool:
+        try:
+            service_name = provider_service_name(service, obj.type)
+        except ValueError:
+            return False
+        provider = obj.get_provider()
+        inner = getattr(provider, "_provider", None)
+        return bool(inner) and hasattr(inner, service_name)
+
     def has_change_permission(self, request, obj=None):
         if obj:
-            provider = obj.get_provider()
-            return hasattr(provider._provider, f"update_webhook_{obj.type}")
+            return self._provider_has_webhook_service(obj, "update_webhook")
         return False
 
     def has_delete_permission(self, request, obj=None):
         if obj:
-            provider = obj.get_provider()
-            return hasattr(provider._provider, f"delete_webhook_{obj.type}")
+            return self._provider_has_webhook_service(obj, "delete_webhook")
         return False
 
     def has_action_rights(self, request, obj=None) -> bool:

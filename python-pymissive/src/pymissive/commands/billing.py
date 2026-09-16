@@ -10,6 +10,8 @@ from clicommands.commands.base import Command
 from clicommands.utils import print_header, print_separator
 from providerkit.commands.provider import _PROVIDER_COMMAND_CONFIG
 from providerkit.helpers import get_providers
+from pymissive.config import provider_service_name
+
 
 _ARG_CONFIG = {
     **_PROVIDER_COMMAND_CONFIG,
@@ -32,7 +34,7 @@ def _billing_command(args: list[str]) -> bool:
     cmd_args = parsed.get("args") or []
     subcommand = cmd_args[0] if cmd_args else "retrieve"
     provider_name = parsed.get("provider") or parsed.get("filter") or parsed.get("backend", "")
-    missive_type = parsed.get("type") or parsed.get("missive_type", "lre")
+    missive_type = parsed.get("type") or parsed.get("missive_type", "registered_letter")
     external_id = parsed.get("external_id", "")
     start_date = parsed.get("start_date") or ""
     end_date = parsed.get("end_date") or ""
@@ -59,16 +61,24 @@ def _billing_command(args: list[str]) -> bool:
                 print("Error: --start-date and --end-date required for bulk billing retrieve", file=sys.stderr)
                 return False
             if not missive_type:
-                print("Error: --type required for retrieve billings (e.g. lre)", file=sys.stderr)
+                print("Error: --type required for retrieve billings (e.g. registered_letter)", file=sys.stderr)
                 return False
-            service = f"retrieve_billings_{missive_type}"
+            try:
+                service = provider_service_name("retrieve_billings", missive_type)
+            except ValueError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return False
             if not hasattr(provider, service):
                 print(f"Error: Provider does not support {service}", file=sys.stderr)
                 return False
             provider.call_service(service, start_date=start_date, end_date=end_date)
             data = provider.get_service_normalize(service)
         else:
-            service = f"get_billings_{missive_type}"
+            try:
+                service = provider_service_name("get_billings", missive_type)
+            except ValueError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return False
             if hasattr(provider, service):
                 payload = {"external_id": external_id} if external_id else {}
                 provider.call_service(service, **payload)

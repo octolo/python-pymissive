@@ -64,3 +64,10 @@ def test_get_occurred_at_strips_microseconds():
     occurred = _get_occurred_at("2026-06-12T09:30:16.417Z")
     assert occurred.microsecond == 0
     assert occurred == parse_datetime("2026-06-12T09:30:16+00:00")
+
+
+def test_get_occurred_at_without_a_timestamp_is_stable():
+    from django_pymissive.events import UNKNOWN_OCCURRED_AT
+
+    assert _get_occurred_at(None) == UNKNOWN_OCCURRED_AT
+    assert _get_occurred_at("") == UNKNOWN_OCCURRED_AT

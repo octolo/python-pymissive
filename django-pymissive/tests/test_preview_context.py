@@ -11,6 +11,7 @@ from django_pymissive.models.choices import MissiveRecipientType, MissiveStatus,
 from django_pymissive.models.missive import Missive
 from django_pymissive.models.recipient import MissiveRecipient
 from django_pymissive.views.preview import (
+    POSTAL_PREVIEW_MISSIVE_TYPES,
     build_preview_context,
     missive_for_campaign_preview,
 )
@@ -65,7 +66,7 @@ def test_unsaved_campaign_missive_skips_recipients_without_raising():
 
 def test_postal_context_exposes_letter_chrome():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         status=MissiveStatus.DRAFT,
         sender_name="Octolo",
         sender_address={
@@ -104,3 +105,35 @@ def test_a_failing_builder_is_not_swallowed():
     ):
         with pytest.raises(RuntimeError, match="broken header"):
             build_preview_context(missive)
+
+
+def test_letter_and_registered_letter_share_the_postal_preview_layout():
+    letter = Missive.objects.create(
+        missive_type=MissiveType.LETTER,
+        status=MissiveStatus.DRAFT,
+        body_rich="<p>simple</p>",
+        sender_name="Octolo",
+        sender_address={"address_line1": "1 rue de la Paix", "city": "Paris"},
+    )
+    registered_letter = Missive.objects.create(
+        missive_type=MissiveType.REGISTERED_LETTER,
+        status=MissiveStatus.DRAFT,
+        body_rich="<p>registered</p>",
+        sender_name="Octolo",
+        sender_address={"address_line1": "1 rue de la Paix", "city": "Paris"},
+    )
+    assert letter.missive_type != registered_letter.missive_type
+    assert letter.missive_type in POSTAL_PREVIEW_MISSIVE_TYPES
+    assert registered_letter.missive_type in POSTAL_PREVIEW_MISSIVE_TYPES
+    assert letter.is_postal_like()
+    assert registered_letter.is_postal_like()
+    assert letter.check_letter() is False  # no recipient yet
+    MissiveRecipient.objects.create(
+        missive=letter,
+        name="Alice",
+        address={"address_line1": "10 rue Example", "city": "Lyon"},
+        recipient_type=MissiveRecipientType.RECIPIENT,
+    )
+    letter.refresh_from_db()
+    assert letter.check_letter()
+    assert letter.check_registered_letter()  # same body check

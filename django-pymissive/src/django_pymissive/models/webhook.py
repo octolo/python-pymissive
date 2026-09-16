@@ -7,7 +7,7 @@ from virtualqueryset.models import VirtualModel
 
 from .choices import MissiveType, WebhookScheme
 
-from pymissive.config import WEBHOOK_FIELDS
+from pymissive.config import WEBHOOK_FIELDS, provider_service_name
 from ..utils import (
     get_default_domain,
     get_default_scheme,
@@ -112,7 +112,7 @@ class MissiveWebhook(VirtualModel):
         return {"id": self.id, "webhook_id": self.webhook_id, "type": self.type, "url": url}
 
     def new_webhook(self):
-        service = f"create_webhook_{self.type}"
+        service = provider_service_name("create_webhook", self.type)
         provider = self.get_provider()
         if hasattr(provider._provider, service):
             return provider._provider.call_service(
@@ -120,7 +120,7 @@ class MissiveWebhook(VirtualModel):
             )
 
     def update_webhook(self):
-        service = f"update_webhook_{self.type}"
+        service = provider_service_name("update_webhook", self.type)
         provider = self.get_provider()
         if hasattr(provider._provider, service):
             return provider._provider.call_service(
@@ -155,7 +155,7 @@ class MissiveWebhook(VirtualModel):
     def delete(self, using=None, keep_parents=False):
         """Remove on the provider. ``VirtualModel.delete`` raises — do not call it."""
         pre_delete.send(sender=type(self), instance=self, using=using)
-        service = f"delete_webhook_{self.type}".lower()
+        service = provider_service_name("delete_webhook", self.type)
         provider = self.get_provider()
         if hasattr(provider._provider, service):
             provider._provider.call_service(

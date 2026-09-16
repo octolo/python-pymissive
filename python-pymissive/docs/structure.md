@@ -65,7 +65,7 @@ The `providers/` directory contains message provider implementations:
 - **`__init__.py`**: Imports and exports all provider classes
 - **`base/`**: `MissiveProviderBase` plus the mixins that hold real behaviour
   (`acknowledgement`, `attachments`, `branded`). Channel types (`email`, `sms`,
-  `lre`, …) are services in the config; ProviderKit raises if the method is missing.
+  `registered_letter`, …) are services in the config; ProviderKit raises if the method is missing.
 - Each shipped provider file implements a specific messaging service
 - All providers inherit from `MissiveProviderBase` (which extends ProviderKit's `ProviderBase`)
 
@@ -92,7 +92,7 @@ The `providers/` directory contains message provider implementations:
 - SlackProvider
 - TeamsProvider
 
-**Postal & LRE providers**:
+**Postal & registered letter providers**:
 - LaPosteProvider
 - MailevaProvider
 - AR24Provider

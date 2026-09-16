@@ -20,16 +20,16 @@ def test_maileva_address_line_6_joins_postal_code_and_city():
     )
 
 
-def test_recipient_lre_requires_organization_or_name():
+def test_recipient_registered_letter_requires_organization_or_name():
     provider = MailevaProvider.__new__(MailevaProvider)
     address = {"address_line1": "1 rue", "postal_code": "75001", "city": "Paris"}
     with pytest.raises(ValueError, match="address_line_1 or address_line_2"):
-        provider.get_recipient_lre_data({"address": address})
-    data = provider.get_recipient_lre_data(
+        provider.get_recipient_registered_letter_data({"address": address})
+    data = provider.get_recipient_registered_letter_data(
         {"name": "Alice", "address": address}
     )
     assert data["address_line_2"] == "Alice"
-    data = provider.get_recipient_lre_data(
+    data = provider.get_recipient_registered_letter_data(
         {"address": {**address, "organization": "Octolo"}}
     )
     assert data["address_line_1"] == "Octolo"
@@ -41,7 +41,7 @@ def test_maileva_address_line_6_rejects_missing_parts():
     with pytest.raises(ValueError, match="postal_code and city"):
         _maileva_address_line_6({"city": "Paris"})
     with pytest.raises(ValueError, match="recipient address"):
-        MailevaProvider.__new__(MailevaProvider).get_recipient_lre_data(
+        MailevaProvider.__new__(MailevaProvider).get_recipient_registered_letter_data(
             {"name": "Alice", "address": {"address_line1": "1 rue"}}
         )
 
@@ -260,9 +260,9 @@ def test_normalize_sender_address_keeps_already_mapped_geoaddress():
     assert provider.get_normalize_sender_address(data) == mapped
 
 
-def test_recipient_lre_custom_id_prefers_substitute_id():
+def test_recipient_registered_letter_custom_id_prefers_substitute_id():
     provider = MailevaProvider.__new__(MailevaProvider)
-    data = provider.get_recipient_lre_data(
+    data = provider.get_recipient_registered_letter_data(
         {
             "id": "local-pk",
             "substitute_id": "legacy-custom-id",
@@ -278,9 +278,9 @@ def test_recipient_lre_custom_id_prefers_substitute_id():
     assert data["custom_id"] == "legacy-custom-id"
 
 
-def test_recipient_lre_custom_id_falls_back_to_id():
+def test_recipient_registered_letter_custom_id_falls_back_to_id():
     provider = MailevaProvider.__new__(MailevaProvider)
-    data = provider.get_recipient_lre_data(
+    data = provider.get_recipient_registered_letter_data(
         {
             "id": "uuid-or-pk",
             "name": "Alice",

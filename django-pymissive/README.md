@@ -1,12 +1,12 @@
 # django-pymissive
 
-🚀 A Django library for managing **multi-channel missive sending**: email, SMS, registered electronic mail (LRE), hand delivery and team messaging.
+🚀 A Django library for managing **multi-channel missive sending**: email, SMS, registered electronic mail (registered letter), hand delivery and team messaging.
 
 ## ✨ Features
 
 ### Main features
 
-- 📧 **Multi-channel**: 11 declared missive types; `email`, `sms`, `lre`, `hand_delivery` and `branded` have a working provider today
+- 📧 **Multi-channel**: 11 declared missive types; `email`, `sms`, `registered_letter`, `hand_delivery` and `branded` have a working provider today
 - 🔌 **8 providers** through `pymissive`: Brevo, Scaleway, Maileva, SMSPartner, Slack, Microsoft Teams, Discord, hand delivery
 - 📎 **Flexible attachments**: local files OR external URLs (S3, Google Drive)
 - 🔔 **Unified webhooks**: one endpoint, `/missive/webhook/<provider>/<missive_type>/`
@@ -230,18 +230,17 @@ for event in missive.to_missiveevent.order_by("occurred_at"):
 ### Supports rather than types
 
 A support groups the missive types of one physical channel
-(`pymissive.config.GENERIC_SUPPORT`): `address` covers `lre` and
+(`pymissive.config.GENERIC_SUPPORT`): `address` covers `letter`, `registered_letter` and
 `hand_delivery`, `email` covers `email`, `email_marketing` and `ere`, and so on.
-Plain mail is not a type of its own — it is `lre` without
-`acknowledgement_of_receipt`, which is what providers key the mode on. Count per
-support instead of listing types by hand:
+Postal simple mail is the `letter` type; the registered product is `registered_letter`.
+Count per support instead of listing types by hand:
 
 ```python
 from pymissive.config import missive_types_for_support, normalize_support
 
-normalize_support("courrier")        # 'address'
-normalize_support("postal")          # 'address' (legacy synonym)
-missive_types_for_support("address") # ['lre', 'hand_delivery']
+normalize_support("address")         # 'address'
+normalize_support("letter")          # 'address'
+missive_types_for_support("address") # ['letter', 'registered_letter', 'hand_delivery']
 ```
 
 Counters are opt-in on both sides, under the same name — `with_counts()` on the
@@ -306,7 +305,7 @@ from django_pymissive.models.choices import (
 
 Missive.objects.filter(sent_missive_q())
 campaign.to_missive.filter(pending_missive_q())
-Missive.objects.filter(**missive_type_filter("courrier"))
+Missive.objects.filter(**missive_type_filter("address"))
 ```
 
 ### Annotating your own models

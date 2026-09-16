@@ -69,10 +69,10 @@ def test_recipient_save_infers_support_from_email_and_missive_type():
     )
     assert by_email.recipient_support == "email"
 
-    lre_missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+    erl_missive = Missive.objects.create(
+        missive_type=MissiveType.REGISTERED_LETTER,
         status=MissiveStatus.DRAFT,
     )
-    by_missive = MissiveRecipient.objects.create(missive=lre_missive, name="Jean")
-    assert lre_missive.missive_support == "address"
+    by_missive = MissiveRecipient.objects.create(missive=erl_missive, name="Jean")
+    assert erl_missive.missive_support == "address"
     assert by_missive.recipient_support == "address"

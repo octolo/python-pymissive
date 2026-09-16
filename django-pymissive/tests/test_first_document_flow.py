@@ -68,10 +68,10 @@ def _record_renderer(missive, pdf_bytes, *, campaign=None, context=None, **kwarg
 # ---------------------------------------------------------------------------
 
 
-def _make_lre_missive(**overrides) -> Missive:
+def _make_registered_letter_missive(**overrides) -> Missive:
     defaults = {
-        "missive_type": "lre",
-        "subject": "LRE",
+        "missive_type": "registered_letter",
+        "subject": "registered letter",
         "body_rich": "<p>letter body</p>",
     }
     defaults.update(overrides)
@@ -118,7 +118,7 @@ def test_generate_first_document_creates_attachment_row(settings):
     settings.PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS = [
         "tests.test_first_document_flow._record_renderer",
     ]
-    missive = _make_lre_missive()
+    missive = _make_registered_letter_missive()
 
     att = missive.generate_first_document()
 
@@ -134,7 +134,7 @@ def test_generate_first_document_is_idempotent(settings):
     settings.PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS = [
         "tests.test_first_document_flow._record_renderer",
     ]
-    missive = _make_lre_missive()
+    missive = _make_registered_letter_missive()
     first = missive.generate_first_document()
     second = missive.generate_first_document()
 
@@ -158,7 +158,7 @@ def test_generate_first_document_does_not_overwrite_virtual_attachment(settings)
     settings.PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS = [
         "tests.test_first_document_flow._record_renderer",
     ]
-    missive = _make_lre_missive()
+    missive = _make_registered_letter_missive()
 
     doc = PdfDocument.objects.create(name="user-doc.pdf")
     virtual = MissiveBaseAttachment.objects.create(
@@ -243,7 +243,7 @@ def test_ensure_first_document_swallows_processor_errors(settings):
     settings.PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS = [
         "tests.test_first_document_flow._broken_renderer",
     ]
-    missive = _make_lre_missive()
+    missive = _make_registered_letter_missive()
     assert missive.ensure_first_document() is None
 
 
@@ -263,7 +263,7 @@ def test_duplicate_missive_copies_regular_and_virtual_attachments(settings):
     ]
     settings.PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS = []  # avoid watermark side effects
 
-    source = _make_lre_missive()
+    source = _make_registered_letter_missive()
     regular = _attach_pdf(source, name="brief.pdf")
     doc = PdfDocument.objects.create(name="virtual.pdf")
     virtual = _attach_virtual_pdf(source, doc)
@@ -336,7 +336,7 @@ def test_get_serialized_attachment_skips_chain_for_first_document(settings):
     settings.PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS = [
         "tests.test_first_document_flow._capturing_attachment_processor",
     ]
-    missive = _make_lre_missive()
+    missive = _make_registered_letter_missive()
     first_doc = missive.generate_first_document()
     assert first_doc.is_first_document is True
 
@@ -356,12 +356,12 @@ def test_get_serialized_attachment_passthrough_when_chain_empty(settings):
 
 
 def test_postal_attachments_ignore_linked_flag(settings):
-    """Postal/LRE: ``linked`` does not exclude attachments from send or preview."""
+    """Postal/registered letter: ``linked`` does not exclude attachments from send or preview."""
     settings.PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS = []
     settings.PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS = [
         "tests.test_first_document_flow._record_renderer",
     ]
-    missive = _make_lre_missive()
+    missive = _make_registered_letter_missive()
     att = MissiveBaseAttachment.objects.create(
         missive=missive,
         attachment_type=MissiveAttachmentType.ATTACHMENT,

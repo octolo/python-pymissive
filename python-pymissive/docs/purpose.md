@@ -11,7 +11,7 @@ The library enables you to:
    - SMS and voice calls
    - Instant messaging (Telegram, Signal, Messenger, Slack, Teams)
    - Push notifications (FCM, APN)
-   - Postal mail and registered letters (LRE)
+   - Postal mail (simple letter) and registered letters (registered letter)
 
 2. **Manage multiple providers** through ProviderKit:
    - Provider discovery and enumeration

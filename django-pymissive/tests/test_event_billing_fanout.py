@@ -11,8 +11,10 @@ from unittest.mock import patch
 
 import pytest
 
+from django_pymissive.billings import fetch_missive_billings
 from django_pymissive.events import _process_event
-from django_pymissive.models import MissiveRecipientEmail, MissiveStatus, MissiveType
+from django_pymissive.models import MissiveEvent, MissiveRecipientEmail, MissiveStatus, MissiveType
+from django_pymissive.models.choices import MissiveEventType
 from django_pymissive.models.missive import Missive
 
 pytestmark = pytest.mark.django_db
@@ -84,3 +86,27 @@ def test_nothing_is_billed_when_the_provider_has_no_billing_service():
         _process_event(_accepted_event(), missive)
 
     get_billings.assert_not_called()
+
+
+def test_request_event_does_not_fetch_billings():
+    missive = _missive_with_recipients(1)
+
+    with patch.object(Missive, "can_billings", return_value=True), patch.object(
+        Missive, "get_billings"
+    ) as get_billings:
+        MissiveEvent.objects.create(
+            missive=missive,
+            event=MissiveEventType.REQUEST,
+            client_initiated=True,
+        )
+
+    get_billings.assert_not_called()
+
+
+def test_fetch_missive_billings_swallows_provider_errors():
+    missive = _missive_with_recipients(1)
+
+    with patch.object(
+        Missive, "get_billings", side_effect=RuntimeError("billing down")
+    ):
+        fetch_missive_billings(str(missive.pk))

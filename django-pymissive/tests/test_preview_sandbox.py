@@ -67,7 +67,7 @@ def test_quotes_in_the_body_cannot_break_out_of_srcdoc():
 def test_postal_pdf_letter_keeps_inline_html():
     """WeasyPrint needs the compiled body in the page, not in an iframe."""
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         status=MissiveStatus.DRAFT,
         body_rich="<p>letter body</p>",
     )
@@ -81,7 +81,7 @@ def test_postal_pdf_letter_keeps_inline_html():
 
 def test_postal_browser_letter_sandboxes_the_compiled_body():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         status=MissiveStatus.DRAFT,
         body_rich=PAYLOAD,
     )

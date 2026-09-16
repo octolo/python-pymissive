@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 from django.contrib import messages
-from django.http import HttpResponse
+from django.http import StreamingHttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
@@ -12,8 +12,8 @@ from django_boosted import AdminBoostModel, admin_boost_view
 from ..billings import (
     billings_export_queryset,
     delay_retrieve_billings,
+    iter_billings_csv,
     mark_billings_billed,
-    render_billings_csv,
     retrieve_billings as do_retrieve_billings,
 )
 from ..forms.billing import BillingFilterForm, ExportBillingsForm, RetrieveBillingsForm
@@ -152,14 +152,17 @@ class MissiveBillingAdmin(AdminBoostModel):
         )
         start = form.cleaned_data["start_date"].isoformat()
         end = form.cleaned_data["end_date"].isoformat()
-        response = HttpResponse(
-            "\ufeff"
-            + render_billings_csv(
-                queryset,
-                extra_fields=form.cleaned_data.get("fields") or [],
-                one_row=bool(form.cleaned_data.get("one_row")),
-            ),
-            content_type="text/csv; charset=utf-8",
+        extra_fields = form.cleaned_data.get("fields") or []
+        one_row = bool(form.cleaned_data.get("one_row"))
+
+        def stream():
+            yield "\ufeff"
+            yield from iter_billings_csv(
+                queryset, extra_fields=extra_fields, one_row=one_row
+            )
+
+        response = StreamingHttpResponse(
+            stream(), content_type="text/csv; charset=utf-8"
         )
         response["Content-Disposition"] = (
             f'attachment; filename="billings_{start}_{end}.csv"'
