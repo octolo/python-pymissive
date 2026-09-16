@@ -119,7 +119,7 @@ ADDRESS_FIELDS = {
 GENERIC_SUPPORT = {
     "email": ["email", "email_marketing", "ere"],
     "phone": ["sms", "rcs", "voice_call",],
-    "address": ["lre", "hand_delivery"],
+    "address": ["letter", "registered_letter", "hand_delivery"],
     "application": ["notification", "push_notification", "branded"],
 }
 
@@ -130,22 +130,37 @@ GENERIC_SUPPORT = {
 SENT_EVENTS = ("sent", "accepted", "delivered")
 
 
-#: Spellings that consumers use for a support without being a missive type.
-#: Support keys and missive types resolve on their own, so only genuine
-#: synonyms belong here.
-MISSIVE_SUPPORT_ALIASES = {
-    "courrier": "address",
-    "mail": "address",
-    # Plain mail is ``lre`` without acknowledgement of receipt, but older rows
-    # and query strings still say ``postal``.
-    "postal": "address",
-    "app": "application",
-}
+def normalize_missive_type(value: str) -> str:
+    """Return the canonical missive-type key, or ``""`` when unknown.
+
+    Only keys in ``MISSIVE_TYPES`` match (hyphens are treated as underscores).
+    """
+    key = str(value or "").strip().lower().replace("-", "_")
+    if key in MISSIVE_TYPES:
+        return key
+    return ""
+
+
+def missive_service_type(missive_type: str) -> str:
+    """Type key used in provider service names (``send_letter``, ``send_registered_letter``, …).
+
+    Unknown values raise: a pass-through used to build names like ``send_lre``
+    that ``hasattr`` then treated as a quiet no-op.
+    """
+    key = normalize_missive_type(missive_type)
+    if not key:
+        raise ValueError(f"Unknown missive type: {missive_type!r}")
+    return key
+
+
+def provider_service_name(service: str, missive_type: str) -> str:
+    """``{service}_{type}`` after :func:`missive_service_type`."""
+    return f"{service}_{missive_service_type(missive_type)}"
 
 
 def missive_support_for_type(missive_type: str) -> str:
     """Return the ``GENERIC_SUPPORT`` key owning ``missive_type``, or ``""``."""
-    mt = str(missive_type or "").strip().lower()
+    mt = normalize_missive_type(missive_type) or str(missive_type or "").strip().lower()
     if not mt:
         return ""
     for support, types in GENERIC_SUPPORT.items():
@@ -155,11 +170,12 @@ def missive_support_for_type(missive_type: str) -> str:
 
 
 def normalize_support(value: str) -> str:
-    """Return the canonical support key for a support name, alias or missive type.
+    """Return the canonical support key for a support name or missive type.
 
-    Accepts what the different layers actually pass around: a support key
-    (``address``), a missive type (``lre``, ``hand_delivery``), a synonym
-    (``courrier``, ``postal``) or a hyphenated spelling (``hand-delivery``).
+    Accepts a support key (``address``, ``email``, ``phone``, ``application``)
+    or a missive type from ``MISSIVE_TYPES`` (``letter``, ``registered_letter``,
+    ``sms``, …). Hyphens are treated as underscores. Historical aliases
+    (``postal``, ``courrier``, ``mail``, ``app``) are not accepted.
     Returns ``""`` when nothing matches.
     """
     key = str(value or "").strip().lower().replace("-", "_")
@@ -167,14 +183,14 @@ def normalize_support(value: str) -> str:
         return ""
     if key in GENERIC_SUPPORT:
         return key
-    return missive_support_for_type(key) or MISSIVE_SUPPORT_ALIASES.get(key, "")
+    return missive_support_for_type(key)
 
 
 def missive_types_for_support(support: str) -> list[str]:
     """Missive types belonging to ``support`` (inverse of :func:`missive_support_for_type`).
 
-    ``support`` goes through :func:`normalize_support`, so a type or an alias is
-    accepted too. Returns ``[]`` for an unknown support.
+    ``support`` goes through :func:`normalize_support`. Returns ``[]`` for an
+    unknown support.
     """
     return list(GENERIC_SUPPORT.get(normalize_support(support), []))
 

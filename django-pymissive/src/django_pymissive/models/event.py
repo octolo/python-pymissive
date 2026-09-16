@@ -3,6 +3,8 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+from pymissive.config import provider_service_name
+
 from .mixins import CommentTimestampedModel
 from .choices import MissiveEventType
 from ..managers.event import MissiveEventManager
@@ -90,6 +92,21 @@ class MissiveEvent(CommentTimestampedModel):
             # same leading columns.
             models.Index(fields=["missive", "recipient", "-occurred_at"]),
         ]
+        constraints = [
+            # Two partial uniques: SQL treats NULL as distinct, so one constraint
+            # on all four columns would still allow two recipient-less rows.
+            # Untreated events (missive=None) stay unconstrained.
+            models.UniqueConstraint(
+                fields=["missive", "event", "occurred_at", "recipient"],
+                condition=models.Q(missive__isnull=False, recipient__isnull=False),
+                name="uniq_missive_event_at_recipient",
+            ),
+            models.UniqueConstraint(
+                fields=["missive", "event", "occurred_at"],
+                condition=models.Q(missive__isnull=False, recipient__isnull=True),
+                name="uniq_missive_event_at_no_recipient",
+            ),
+        ]
 
     def get_reason(self):
         """Return human-readable reason for event from config, or empty string."""
@@ -135,7 +152,7 @@ class MissiveEvent(CommentTimestampedModel):
         if backend is None:
             raise ValueError("Cannot replay event without a provider backend")
         events_normalized = backend.call_service_formatted(
-            f"handle_webhook_{self.missive.missive_type}", payload=[event]
+            provider_service_name("handle_webhook", self.missive.missive_type), payload=[event]
         )
         if isinstance(events_normalized, dict):
             events_normalized = [events_normalized]

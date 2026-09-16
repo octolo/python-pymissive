@@ -1,11 +1,15 @@
 """Event handling: normalize via provider.handle_webhook_{missive_type}, then process each event."""
 
 import logging
-from datetime import timezone as dt_timezone
+from datetime import datetime, timezone as dt_timezone
 
 from django.conf import settings
+from django.core.exceptions import MultipleObjectsReturned
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+
+from pymissive.config import provider_service_name
 
 from .models.choices import MissiveEventType
 from .models.event import MissiveEvent
@@ -14,6 +18,12 @@ from .signals import suppress_event_billings, trigger_billings
 from .utils import get_recipient
 
 logger = logging.getLogger(__name__)
+
+#: Stable stand-in when the provider omits ``occurred_at``. ``timezone.now()``
+#: would change on every retry and create a new row. A real timestamp is never
+#: 1970, so this cannot collide with a dated event. Truthy so ``MissiveEvent.save``
+#: does not replace it with ``now()``.
+UNKNOWN_OCCURRED_AT = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
 
 
 def _can_save_untreated(provider_name):
@@ -32,7 +42,7 @@ def _get_occurred_at(occurred_at):
         occurred_at = timezone.make_aware(occurred_at, dt_timezone.utc)
     if occurred_at is not None:
         return occurred_at.replace(microsecond=0)
-    return timezone.now().replace(microsecond=0)
+    return UNKNOWN_OCCURRED_AT
 
 
 def _save_untreated(event, provider) -> bool:
@@ -53,7 +63,7 @@ def _save_untreated(event, provider) -> bool:
 
 
 # Sending-level lifecycle events that describe the whole missive rather than a
-# single recipient. Some providers (e.g. Maileva LRE) emit them without any
+# single recipient. Some providers (e.g. Maileva registered letter) emit them without any
 # recipient attached; status is derived from the latest event of each
 # *recipient*, so a recipient-less event would be ignored and the missive would
 # stay ``DRAFT``. We fan these out to every recipient instead. Only early
@@ -65,6 +75,10 @@ FANOUT_EVENTS = {"request", "accepted", "processed", "queued", "processing"}
 def _upsert_event(event, missive, recipient, occurred_at, pk=None):
     """Create or update the event row identified by its business key.
 
+    The business key is ``(missive, event, occurred_at, recipient)``.
+    ``recipient`` is always in the lookup, including ``None``, so a
+    sending-level row does not match fanned-out per-recipient rows.
+
     ``pk`` targets one existing row instead, so a replay updates the row it
     came from rather than duplicating it — the business key then moves to the
     values written. It is a caller argument on purpose: it must never be read
@@ -72,13 +86,13 @@ def _upsert_event(event, missive, recipient, occurred_at, pk=None):
     and ``MissiveEvent`` has a sequential pk, which would let an unauthenticated
     webhook rewrite any event row by guessing its id.
     """
-    lookup = {
+    business_key = {
         "missive": missive,
         "event": event.get("event"),
         "occurred_at": occurred_at,
+        "recipient": recipient,
     }
-    if recipient is not None:
-        lookup["recipient"] = recipient
+    lookup = dict(business_key)
     defaults = {
         "reason": event.get("reason", "No reason provided"),
         "trace": event.get("raw") or {},
@@ -89,7 +103,21 @@ def _upsert_event(event, missive, recipient, occurred_at, pk=None):
             **lookup,
         }
         lookup = {"pk": pk}
-    MissiveEvent.objects.update_or_create(defaults=defaults, **lookup)
+    try:
+        with transaction.atomic():
+            MissiveEvent.objects.update_or_create(defaults=defaults, **lookup)
+    except (MultipleObjectsReturned, IntegrityError):
+        # Pre-constraint duplicates, or a lost insert race against the unique
+        # index. Replay (pk lookup) may also collide with the business key.
+        row = (
+            MissiveEvent.objects.filter(**lookup).order_by("pk").first()
+            or MissiveEvent.objects.filter(**business_key).order_by("pk").first()
+        )
+        if row is None:
+            raise
+        for key, value in defaults.items():
+            setattr(row, key, value)
+        row.save(update_fields=list(defaults))
 
 
 def _process_event(event, missive, pk=None):
@@ -143,7 +171,7 @@ def handle_events(events, provider, missive_type: str) -> int:
     instead of pretending everything went through.
     """
     events_normalized = provider._provider.call_service_formatted(
-        f"handle_webhook_{missive_type}", payload=events
+        provider_service_name("handle_webhook", missive_type), payload=events
     )
     if not events_normalized:
         return 0
@@ -177,7 +205,7 @@ def retrieve_events(*, provider, missive_type, start_date, end_date):
     from .models.provider import MissiveProviderModel
 
     provider_obj = MissiveProviderModel.objects.get(name=str(provider))
-    service = f"retrieve_events_{missive_type}"
+    service = provider_service_name("retrieve_events", missive_type)
     if not hasattr(provider_obj._provider, service):
         raise ValidationError(
             _("This provider does not support events for this missive type.")

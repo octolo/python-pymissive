@@ -41,17 +41,15 @@ def test_extract_tracking_number_from_international_deposit_proof():
     assert extract_tracking_number_from_deposit_proof(pdf) == "RW799210633FR"
 
 
-def test_tracking_number_lre_prefers_deposit_proof_over_api_field():
+def test_tracking_number_registered_letter_prefers_deposit_proof_over_api_field():
     france_pdf = _require_fixture(FRANCE_PDF).read_bytes()
 
     class _Provider(MailevaProvider):
         def __init__(self):
-            self.ack_level = "acknowledgement_of_receipt"
+            pass
 
-        def is_acknowledgement_of_receipt(self, **kwargs):
-            return True
-
-        def _detail_recipients_lre(self, external_id):
+        def _detail_recipients_postal(self, external_id, *, product):
+            assert product == "registered_letter"
             return [
                 {
                     "custom_id": "rec-1",
@@ -61,11 +59,12 @@ def test_tracking_number_lre_prefers_deposit_proof_over_api_field():
                 }
             ]
 
-        def _download_proof_bytes(self, url):
+        def _download_proof_bytes(self, url, *, product):
+            assert product == "registered_letter"
             assert url == "/registered_mail/v4/proofs/abc"
             return france_pdf
 
-    result = _Provider().tracking_number_lre(external_id="sending-1")
+    result = _Provider().tracking_number_registered_letter(external_id="sending-1")
     assert result == [
         {
             "internal_id": "rec-1",

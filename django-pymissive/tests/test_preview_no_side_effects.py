@@ -23,7 +23,7 @@ pytestmark = pytest.mark.django_db
 
 def _postal_missive() -> Missive:
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         subject="LRAR",
         status=MissiveStatus.SUCCESS,
         external_id="mv-sent-1",

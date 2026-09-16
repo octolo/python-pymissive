@@ -234,7 +234,7 @@ def get_allowed_attachment_extensions(missive_type: str | None) -> list[str] | N
     - **None / unset** → no restriction (any extension allowed).
     - **list/tuple** → applies the same list to every missive type.
     - **dict** → per-type override; supported keys are concrete missive types
-      (``"email"``, ``"lre"``, ``"sms"`` …) and the special ``"default"``
+      (``"email"``, ``"registered_letter"``, ``"letter"``, ``"sms"`` …) and the special ``"default"``
       entry used as a fallback when the missive type is not explicitly
       listed. A dict without a matching key and without ``"default"``
       means no restriction for that type.
@@ -253,9 +253,14 @@ def get_allowed_attachment_extensions(missive_type: str | None) -> list[str] | N
     if isinstance(config, (list, tuple, set, frozenset)):
         return _normalize_extensions(config)
     if isinstance(config, dict):
+        from pymissive.config import normalize_missive_type
+
         mt = (missive_type or "").lower()
         if mt in config:
             return _normalize_extensions(config[mt])
+        canonical = normalize_missive_type(mt)
+        if canonical and canonical in config:
+            return _normalize_extensions(config[canonical])
         if "default" in config:
             return _normalize_extensions(config["default"])
         return None

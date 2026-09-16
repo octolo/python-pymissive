@@ -33,22 +33,10 @@ class RetrieveMissiveForm(forms.Form):
             required=True,
             label=_("Missive type"),
         )
-        self.fields["acknowledgement"] = Missive._meta.get_field(
-            "acknowledgement"
-        ).formfield(required=False)
-        self.fields["delivery_mode"] = Missive._meta.get_field("delivery_mode").formfield(
-            required=False
-        )
-        self.fields["priority"] = Missive._meta.get_field("priority").formfield(
-            required=False
-        )
         self.order_fields(
             [
                 "provider",
                 "missive_type",
-                "acknowledgement",
-                "delivery_mode",
-                "priority",
                 "partner_id",
                 "uid",
             ]
@@ -62,7 +50,4 @@ class RetrieveMissiveForm(forms.Form):
         if not partner_id and not uid:
             raise ValidationError(_("Provide a partner ID or an internal ID."))
         cleaned["partner_id"] = partner_id
-        for name in ("acknowledgement", "delivery_mode", "priority"):
-            value = cleaned.get(name)
-            cleaned[name] = (value or "").strip() or None
         return cleaned

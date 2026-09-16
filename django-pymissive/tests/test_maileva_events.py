@@ -64,7 +64,7 @@ def test_sending_level_webhook_has_no_recipient():
 
 def test_serialize_recipient_statuses_keeps_processed_code():
     provider = _provider()
-    events = provider._serialize_events_lre(
+    events = provider._serialize_events_postal(
         [
             {
                 "custom_id": "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686",
@@ -128,9 +128,9 @@ def test_recipient_level_webhook_does_not_use_recipient_uuid_as_missive_id():
     )
 
 
-def _lre_missive_with_address_recipient(**recipient_kw):
+def _registered_letter_missive_with_address_recipient(**recipient_kw):
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         provider="maileva",
         subject="THE UNIQUE PAPER COMPANY LIMIT",
         sender_name="Octolo",
@@ -149,7 +149,7 @@ def _lre_missive_with_address_recipient(**recipient_kw):
 
 @pytest.mark.django_db
 def test_get_recipient_uuid_custom_id_does_not_raise_and_matches_unique():
-    missive, recipient = _lre_missive_with_address_recipient(
+    missive, recipient = _registered_letter_missive_with_address_recipient(
         substitute_id="753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686"
     )
     found = get_recipient(
@@ -160,7 +160,7 @@ def test_get_recipient_uuid_custom_id_does_not_raise_and_matches_unique():
 
 @pytest.mark.django_db
 def test_get_recipient_matches_substitute_id_among_several():
-    missive, recipient = _lre_missive_with_address_recipient(
+    missive, recipient = _registered_letter_missive_with_address_recipient(
         substitute_id="753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686"
     )
     MissiveRecipient.objects.create(
@@ -177,7 +177,7 @@ def test_get_recipient_matches_substitute_id_among_several():
 
 @pytest.mark.django_db
 def test_get_recipient_matches_name():
-    missive, recipient = _lre_missive_with_address_recipient()
+    missive, recipient = _registered_letter_missive_with_address_recipient()
     found = get_recipient(
         missive,
         {
@@ -190,7 +190,7 @@ def test_get_recipient_matches_name():
 
 @pytest.mark.django_db
 def test_get_recipient_does_not_guess_among_several():
-    missive, _first = _lre_missive_with_address_recipient()
+    missive, _first = _registered_letter_missive_with_address_recipient()
     MissiveRecipient.objects.create(
         missive=missive,
         name="Other",
@@ -204,7 +204,7 @@ def test_get_recipient_does_not_guess_among_several():
 
 @pytest.mark.django_db
 def test_replay_processed_updates_unknown_event_and_attaches_recipient():
-    missive, recipient = _lre_missive_with_address_recipient()
+    missive, recipient = _registered_letter_missive_with_address_recipient()
     stored = MissiveEvent.objects.create(
         missive=missive,
         event="unknown",

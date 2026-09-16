@@ -92,3 +92,18 @@ def test_save_emits_signals_and_does_not_hit_virtualmodel_save():
         assert created == ["brevo-99"]
     finally:
         post_save.disconnect(_on_save, sender=MissiveWebhook)
+
+
+def test_change_permission_uses_provider_service_name():
+    webhook_admin = admin.site._registry[MissiveWebhook]
+    request = RequestFactory().get("/")
+    inner = MagicMock()
+    inner.update_webhook_email = True
+    obj = _webhook(webhook_id="brevo-1", provider_name="brevo", type="email")
+    obj.get_provider = lambda: MagicMock(_provider=inner)
+    assert webhook_admin.has_change_permission(request, obj) is True
+
+    stale = _webhook(webhook_id="maileva-1", provider_name="maileva", type="lre")
+    stale.get_provider = lambda: MagicMock(_provider=inner)
+    assert webhook_admin.has_change_permission(request, stale) is False
+    assert webhook_admin.has_delete_permission(request, stale) is False

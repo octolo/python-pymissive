@@ -74,7 +74,7 @@ These rules must always be followed.
    - SMS and voice calls
    - Instant messaging (Telegram, Signal, Messenger, Slack, Teams)
    - Push notifications (FCM, APN)
-   - Postal mail and registered letters (LRE)
+   - Postal mail and registered letters (registered letter)
 
 2. **Manage multiple providers** through ProviderKit:
    - Provider discovery and enumeration
@@ -238,7 +238,7 @@ class MyEmailProvider(MissiveProviderBase):
 ### Required Services by Provider Type
 
 Implement the `send_*` / `retrieve_*` methods for the missive types you handle
-(`send_email`, `send_sms`, `send_lre`, `send_branded`, …). Services are listed
+(`send_email`, `send_sms`, `send_registered_letter`, `send_letter`, `send_branded`, …). Services are listed
 in the config; ProviderKit raises ``AttributeError`` if the method is missing.
 Do not add empty category mixins just to raise ``NotImplementedError``.
 

@@ -71,12 +71,38 @@ def _compact_http_error_detail(body: str, *, limit: int = 400) -> str:
     return summary
 
 
-#: Envelope window. mail/v2 and registered_mail/v4 use the same placement.
-_ADDRESS_OFFSET_LRE = {
+#: Envelope window. mail/v3 and registered_mail/v4 use the same placement.
+_ADDRESS_OFFSET = {
     "top": "20mm",
     "width": "70mm",
     "height": "30mm",
 }
+
+#: Maileva product → (API mode, version). Chosen by the service, not acknowledgement.
+_POSTAL_API = {
+    "letter": ("mail", "v3"),
+    "registered_letter": ("registered_mail", "v4"),
+}
+
+
+def _postal_api(product: str) -> tuple[str, str]:
+    """Return ``(postal_mode, version)`` for a Maileva product. Raises if unknown."""
+    try:
+        return _POSTAL_API[product]
+    except KeyError:
+        raise ValueError(f"Unknown Maileva postal product: {product!r}") from None
+
+
+def _registered_acknowledgement_of_receipt(kwargs: dict[str, Any]) -> bool:
+    """``registered_mail/v4`` AR flag. Default True when the caller omitted it."""
+    if "acknowledgement_of_receipt" in kwargs:
+        return bool(kwargs["acknowledgement_of_receipt"])
+    ack = kwargs.get("acknowledgement")
+    if ack is None or ack == "":
+        return True
+    if isinstance(ack, bool):
+        return ack
+    return str(ack).strip().lower() != "basic_delivery"
 
 # International registered mail (UPU S10), e.g. RW799210633FR.
 _UPU_S10_RE = re.compile(r"\b[A-Z]{2}\d{9}[A-Z]{2}\b")
@@ -329,7 +355,7 @@ def extract_tracking_number_from_deposit_proof(pdf_bytes: bytes) -> str | None:
 
 
 class MailevaProvider(MissiveProviderBase):
-    """Maileva LRE provider (electronic registered letter, registered mail)."""
+    """Maileva provider (electronic simple letter and registered letter)."""
 
     #########################################################
     # Metadata / Configuration
@@ -337,7 +363,7 @@ class MailevaProvider(MissiveProviderBase):
 
     name = "maileva"
     display_name = "Maileva"
-    description = "LRE (electronic registered letter) and registered mail services"
+    description = "Simple letter and electronic registered letter (registered letter)"
     required_packages = ["requests"]
     config_keys = [
         "CLIENTID", "SECRET", "USERNAME", "PASSWORD", "SANDBOX",
@@ -410,41 +436,62 @@ class MailevaProvider(MissiveProviderBase):
         "occurred_at": ("event_date", "event_timestamp"),
     }
     resource_types = {
-        "registered_mail/v4/sendings": "lre",
-        "registered_mail/v4/recipients": "lre",
-        "registered_mail/v2/sendings": "lre",
-        "registered_mail/v2/recipients": "lre",
+        "registered_mail/v4/sendings": "registered_letter",
+        "registered_mail/v4/recipients": "registered_letter",
+        "registered_mail/v2/sendings": "registered_letter",
+        "registered_mail/v2/recipients": "registered_letter",
+        "mail/v3/sendings": "letter",
+        "mail/v3/recipients": "letter",
+        "mail/v2/sendings": "letter",
+        "mail/v2/recipients": "letter",
     }
     proof_keys = [
         "content_proof_embedded_document",
         "deposit_proof",
         "content_proof",
+        "archive",
+    ]
+    registered_letter_proof_keys = [
+        *proof_keys,
         "acknowledgement_of_receipt",
     ]
-    ack_level = None
 
     #########################################################
     # Helpers
     #########################################################
 
     @property
-    def address_offset_lre(self) -> dict[str, str]:
-        return _ADDRESS_OFFSET_LRE
+    def address_offset_letter(self) -> dict[str, str]:
+        return _ADDRESS_OFFSET
 
-    def get_lre_mode(self) -> str:
-        return "registered_mail" if self.is_acknowledgement_of_receipt() else "mail"
+    @property
+    def address_offset_registered_letter(self) -> dict[str, str]:
+        return _ADDRESS_OFFSET
 
-    def get_version(self) -> str:
-        return "v4" if self.is_acknowledgement_of_receipt() else "v2"
+    def get_postal_mode(self, product: str) -> str:
+        return _postal_api(product)[0]
+
+    def get_version(self, product: str) -> str:
+        return _postal_api(product)[1]
 
     def is_mode_sandbox(self) -> bool:
         return _truthy(self._get_config_or_env("SANDBOX", False))
 
-    def get_endpoint(self, endpoint: str, prefix: str = "api") -> str:
-        return self.endpoints[endpoint].format(
+    def get_endpoint(
+        self, endpoint: str, prefix: str = "api", *, product: str | None = None
+    ) -> str:
+        template = self.endpoints[endpoint]
+        needs_product = "{postal_mode}" in template or "{version}" in template
+        if needs_product:
+            postal_mode, version = _postal_api(product) if product else (None, None)
+            if postal_mode is None:
+                raise ValueError(f"Maileva endpoint {endpoint!r} requires a postal product")
+        else:
+            postal_mode, version = "", ""
+        return template.format(
             base_url=self.get_base_url(prefix),
-            postal_mode=self.get_lre_mode(),
-            version=self.get_version(),
+            postal_mode=postal_mode,
+            version=version,
         )
 
     def get_base_url(self, prefix: str = "api") -> str:
@@ -551,7 +598,10 @@ class MailevaProvider(MissiveProviderBase):
         return duration if duration in (3, 6, 10) else 3
 
     def get_resource_types(self, resource_type: str) -> list[str]:
-        return [rt for rt, tp in self.resource_types.items() if tp == resource_type]
+        from pymissive.config import normalize_missive_type
+
+        key = normalize_missive_type(resource_type) or resource_type
+        return [rt for rt, tp in self.resource_types.items() if tp == key]
 
     def get_normalize_type(self, data: dict[str, Any]) -> str:
         rt = data.get("resource_type")
@@ -628,13 +678,13 @@ class MailevaProvider(MissiveProviderBase):
         return True
 
     #########################################################
-    # LRE - Recipients
+    # registered letter / letter - Recipients
     #########################################################
 
-    def get_recipient_lre_data(self, recipient: dict[str, Any]) -> dict[str, Any]:
+    def get_recipient_registered_letter_data(self, recipient: dict[str, Any]) -> dict[str, Any]:
         address = recipient.get("address")
         if not address:
-            raise ValueError("LRE recipient requires address")
+            raise ValueError("Postal recipient requires address")
         data = {
             "address_line_1": address.get("organization"),
             "address_line_2": recipient.get("name"),
@@ -692,66 +742,102 @@ class MailevaProvider(MissiveProviderBase):
             data["tracking_number"] = tracking_number
         return data
 
-    def _detail_recipients_lre(self, external_id: str) -> list[dict[str, Any]]:
-        url = self.get_endpoint('recipients') % external_id
+    def _detail_recipients_postal(
+        self, external_id: str, *, product: str
+    ) -> list[dict[str, Any]]:
+        url = self.get_endpoint("recipients", product=product) % external_id
         response = self._request("GET", url)
         response.raise_for_status()
         response = response.json()
         return response.get("recipients", [])
 
-    def add_recipient_lre(self, recipient: dict[str, Any], external_id: str) -> dict[str, Any]:
-        url = self.get_endpoint('recipients') % external_id
-        data = self.get_recipient_lre_data(recipient)
+    def get_recipient_letter_data(self, recipient: dict[str, Any]) -> dict[str, Any]:
+        return self.get_recipient_registered_letter_data(recipient)
+
+    def _add_recipient(
+        self, recipient: dict[str, Any], external_id: str, *, product: str
+    ) -> dict[str, Any]:
+        url = self.get_endpoint("recipients", product=product) % external_id
+        data = self.get_recipient_registered_letter_data(recipient)
         response = self._request("POST", url, json=data)
         self._raise_for_response(response, f"Maileva add recipient failed ({url})")
         return self._serialize_recipient_ref(recipient, response.json())
 
-    def update_recipient_lre(self, recipient: dict[str, Any], external_id: str) -> dict[str, Any]:
-        url = self.get_endpoint('recipients') % external_id + "/" + recipient.get("external_id")
-        data = self.get_recipient_lre_data(recipient)
+    def add_recipient_letter(self, recipient: dict[str, Any], external_id: str) -> dict[str, Any]:
+        return self._add_recipient(recipient, external_id, product="letter")
+
+    def add_recipient_registered_letter(
+        self, recipient: dict[str, Any], external_id: str
+    ) -> dict[str, Any]:
+        return self._add_recipient(recipient, external_id, product="registered_letter")
+
+    def _update_recipient(
+        self, recipient: dict[str, Any], external_id: str, *, product: str
+    ) -> dict[str, Any]:
+        url = (
+            self.get_endpoint("recipients", product=product) % external_id
+            + "/"
+            + recipient.get("external_id")
+        )
+        data = self.get_recipient_registered_letter_data(recipient)
         response = self._request("PATCH", url, json=data)
         self._raise_for_response(response, f"Maileva update recipient failed ({url})")
         return self._serialize_recipient_ref(recipient, response.json())
 
-    def _add_recipients_lre(self, recipients: list[dict[str, Any]], external_id: str) -> list[dict[str, Any]]:
+    def update_recipient_letter(self, recipient: dict[str, Any], external_id: str) -> dict[str, Any]:
+        return self._update_recipient(recipient, external_id, product="letter")
+
+    def update_recipient_registered_letter(
+        self, recipient: dict[str, Any], external_id: str
+    ) -> dict[str, Any]:
+        return self._update_recipient(recipient, external_id, product="registered_letter")
+
+    def _add_recipients_postal(
+        self, recipients: list[dict[str, Any]], external_id: str, *, product: str
+    ) -> list[dict[str, Any]]:
         external_ids = []
         for recipient in recipients:
             if recipient.get("external_id"):
-                response = self.update_recipient_lre(recipient, external_id)
+                response = self._update_recipient(recipient, external_id, product=product)
             else:
-                response = self.add_recipient_lre(recipient, external_id)
+                response = self._add_recipient(recipient, external_id, product=product)
             external_ids.append(response)
         return external_ids
 
-    def delete_recipient_lre(self, recipient, external_id: str) -> Any:
-        url = self.get_endpoint('recipients') % external_id + "/" + recipient.get("external_id")
+    def _delete_recipient(self, recipient, external_id: str, *, product: str) -> Any:
+        url = (
+            self.get_endpoint("recipients", product=product) % external_id
+            + "/"
+            + recipient.get("external_id")
+        )
         response = self._request("DELETE", url)
         response.raise_for_status()
         return response.json()
 
-    def delete_recipients_lre(self, external_id: str) -> Any:
-        url = self.get_endpoint('recipients') % external_id
+    def delete_recipient_letter(self, recipient, external_id: str) -> Any:
+        return self._delete_recipient(recipient, external_id, product="letter")
+
+    def delete_recipient_registered_letter(self, recipient, external_id: str) -> Any:
+        return self._delete_recipient(recipient, external_id, product="registered_letter")
+
+    def _delete_recipients(self, external_id: str, *, product: str) -> Any:
+        url = self.get_endpoint("recipients", product=product) % external_id
         response = self._request("DELETE", url)
         response.raise_for_status()
         return response.json()
 
+    def delete_recipients_letter(self, external_id: str) -> Any:
+        return self._delete_recipients(external_id, product="letter")
+
+    def delete_recipients_registered_letter(self, external_id: str) -> Any:
+        return self._delete_recipients(external_id, product="registered_letter")
+
     #########################################################
-    # LRE - Sendings (create, update, delete, send)
-    # Maileva: no separate "cancel sending" API; removing a sending uses HTTP DELETE (delete_lre).
+    # letter (mail/v3) and registered_letter (registered_mail/v4) sendings
+    # Maileva: no separate "cancel sending" API; removing a sending uses HTTP DELETE.
     #########################################################
 
-    def is_acknowledgement_of_receipt(self, **kwargs: Any) -> bool:
-        """Whether this call is registered-mail (v4), not the previous missive.
-
-        ``get_endpoint`` / ``get_version`` read the value set by the last
-        public method that passed ``**kwargs``. A reused provider instance
-        (ProviderKit) must not keep the first missive's product.
-        """
-        if kwargs:
-            self.ack_level = kwargs.get("acknowledgement")
-        return self.ack_level == "acknowledgement_of_receipt"
-
-    def get_lre_data(self, **kwargs: Any) -> dict[str, Any]:
+    def _sending_base_data(self, **kwargs: Any) -> dict[str, Any]:
         data: dict[str, Any] = {
             "name": (kwargs.get("subject") or "").strip() or "Missive",
         }
@@ -792,90 +878,122 @@ class MailevaProvider(MissiveProviderBase):
 
         if kwargs.get("notification_email"):
             data["notification_email"] = kwargs.get("notification_email", self._get_config_or_env("NOTIFICATION_EMAIL", ""))
-            data["notification_types"] = self._get_config_or_env("NOTIFICATION_TYPES", ["ALL_MAILEVA", "ALL_LAPOSTE"])
-
-        if self.is_acknowledgement_of_receipt(**kwargs):
-            # registered_mail/v4 — do not send mail/v2-only fields (postage_type, envelope_windows_type, …)
-            data["acknowledgement_of_receipt"] = True
-            if kwargs.get("returned_mail_scanning", self._get_config_or_env("RETURNED_MAIL_SCANNING", False)):
-                data["acknowledgement_of_receipt_scanning"] = True
-        else:
-            data["print_sender_address"] = kwargs.get(
-                "print_sender_address", self._get_config_or_env("PRINT_SENDER_ADDRESS", True)
-            )
-            data["envelope_windows_type"] = kwargs.get(
-                "envelope_windows_type", self._get_config_or_env("ENVELOPE_WINDOWS_TYPE", "DOUBLE")
-            )
-            priority = kwargs.get("priority")
-            postage_type = (
-                "urgent"
-                if (priority or "").lower() == "urgent"
-                else str(self._get_config_or_env("POSTAGE_TYPE", "fast")).lower()
-            )
-            data["postage_type"] = postage_type.upper()
-
         if kwargs.get("custom_data") is not None:
             data["custom_data"] = kwargs["custom_data"]
         return data
 
-    def _detail_lre(self, external_id: str) -> dict[str, Any]:
-        url = self.get_endpoint('sendings')
+    def get_letter_data(self, **kwargs: Any) -> dict[str, Any]:
+        """mail/v3 sending payload (postage, envelope)."""
+        data = self._sending_base_data(**kwargs)
+        data["print_sender_address"] = kwargs.get(
+            "print_sender_address", self._get_config_or_env("PRINT_SENDER_ADDRESS", True)
+        )
+        data["envelope_windows_type"] = kwargs.get(
+            "envelope_windows_type", self._get_config_or_env("ENVELOPE_WINDOWS_TYPE", "DOUBLE")
+        )
+        priority = kwargs.get("priority")
+        postage_type = (
+            "urgent"
+            if (priority or "").lower() == "urgent"
+            else str(self._get_config_or_env("POSTAGE_TYPE", "fast")).lower()
+        )
+        data["postage_type"] = postage_type.upper()
+        return data
+
+    def get_registered_letter_data(self, **kwargs: Any) -> dict[str, Any]:
+        """registered_mail/v4 sending payload. AR follows the missive field."""
+        data = self._sending_base_data(**kwargs)
+        wants_ar = _registered_acknowledgement_of_receipt(kwargs)
+        data["acknowledgement_of_receipt"] = wants_ar
+        if wants_ar and kwargs.get(
+            "returned_mail_scanning", self._get_config_or_env("RETURNED_MAIL_SCANNING", False)
+        ):
+            data["acknowledgement_of_receipt_scanning"] = True
+        if data.get("notification_email"):
+            data["notification_types"] = self._get_config_or_env(
+                "NOTIFICATION_TYPES", ["ALL_MAILEVA", "ALL_LAPOSTE"]
+            )
+        return data
+
+    def _sending_data(self, *, product: str, **kwargs: Any) -> dict[str, Any]:
+        if product == "letter":
+            return self.get_letter_data(**kwargs)
+        return self.get_registered_letter_data(**kwargs)
+
+    def _detail_sending_postal(self, external_id: str, *, product: str) -> dict[str, Any]:
+        url = self.get_endpoint("sendings", product=product)
         response = self._request("GET", url + "/" + external_id)
         response.raise_for_status()
         return response.json()
 
-    def _create_lre(self, **kwargs: Any) -> dict[str, Any]:
-        self.is_acknowledgement_of_receipt(**kwargs)
+    def _create_sending_postal(self, *, product: str, **kwargs: Any) -> dict[str, Any]:
         if kwargs.get("external_id"):
-            return self._detail_lre(kwargs.get("external_id"))
-        url = self.get_endpoint('sendings')
-        data = self.get_lre_data(**kwargs)
+            return self._detail_sending_postal(kwargs.get("external_id"), product=product)
+        url = self.get_endpoint("sendings", product=product)
+        data = self._sending_data(product=product, **kwargs)
         response = self._request("POST", url, json=data)
         self._raise_for_response(response, f"Maileva create sending failed ({url})")
         return response.json()
 
-    def create_lre(self, **kwargs: Any) -> dict[str, Any]:
+    def _create_postal(self, *, product: str, **kwargs: Any) -> dict[str, Any]:
+        response = self._create_sending_postal(product=product, **kwargs)
+        external_id = response.get("id")
+        response["recipients"] = self._add_recipients_postal(
+            kwargs.get("recipients"), external_id, product=product
+        )
+        return response
+
+    def create_letter(self, **kwargs: Any) -> dict[str, Any]:
+        return self._create_postal(product="letter", **kwargs)
+
+    def create_registered_letter(self, **kwargs: Any) -> dict[str, Any]:
         """Create sending and add recipients on the provider (used by prepare_missive)."""
-        self.is_acknowledgement_of_receipt(**kwargs)
-        response = self._create_lre(**kwargs)
-        external_id = response.get("id")
-        response["recipients"] = self._add_recipients_lre(kwargs.get("recipients"), external_id)
-        return response
+        return self._create_postal(product="registered_letter", **kwargs)
 
-    def prepare_lre(self, **kwargs: Any) -> dict[str, Any]:
-        """Alias for create_lre (deprecated, use create_lre)."""
-        return self.create_lre(**kwargs)
+    def prepare_registered_letter(self, **kwargs: Any) -> dict[str, Any]:
+        """Alias for create_registered_letter (deprecated, use create_registered_letter)."""
+        return self.create_registered_letter(**kwargs)
 
-    def update_lre(self, **kwargs: Any) -> dict[str, Any]:
-        self.is_acknowledgement_of_receipt(**kwargs)
-        response = self._create_lre(**kwargs)
-        external_id = response.get("id")
-        response["recipients"] = self._add_recipients_lre(kwargs.get("recipients"), external_id)
-        return response
+    def update_letter(self, **kwargs: Any) -> dict[str, Any]:
+        return self._create_postal(product="letter", **kwargs)
 
-    def delete_lre(self, **kwargs: Any) -> dict[str, Any]:
-        """DELETE sending on Maileva (draft or submitted); not the same as cancel semantics elsewhere."""
-        self.is_acknowledgement_of_receipt(**kwargs)
-        url = self.get_endpoint('sendings') + "/" + kwargs.get("external_id")
+    def update_registered_letter(self, **kwargs: Any) -> dict[str, Any]:
+        return self._create_postal(product="registered_letter", **kwargs)
+
+    def _delete_postal(self, *, product: str, **kwargs: Any) -> dict[str, Any]:
+        url = self.get_endpoint("sendings", product=product) + "/" + kwargs.get("external_id")
         response = self._request("DELETE", url)
         return {"code": response.status_code, "message": response.text}
 
-    def _stage_lre_before_submit(self, **kwargs: Any) -> tuple[str, list[Any], list[Any]]:
+    def delete_letter(self, **kwargs: Any) -> dict[str, Any]:
+        return self._delete_postal(product="letter", **kwargs)
+
+    def delete_registered_letter(self, **kwargs: Any) -> dict[str, Any]:
+        """DELETE sending on Maileva (draft or submitted); not the same as cancel semantics elsewhere."""
+        return self._delete_postal(product="registered_letter", **kwargs)
+
+    def _stage_postal_before_submit(
+        self, *, product: str, **kwargs: Any
+    ) -> tuple[str, list[Any], list[Any]]:
         """Create/update sending, recipients, and documents; does not call submit."""
-        self.is_acknowledgement_of_receipt(**kwargs)
-        response = self._create_lre(**kwargs)
+        response = self._create_sending_postal(product=product, **kwargs)
         external_id = response.get("id")
-        recipients = self._add_recipients_lre(kwargs.get("recipients"), external_id)
-        attachments = self._add_attachments_lre(kwargs.get("attachments", []), external_id)
+        recipients = self._add_recipients_postal(
+            kwargs.get("recipients"), external_id, product=product
+        )
+        attachments = self._add_attachments_postal(
+            kwargs.get("attachments", []), external_id, product=product
+        )
         return external_id, recipients, attachments
 
-    def preview_lre(self, **kwargs: Any) -> dict[str, Any]:
-        """Same pipeline as send_lre (sending, recipients, documents) without submit."""
+    def _preview_postal(self, *, product: str, **kwargs: Any) -> dict[str, Any]:
         kwargs = {
             **kwargs,
             "custom_data": kwargs.get("custom_data", "pymissive_temporary_preview"),
         }
-        external_id, recipients, attachments = self._stage_lre_before_submit(**kwargs)
+        external_id, recipients, attachments = self._stage_postal_before_submit(
+            product=product, **kwargs
+        )
         return {
             "id": external_id,
             "event": "draft",
@@ -886,19 +1004,29 @@ class MailevaProvider(MissiveProviderBase):
             "recipients": recipients,
         }
 
-    def send_lre(self, **kwargs: Any) -> dict[str, Any]:
-        external_id, recipients, attachments = self._stage_lre_before_submit(**kwargs)
+    def preview_letter(self, **kwargs: Any) -> dict[str, Any]:
+        return self._preview_postal(product="letter", **kwargs)
+
+    def preview_registered_letter(self, **kwargs: Any) -> dict[str, Any]:
+        """Same pipeline as send_registered_letter (sending, recipients, documents) without submit."""
+        return self._preview_postal(product="registered_letter", **kwargs)
+
+    def _send_postal(self, *, product: str, **kwargs: Any) -> dict[str, Any]:
+        external_id, recipients, attachments = self._stage_postal_before_submit(
+            product=product, **kwargs
+        )
+        service = f"send_{product}"
         if is_disable_send():
             return self._disabled_send_response(
-                "send_lre",
+                service,
                 external_id=external_id,
                 recipients=recipients,
                 attachments=attachments,
             )
-        url = self.get_endpoint('submit') % external_id
+        url = self.get_endpoint("submit", product=product) % external_id
         response = self._request("POST", url)
         response.raise_for_status()
-        data = {
+        return {
             "id": external_id,
             "event": "request",
             "code": response.status_code,
@@ -907,30 +1035,24 @@ class MailevaProvider(MissiveProviderBase):
             "attachments": attachments,
             "recipients": recipients,
         }
-        return data
+
+    def send_letter(self, **kwargs: Any) -> dict[str, Any]:
+        return self._send_postal(product="letter", **kwargs)
+
+    def send_registered_letter(self, **kwargs: Any) -> dict[str, Any]:
+        return self._send_postal(product="registered_letter", **kwargs)
 
     #########################################################
-    # LRE - Attachments
+    # registered letter / letter - Attachments
     #########################################################
 
-    def _add_attachments_lre(self, attachments: list[dict[str, Any]], external_id: str) -> list[dict[str, Any]]:
-        external_ids = []
-        for priority, attachment in enumerate(attachments, start=1):
-            external_ids.append(self.add_attachment_lre(
-                attachment=attachment,
-                external_id=external_id,
-                priority=priority,
-            ))
-        return external_ids
-
-    def add_attachment_lre(self, **kwargs: Any) -> dict[str, Any]:
-        self.is_acknowledgement_of_receipt(**kwargs)
+    def _add_attachment(self, *, product: str, **kwargs: Any) -> dict[str, Any]:
         attachment = kwargs.get("attachment", {})
         external_id = kwargs.get("external_id")
         priority = kwargs.get("priority", 1)
         doc_name = attachment.get("name", "document.pdf")
         content = attachment.get("content", b"")
-        url = self.get_endpoint('documents') % external_id
+        url = self.get_endpoint("documents", product=product) % external_id
         metadata = {"priority": priority, "name": doc_name, "shrink": True}
         files = {
             'document': (doc_name, content, 'application/pdf'),
@@ -941,37 +1063,71 @@ class MailevaProvider(MissiveProviderBase):
         response = response.json()
         return {"internal_id": attachment.get("id"), "external_id": response.get("id")}
 
-    def get_attachments_lre(self, **kwargs: Any) -> list[dict[str, Any]]:
-        self.is_acknowledgement_of_receipt(**kwargs)
+    def _add_attachments_postal(
+        self, attachments: list[dict[str, Any]], external_id: str, *, product: str
+    ) -> list[dict[str, Any]]:
+        external_ids = []
+        for priority, attachment in enumerate(attachments, start=1):
+            external_ids.append(self._add_attachment(
+                product=product,
+                attachment=attachment,
+                external_id=external_id,
+                priority=priority,
+            ))
+        return external_ids
+
+    def add_attachment_letter(self, **kwargs: Any) -> dict[str, Any]:
+        return self._add_attachment(product="letter", **kwargs)
+
+    def add_attachment_registered_letter(self, **kwargs: Any) -> dict[str, Any]:
+        return self._add_attachment(product="registered_letter", **kwargs)
+
+    def _get_attachments(self, *, product: str, **kwargs: Any) -> list[dict[str, Any]]:
         external_id = kwargs.get("external_id")
-        url = self.get_endpoint('documents') % external_id
+        url = self.get_endpoint("documents", product=product) % external_id
         response = self._request("GET", url)
         response.raise_for_status()
         return response.json()
 
-    def delete_attachment_lre(self, **kwargs: Any) -> bool:
-        self.is_acknowledgement_of_receipt(**kwargs)
+    def get_attachments_letter(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._get_attachments(product="letter", **kwargs)
+
+    def get_attachments_registered_letter(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._get_attachments(product="registered_letter", **kwargs)
+
+    def _delete_attachment(self, *, product: str, **kwargs: Any) -> bool:
         external_id = kwargs.get("external_id")
         document_id = kwargs.get("document_id")
-        url = self.get_endpoint('documents') % external_id + "/" + document_id
+        url = self.get_endpoint("documents", product=product) % external_id + "/" + document_id
         response = self._request("DELETE", url)
         response.raise_for_status()
         return True
 
+    def delete_attachment_letter(self, **kwargs: Any) -> bool:
+        return self._delete_attachment(product="letter", **kwargs)
+
+    def delete_attachment_registered_letter(self, **kwargs: Any) -> bool:
+        return self._delete_attachment(product="registered_letter", **kwargs)
+
     #########################################################
-    # LRE - Webhooks
+    # registered letter / letter - Webhooks
     #########################################################
 
-    def create_webhook_lre(self, webhook_data: dict[str, Any]) -> str:
+    def _create_webhook_postal(self, webhook_data: dict[str, Any], *, product: str) -> str:
         webhook_url = webhook_data.get("url")
         events = list([event for event in self.events_association.keys() if event.startswith("ON_")])
-        resource_types = self.get_resource_types("lre")
-        response = self._create_webhook_api(webhook_url, events, resource_types)
-        return response
+        resource_types = self.get_resource_types(product)
+        return self._create_webhook_api(webhook_url, events, resource_types)
 
-    def _retrieve_webhooks_lre(self) -> list[dict[str, Any]]:
+    def create_webhook_letter(self, webhook_data: dict[str, Any]) -> str:
+        return self._create_webhook_postal(webhook_data, product="letter")
+
+    def create_webhook_registered_letter(self, webhook_data: dict[str, Any]) -> str:
+        return self._create_webhook_postal(webhook_data, product="registered_letter")
+
+    def _retrieve_webhooks_registered_letter(self) -> list[dict[str, Any]]:
         webhooks = self.retrieve_webhooks()
-        resource_types = self.get_resource_types("lre")
+        resource_types = self.get_resource_types("registered_letter") + self.get_resource_types("letter")
         return [
             webhook for webhook in webhooks
             if webhook.get("resource_type") in resource_types
@@ -984,39 +1140,51 @@ class MailevaProvider(MissiveProviderBase):
         parts = str(webhook_id).split("-", 1)
         return parts[1] if len(parts) > 1 else parts[0]
 
-    def delete_webhook_lre(self, webhook_data: dict[str, Any]) -> None:
+    def _webhook_url_from_data(self, webhook_data: dict[str, Any]) -> str | None:
         url = webhook_data.get("url") or webhook_data.get("callback_url")
-        if not url:
-            raw_id = self._raw_id_from_webhook_id(
-                webhook_data.get("webhook_id") or webhook_data.get("id")
-            )
-            if raw_id:
-                for w in self.retrieve_webhooks():
-                    if str(w.get("id")) == str(raw_id):
-                        url = w.get("callback_url")
-                        break
+        if url:
+            return url
+        raw_id = self._raw_id_from_webhook_id(
+            webhook_data.get("webhook_id") or webhook_data.get("id")
+        )
+        if not raw_id:
+            return None
+        for webhook in self.retrieve_webhooks():
+            if str(webhook.get("id")) == str(raw_id):
+                return webhook.get("callback_url")
+        return None
+
+    def delete_webhook_letter(self, webhook_data: dict[str, Any]) -> None:
+        return self._delete_webhook_postal(webhook_data, product="letter")
+
+    def delete_webhook_registered_letter(self, webhook_data: dict[str, Any]) -> None:
+        return self._delete_webhook_postal(webhook_data, product="registered_letter")
+
+    def _delete_webhook_postal(self, webhook_data: dict[str, Any], *, product: str) -> None:
+        url = self._webhook_url_from_data(webhook_data)
         if not url:
             raise ValueError("Cannot delete webhook: no URL and could not derive from webhook_id")
-        return self.delete_webhooks("lre", url)
+        return self.delete_webhooks(product, url)
 
-    def update_webhook_lre(self, webhook_data: dict[str, Any]) -> dict[str, Any]:
+    def update_webhook_letter(self, webhook_data: dict[str, Any]) -> dict[str, Any]:
+        return self._update_webhook_postal(webhook_data, product="letter")
+
+    def update_webhook_registered_letter(self, webhook_data: dict[str, Any]) -> dict[str, Any]:
+        return self._update_webhook_postal(webhook_data, product="registered_letter")
+
+    def _update_webhook_postal(self, webhook_data: dict[str, Any], *, product: str) -> dict[str, Any]:
         new_url = webhook_data.get("url") or webhook_data.get("callback_url")
-        search_url = new_url
-        if not search_url:
-            raw_id = self._raw_id_from_webhook_id(
-                webhook_data.get("webhook_id") or webhook_data.get("id")
-            )
-            if raw_id:
-                for w in self.retrieve_webhooks():
-                    if str(w.get("id")) == str(raw_id):
-                        search_url = w.get("callback_url")
-                        break
+        search_url = new_url or self._webhook_url_from_data(webhook_data)
         if not search_url:
             raise ValueError("Cannot update webhook: no URL and could not derive from webhook_id")
-        return self.update_webhooks("lre", search_url, new_url or search_url)
+        return self.update_webhooks(
+            product,
+            search_url,
+            new_url or search_url,
+        )
 
     #########################################################
-    # LRE - Retrieve / Events
+    # registered letter / letter - Retrieve / Events
     #########################################################
 
     def get_normalize_events(self, data):
@@ -1073,14 +1241,14 @@ class MailevaProvider(MissiveProviderBase):
             ref["name"] = name
         return ref
 
-    def _serialize_events_lre(self, recipients, detail_lre):
+    def _serialize_events_postal(self, recipients, detail_registered_letter):
         events = []
         for recipient in recipients:
             recipient_ref = self._recipient_event_ref(recipient)
             if "statuses" in recipient:
                 for status in recipient.get("statuses", []):
                     events.append({
-                        "resource_id": detail_lre.get("id"),
+                        "resource_id": detail_registered_letter.get("id"),
                         "event": status.get("code"),
                         "event_date": status.get("date"),
                         "recipient": recipient_ref,
@@ -1088,38 +1256,43 @@ class MailevaProvider(MissiveProviderBase):
             elif "status" in recipient:
                 events.append({
                     "recipient": recipient_ref,
-                    "resource_id": detail_lre.get("id"),
+                    "resource_id": detail_registered_letter.get("id"),
                     "event": recipient.get("status"),
-                    "event_date": detail_lre.get("submission_date"),
+                    "event_date": detail_registered_letter.get("submission_date"),
                 })
         return events
 
-    def retrieve_lre(self, **kwargs: Any) -> list[dict[str, Any]]:
-        self.is_acknowledgement_of_receipt(**kwargs)
+    def _retrieve_postal(self, *, product: str, **kwargs: Any) -> list[dict[str, Any]]:
         external_id = kwargs.get("external_id")
-        detail_lre = self._detail_lre(external_id)
-        recipients_lre = self._detail_recipients_lre(external_id)
+        detail = self._detail_sending_postal(external_id, product=product)
+        recipients = self._detail_recipients_postal(external_id, product=product)
         result = {
-            **detail_lre,
-            "events": self._serialize_events_lre(recipients_lre, detail_lre),
+            **detail,
+            "events": self._serialize_events_postal(recipients, detail),
             "recipients": [
                 self._serialize_recipient_ref({"id": recipient.get("custom_id")}, recipient)
-                for recipient in recipients_lre
+                for recipient in recipients
             ],
         }
-        if not result.get("subject") and detail_lre.get("name"):
-            result["subject"] = detail_lre["name"]
-        sender_name = (detail_lre.get("sender_address_line_2") or "").strip()
+        if not result.get("subject") and detail.get("name"):
+            result["subject"] = detail["name"]
+        sender_name = (detail.get("sender_address_line_2") or "").strip()
         if sender_name and not result.get("sender_name"):
             result["sender_name"] = sender_name
         sender_address = _address_from_maileva_lines(
-            detail_lre, prefix="sender_", country_key="sender_country_code"
+            detail, prefix="sender_", country_key="sender_country_code"
         )
         if sender_address:
             result["sender_address"] = sender_address
         return result
 
-    def tracking_number_lre(self, **kwargs: Any) -> list[dict[str, Any]]:
+    def retrieve_letter(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._retrieve_postal(product="letter", **kwargs)
+
+    def retrieve_registered_letter(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._retrieve_postal(product="registered_letter", **kwargs)
+
+    def _tracking_number_postal(self, *, product: str, **kwargs: Any) -> list[dict[str, Any]]:
         """Return carrier tracking numbers for each recipient of a sending.
 
         Maileva prints the public tracking reference on the deposit-proof PDF
@@ -1127,25 +1300,35 @@ class MailevaProvider(MissiveProviderBase):
         under ``NUMERO DE RECOMMANDE``). The recipient API fields are only a
         fallback when no proof is available yet.
         """
-        self.is_acknowledgement_of_receipt(**kwargs)
-        recipients_lre = self._detail_recipients_lre(kwargs.get("external_id"))
+        recipients = self._detail_recipients_postal(
+            kwargs.get("external_id"), product=product
+        )
         results = []
-        for recipient in recipients_lre:
+        for recipient in recipients:
             ref = self._serialize_recipient_ref({"id": recipient.get("custom_id")}, recipient)
-            proof_url = recipient.get("deposit_proof_url")
-            if proof_url:
-                try:
-                    pdf_bytes = self._download_proof_bytes(proof_url)
-                    tracking_number = extract_tracking_number_from_deposit_proof(pdf_bytes)
-                except Exception:
-                    tracking_number = None
-                if tracking_number:
-                    ref["tracking_number"] = tracking_number
+            # LR / recommandé numbers are printed on the deposit-proof PDF.
+            # mail/v3 exposes ``tracking_number`` on the recipient (TRACKED_LETTER).
+            if product == "registered_letter":
+                proof_url = recipient.get("deposit_proof_url")
+                if proof_url:
+                    try:
+                        pdf_bytes = self._download_proof_bytes(proof_url, product=product)
+                        tracking_number = extract_tracking_number_from_deposit_proof(pdf_bytes)
+                    except Exception:
+                        tracking_number = None
+                    if tracking_number:
+                        ref["tracking_number"] = tracking_number
             results.append(ref)
         return results
 
+    def tracking_number_letter(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._tracking_number_postal(product="letter", **kwargs)
+
+    def tracking_number_registered_letter(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._tracking_number_postal(product="registered_letter", **kwargs)
+
     #########################################################
-    # LRE - Billings
+    # registered letter / letter - Billings
     #########################################################
 
     @staticmethod
@@ -1219,7 +1402,7 @@ class MailevaProvider(MissiveProviderBase):
             "raw": item,
         }
 
-    def get_billings_lre(self, **kwargs: Any) -> list[dict[str, Any]]:
+    def _get_billings(self, **kwargs: Any) -> list[dict[str, Any]]:
         """Fetch invoiced lines from ``/billing/v1/recipient_items``.
 
         ``user_reference`` is the sending ``custom_id``: ``substitute_id`` when
@@ -1236,6 +1419,12 @@ class MailevaProvider(MissiveProviderBase):
             self._serialize_billing_item(item, external_id=external_id)
             for item in items
         ]
+
+    def get_billings_letter(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._get_billings(**kwargs)
+
+    def get_billings_registered_letter(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._get_billings(**kwargs)
 
     def retrieve_billings(self, start_date, end_date, **kwargs: Any) -> dict[str, Any]:
         """Invoiced recipient lines for a date range via ``recipient_items``.
@@ -1259,16 +1448,22 @@ class MailevaProvider(MissiveProviderBase):
         }
 
     #########################################################
-    # LRE - Proofs
+    # registered letter / letter - Proofs
     #########################################################
 
-    def retrieve_proofs_lre(self, **kwargs: Any) -> list[dict[str, Any]]:
+    def _retrieve_proofs(self, *, product: str, **kwargs: Any) -> list[dict[str, Any]]:
         """Fetch available proofs from recipients (like Mighty get_prooflist)."""
-        self.is_acknowledgement_of_receipt(**kwargs)
-        recipients = self._detail_recipients_lre(kwargs.get("external_id"))
+        recipients = self._detail_recipients_postal(
+            kwargs.get("external_id"), product=product
+        )
         documents = []
+        keys = (
+            self.registered_letter_proof_keys
+            if product == "registered_letter"
+            else self.proof_keys
+        )
         for recipient in recipients:
-            for proof in self.proof_keys:
+            for proof in keys:
                 key = f"{proof}_url"
                 if key in recipient:
                     filename = self.normalize_filename(f"{recipient.get('address_line_2')}_{proof}.pdf")
@@ -1278,23 +1473,34 @@ class MailevaProvider(MissiveProviderBase):
                     })
         return documents
 
-    def _download_proof_bytes(self, url: str) -> bytes:
-        download_url = self.get_endpoint("proofdownload") % url
+    def retrieve_proofs_letter(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._retrieve_proofs(product="letter", **kwargs)
+
+    def retrieve_proofs_registered_letter(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._retrieve_proofs(product="registered_letter", **kwargs)
+
+    def _download_proof_bytes(self, url: str, *, product: str) -> bytes:
+        download_url = self.get_endpoint("proofdownload", product=product) % url
         response = self._request(
             "GET", download_url, stream=True, timeout=HTTP_DOCUMENT_TIMEOUT
         )
         response.raise_for_status()
         return response.content
 
-    def download_proof_lre(self, **kwargs: Any) -> bytes:
-        self.is_acknowledgement_of_receipt(**kwargs.get("data", {}))
-        return self._download_proof_bytes(kwargs.get("url"))
+    def download_proof_letter(self, **kwargs: Any) -> bytes:
+        return self._download_proof_bytes(kwargs.get("url"), product="letter")
+
+    def download_proof_registered_letter(self, **kwargs: Any) -> bytes:
+        return self._download_proof_bytes(kwargs.get("url"), product="registered_letter")
 
     #########################################################
-    # LRE - Webhook handling
+    # letter / registered_letter - Webhook handling
     #########################################################
 
-    def handle_webhook_lre(self, payload: dict[str, Any] | bytes) -> dict[str, Any]:
+    def handle_webhook_letter(self, payload: dict[str, Any] | bytes) -> dict[str, Any]:
+        return self.handle_webhook_registered_letter(payload)
+
+    def handle_webhook_registered_letter(self, payload: dict[str, Any] | bytes) -> dict[str, Any]:
         """Return raw payload for providerkit normalize() via fields_associations."""
         if isinstance(payload, (bytes, bytearray)):
             payload = json.loads(payload.decode("utf-8"))
@@ -1329,7 +1535,7 @@ class MailevaProvider(MissiveProviderBase):
         return None
 
     def get_normalize_recipient(self, data: dict[str, Any]) -> dict[str, Any] | None:
-        """Attach the recipient for recipient-scoped LRE events.
+        """Attach the recipient for recipient-scoped postal events.
 
         Maileva fires webhooks at two granularities:
         - ``sendings``: the whole sending, with ``resource_custom_id`` set to the

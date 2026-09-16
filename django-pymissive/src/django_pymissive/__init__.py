@@ -10,5 +10,5 @@ except PackageNotFoundError:
 from .shortcuts import send_missive, _shortcuts as _send_shortcuts  # noqa: E402
 
 # Re-export all auto-generated send_<type>() helpers at package level
-# e.g. ``from django_pymissive import send_email, send_sms, send_lre``
+# e.g. ``from django_pymissive import send_email, send_sms, send_registered_letter, send_letter``
 globals().update(_send_shortcuts)

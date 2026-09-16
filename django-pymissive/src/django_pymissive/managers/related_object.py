@@ -133,10 +133,10 @@ def missive_link_q(
 
     Args:
         campaign: A campaign instance or pk — only missives of that campaign.
-        support: A support key, alias or missive type (see
+        support: A support key or missive type (see
             :func:`pymissive.config.normalize_support`); selects every missive
-            type of that support, so ``"address"`` covers ``lre`` (registered or
-            plain mail) and ``hand_delivery`` alike.
+            type of that support, so ``"address"`` covers ``letter``, ``registered_letter``
+            and ``hand_delivery`` alike.
         missive_type: One type or an iterable of types, when a whole support is
             too broad.
         thread_type: Usually ``MissiveThreadType.MISSIVE`` to ignore the

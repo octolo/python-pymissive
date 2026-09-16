@@ -1,11 +1,11 @@
 """Top-level send shortcuts for django-pymissive.
 
 Provides :func:`send_missive` plus per-type helpers (``send_email``,
-``send_sms``, ``send_lre``, …) auto-generated from ``MISSIVE_TYPES``.
+``send_sms``, ``send_registered_letter``, ``send_letter``, …) auto-generated from ``MISSIVE_TYPES``.
 
 Usage::
 
-    from django_pymissive.shortcuts import send_email, send_sms, send_lre
+    from django_pymissive.shortcuts import send_email, send_sms, send_registered_letter
 
     # Send an email
     missive = send_email(
@@ -25,8 +25,8 @@ Usage::
         sender_name="Octolo",
     )
 
-    # Send a postal LRE without triggering the send immediately
-    missive = send_lre(
+    # Send an electronic registered letter without triggering the send immediately
+    missive = send_registered_letter(
         name="Alice Martin",
         address=my_geo_address,
         body_rich="<p>Letter body</p>",
@@ -41,7 +41,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from pymissive.config import GENERIC_SUPPORT, MISSIVE_TYPES
+from pymissive.config import MISSIVE_TYPES, missive_support_for_type, normalize_missive_type
 
 if TYPE_CHECKING:
     from django_pymissive.models import Missive
@@ -55,10 +55,9 @@ def _support_for_type(missive_type: str) -> str:
     Raises:
         ValueError: If *missive_type* maps to no known support category.
     """
-    mt = missive_type.lower()
-    for support, types in GENERIC_SUPPORT.items():
-        if mt in [t.lower() for t in types]:
-            return support
+    support = missive_support_for_type(missive_type)
+    if support:
+        return support
     raise ValueError(
         f"Unknown missive_type {missive_type!r}: no support category found. "
         f"Available types: {', '.join(sorted(MISSIVE_TYPES))}."
@@ -101,18 +100,18 @@ def send_missive(
 
     Args:
         missive_type: Registered missive type key (``'email'``, ``'sms'``,
-            ``'lre'``, ``'ere'``, …).  See ``pymissive.config.MISSIVE_TYPES``.
+            ``'registered_letter'``, ``'letter'``, ``'ere'``, …).  See ``pymissive.config.MISSIVE_TYPES``.
         name: Recipient display name.
         email: Recipient e-mail address — used when *support* is ``email``
             (types: ``email``, ``email_marketing``, ``ere``).
         phone: Recipient phone number — used when *support* is ``phone``
             (types: ``sms``, ``rcs``, ``voice_call``).
         address: Recipient postal address (``GeoaddressField`` value) — used
-            when *support* is ``address`` (types: ``lre``, ``hand_delivery``).
+            when *support* is ``address`` (types: ``letter``, ``registered_letter``, ``hand_delivery``).
         notification_id: Device / channel token — used when *support* is
             ``application`` (types: ``push_notification``, ``branded``).
         subject: Message subject (email).
-        body_rich: Rich body (HTML, RTF, …) for email, LRE, etc.
+        body_rich: Rich body (HTML, RTF, …) for email, letter, registered letter, etc.
         body_text: Plain-text body (sms, email fallback, …).
         sender_name: Display name of the sender.
         sender_email: Sender e-mail address.
@@ -170,6 +169,7 @@ def send_missive(
         MissiveStatus,
     )
 
+    missive_type = normalize_missive_type(missive_type) or missive_type
     # Resolve (and validate) the support before creating any DB row.
     support = _support_for_type(missive_type)
 

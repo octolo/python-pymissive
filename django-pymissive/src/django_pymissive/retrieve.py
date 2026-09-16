@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from django.core.exceptions import ValidationError
@@ -15,6 +16,8 @@ from .models.choices import (
 )
 from .models.missive import Missive
 from .models.recipient import MissiveRecipient
+
+logger = logging.getLogger(__name__)
 
 _RETRIEVE_FIELDS = (
     "subject",
@@ -74,12 +77,6 @@ def _retrieve_kwargs(missive: Missive, partner_id=None, uid=None) -> dict:
         payload["partner_id"] = partner_id
     if uid:
         payload["internal_id"] = str(uid)
-    if missive.acknowledgement:
-        payload["acknowledgement"] = missive.acknowledgement
-    if missive.delivery_mode:
-        payload["delivery_mode"] = missive.delivery_mode
-    if missive.priority:
-        payload["priority"] = missive.priority
     return payload
 
 
@@ -117,11 +114,11 @@ def _ingest_retrieve_response(missive: Missive, response: dict, partner_id=None,
     with transaction.atomic():
         _apply_retrieve_response(missive, response, partner_id=partner_id, uid=uid)
         missive.save()
-        missive.to_missivebilling.all().delete()
-        _replace_retrieve_recipients(missive, response)
-        missive.to_missiveevent.all().delete()
+        if _recipients_from_response(response):
+            _replace_retrieve_recipients(missive, response)
         events = response.get("events")
         if events:
+            missive.to_missiveevent.all().delete()
             from .signals import suppress_event_billings
 
             with suppress_event_billings():
@@ -129,12 +126,27 @@ def _ingest_retrieve_response(missive: Missive, response: dict, partner_id=None,
         for recipient in missive.recipients.all():
             recipient.set_status()
         missive.set_status()
-    try:
-        missive.get_billings()
-    except Exception:
-        pass
+    _refresh_retrieve_billings(missive)
     if was_billed:
         missive.set_billed()
+
+
+def _refresh_retrieve_billings(missive: Missive) -> None:
+    """Replace local billings only after a successful non-empty provider fetch."""
+    if not missive.can_billings():
+        return
+    try:
+        from .billings import _process_billing, load_provider_billings
+
+        bills = load_provider_billings(**missive.get_serialized_data(attachments=False))
+    except Exception:
+        logger.exception("retrieve billings failed for missive %s", missive.pk)
+        return
+    if not bills:
+        return
+    missive.to_missivebilling.all().delete()
+    for bill in bills:
+        _process_billing(missive, bill)
 
 
 def retrieve_from_provider(
@@ -144,16 +156,15 @@ def retrieve_from_provider(
     missive_type=None,
     partner_id=None,
     uid=None,
-    acknowledgement=None,
-    delivery_mode=None,
-    priority=None,
 ) -> tuple[Missive, bool]:
     """Fetch missive data from the provider and persist it.
 
-    Pass ``missive`` to replace that row's provider-owned data (subject, body,
-    sender, recipients, events) while keeping ``pk`` and ``external_id``.
+    Pass ``missive`` to update that row from the provider while keeping
+    ``pk`` and ``external_id``. Each section (fields, recipients, events,
+    billings) is replaced only when the payload actually contains it.
     Omit it to always create a new missive from the form fields; ``uid`` /
-    ``partner_id`` are sent to the provider only.
+    ``partner_id`` are sent to the provider only. The missive type selects
+    the provider service (``retrieve_letter``, ``retrieve_registered_letter``, …).
     """
     created = missive is None
     if created:
@@ -162,19 +173,10 @@ def retrieve_from_provider(
             missive_type=missive_type,
             external_id=partner_id or None,
             substitute_id=str(uid) if uid else None,
-            acknowledgement=acknowledgement or None,
-            delivery_mode=delivery_mode or None,
-            priority=priority or None,
         )
     else:
         partner_id = partner_id or missive.external_id
         uid = uid or missive.substitute_id or missive.pk
-        if acknowledgement:
-            missive.acknowledgement = acknowledgement
-        if delivery_mode:
-            missive.delivery_mode = delivery_mode
-        if priority:
-            missive.priority = priority
     response = _call_retrieve(missive, partner_id=partner_id, uid=uid)
     _ingest_retrieve_response(missive, response, partner_id=partner_id, uid=uid)
     return missive, created
@@ -201,14 +203,12 @@ def _substitute_id_from_payload(payload: dict, fallback=None) -> str | None:
 
 
 def _apply_retrieve_response(missive: Missive, response: dict, partner_id=None, uid=None) -> None:
-    """Replace provider-owned fields; keep the missive ``external_id`` if already set."""
+    """Copy provided fields; leave local values when the payload omits them."""
     external_id = missive.external_id or (
         response.get("external_id")
         or response.get("message_id")
         or partner_id
     )
-    for name in _RETRIEVE_FIELDS:
-        setattr(missive, name, None)
     for name in _RETRIEVE_FIELDS:
         value = response.get(name)
         if value not in (None, ""):
@@ -256,7 +256,10 @@ def _recipient_support_from_payload(rec: dict, missive: Missive) -> str:
 
 
 def _replace_retrieve_recipients(missive: Missive, response: dict) -> None:
-    """Drop local recipients and recreate them from the provider payload."""
+    """Drop local recipients and recreate them from the provider payload.
+
+    Caller must have checked that the payload actually lists recipients.
+    """
     missive.to_missiverecipient.all().delete()
     for rec in _recipients_from_response(response):
         if not isinstance(rec, dict):

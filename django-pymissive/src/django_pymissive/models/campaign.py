@@ -133,7 +133,7 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         help_text=_("Rich body for rich SMS, WhatsApp, RCS, etc."),
     )
 
-    # Address / LRE
+    # Address / letter
     sender_address_name = models.CharField(
         max_length=255,
         verbose_name=_("Sender address name"),
@@ -161,21 +161,21 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         verbose_name=_("Reply-To address"),
         help_text=_("Postal address for replies"),
     )
-    acknowledgement_lre = models.CharField(
+    acknowledgement_letter = models.CharField(
         max_length=50,
         choices=AcknowledgementLevel.choices,
         default=AcknowledgementLevel.BASIC_DELIVERY,
         verbose_name=_("Acknowledgement Level"),
         help_text=_("Desired acknowledgement level for delivery proof"),
     )
-    delivery_mode_lre = models.CharField(
+    delivery_mode_letter = models.CharField(
         max_length=50,
         choices=MissiveDeliveryMode.choices,
         default=MissiveDeliveryMode.NORMAL,
         verbose_name=_("Delivery Mode"),
         help_text=_("Delivery mode (economic, normal, premium, express)"),
     )
-    priority_lre = models.CharField(
+    priority_letter = models.CharField(
         max_length=20,
         choices=MissivePriority.choices,
         default=MissivePriority.NORMAL,
@@ -185,7 +185,7 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     first_document = RichTextField(
         blank=True,
         verbose_name=_("First Document"),
-        help_text=_("First document content (HTML, converted to PDF for LRE)"),
+        help_text=_("First document content (HTML, converted to PDF for postal letters)"),
     )
 
     objects = MissiveCampaignManager()

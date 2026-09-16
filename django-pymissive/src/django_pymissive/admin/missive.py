@@ -370,7 +370,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             return {
                 "confirm": _(
                     "Run provider preview? This calls the provider API "
-                    "(e.g. preview_lre on Maileva)."
+                    "(e.g. preview_registered_letter on Maileva)."
                 )
             }
         try:
@@ -543,7 +543,9 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     is_billed_display.boolean = True
 
     def provider_has_service(self, obj, service):
-        service_name = f"{service}_{obj.missive_type}".lower()
+        from pymissive.config import provider_service_name
+
+        service_name = provider_service_name(service, obj.missive_type)
         if obj.provider:
             return hasattr(obj.provider._provider, service_name)
 
@@ -716,9 +718,6 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
                 missive_type=form.cleaned_data["missive_type"],
                 partner_id=form.cleaned_data.get("partner_id"),
                 uid=form.cleaned_data.get("uid"),
-                acknowledgement=form.cleaned_data.get("acknowledgement"),
-                delivery_mode=form.cleaned_data.get("delivery_mode"),
-                priority=form.cleaned_data.get("priority"),
             )
         except Exception as exc:
             messages.error(request, str(exc))
@@ -747,7 +746,8 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             confirmed,
             _(
                 "Retrieve this missive from the provider and replace local data "
-                "(subject, body, sender, recipients, events)? "
+                "(subject, body, sender, recipients, events, billings) "
+                "only where the provider returns them? "
                 "The missive external ID is kept."
             ),
         )

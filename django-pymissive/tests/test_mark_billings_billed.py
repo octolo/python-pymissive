@@ -28,7 +28,7 @@ def _dt(year, month, day):
 
 def _billing(*, created_on, **kwargs):
     missive = kwargs.pop("missive", None) or Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         subject="LRAR",
         external_id="ext-1",
         substitute_id="sub-1",
@@ -37,7 +37,7 @@ def _billing(*, created_on, **kwargs):
         "billing_amount": Decimal("1.2500"),
         "estimate_amount": Decimal("1.0000"),
         "currency": "EUR",
-        "invoice": "LRE",
+        "invoice": "registered letter",
     }
     defaults.update(kwargs)
     billing = MissiveBilling.objects.create(missive=missive, **defaults)

@@ -7,8 +7,8 @@ Retrieve billing/usage data from provider.
 ## Synopsis
 
 ```
-pymissive billing retrieve --provider <name> --start-date <iso> --end-date <iso> [--type lre]
-pymissive billing retrieve --provider <name> [--type lre] [--external-id ID]
+pymissive billing retrieve --provider <name> --start-date <iso> --end-date <iso> [--type registered_letter]
+pymissive billing retrieve --provider <name> [--type registered_letter] [--external-id ID]
 ```
 
 ## Required options
@@ -21,7 +21,7 @@ pymissive billing retrieve --provider <name> [--type lre] [--external-id ID]
 
 | Option | Description |
 |--------|-------------|
-| `--type` | Missive type (default: lre) |
+| `--type` | Missive type (default: registered_letter) |
 | `--external-id` | External ID for per-missive billing |
 | `--start-date` | Start date for bulk billing retrieval |
 | `--end-date` | End date for bulk billing retrieval |
@@ -32,7 +32,7 @@ pymissive billing retrieve --provider <name> [--type lre] [--external-id ID]
 
 ```bash
 # Bulk retrieve (provider retrieve_billings_* ; start_date and end_date required)
-pymissive billing retrieve --provider maileva --type lre \
+pymissive billing retrieve --provider maileva --type registered_letter \
   --start-date 2026-08-01 --end-date 2026-08-31
 
 pymissive billing retrieve --provider maileva --external-id MY_ID

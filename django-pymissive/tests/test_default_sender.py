@@ -89,8 +89,8 @@ def test_sms_missive_fills_name_and_phone():
 
 
 @override_settings(PYMISSIVE_DEFAULT_SENDER=_DEFAULTS)
-def test_lre_missive_fills_name_and_address():
-    missive = _missive(MissiveType.LRE)
+def test_registered_letter_missive_fills_name_and_address():
+    missive = _missive(MissiveType.REGISTERED_LETTER)
     assert missive.sender_name == "Octolo"
     assert missive.sender_address["organization"] == "Octolo"
     assert not missive.sender_email

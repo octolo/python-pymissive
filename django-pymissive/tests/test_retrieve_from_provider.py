@@ -61,23 +61,11 @@ def test_form_accepts_partner_id():
     assert form.cleaned_data["partner_id"] == "msg-123"
 
 
-def test_form_accepts_acknowledgement_delivery_and_priority():
-    form = RetrieveMissiveForm(
-        data={
-            "provider": "maileva",
-            "missive_type": MissiveType.LRE,
-            "partner_id": "sending-1",
-            "acknowledgement": AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT,
-            "delivery_mode": MissiveDeliveryMode.PREMIUM,
-            "priority": MissivePriority.URGENT,
-        }
-    )
-    assert form.is_valid() is True
-    assert form.cleaned_data["acknowledgement"] == (
-        AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT
-    )
-    assert form.cleaned_data["delivery_mode"] == MissiveDeliveryMode.PREMIUM
-    assert form.cleaned_data["priority"] == MissivePriority.URGENT
+def test_form_has_no_level_fields():
+    form = RetrieveMissiveForm()
+    assert "acknowledgement" not in form.fields
+    assert "delivery_mode" not in form.fields
+    assert "priority" not in form.fields
 
 
 def test_lookup_by_external_id():
@@ -227,7 +215,7 @@ def test_get_or_retrieve_rejects_provider_without_retrieve():
     assert Missive.objects.filter(external_id="missing").exists() is False
 
 
-def test_get_or_retrieve_forwards_levels_to_provider_and_persists_them():
+def test_retrieve_does_not_forward_levels_to_provider():
     response = {
         "external_id": "ext-ar",
         "subject": "AR letter",
@@ -238,22 +226,15 @@ def test_get_or_retrieve_forwards_levels_to_provider_and_persists_them():
     ) as retrieve, patch.object(Missive, "handle_events"):
         missive, created = retrieve_from_provider(
             provider="maileva",
-            missive_type=MissiveType.LRE,
+            missive_type=MissiveType.REGISTERED_LETTER,
             partner_id="ext-ar",
-            acknowledgement=AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT,
-            delivery_mode=MissiveDeliveryMode.PREMIUM,
-            priority=MissivePriority.URGENT,
         )
     assert created is True
-    retrieve.assert_called_once()
     kwargs = retrieve.call_args.kwargs
-    assert kwargs["acknowledgement"] == AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT
-    assert kwargs["delivery_mode"] == MissiveDeliveryMode.PREMIUM
-    assert kwargs["priority"] == MissivePriority.URGENT
-    missive.refresh_from_db()
-    assert missive.acknowledgement == AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT
-    assert missive.delivery_mode == MissiveDeliveryMode.PREMIUM
-    assert missive.priority == MissivePriority.URGENT
+    assert "acknowledgement" not in kwargs
+    assert "delivery_mode" not in kwargs
+    assert "priority" not in kwargs
+    assert kwargs["external_id"] == "ext-ar"
 
 
 def test_admin_retrieve_get_renders_form():
@@ -326,7 +307,7 @@ def test_refresh_from_provider_updates_fields_and_creates_recipients():
     assert rec.recipient_support == "email"
 
 
-def test_refresh_from_provider_resets_fields_keeps_external_id_and_pk():
+def test_refresh_from_provider_updates_only_fields_the_payload_provides():
     missive = _email_missive(
         external_id="ext-keep",
         subject="Old subject",
@@ -352,13 +333,13 @@ def test_refresh_from_provider_resets_fields_keeps_external_id_and_pk():
     assert missive.pk == missive_pk
     assert missive.external_id == "ext-keep"
     assert missive.subject == "New subject"
-    assert missive.body_text is None
-    assert missive.body_rich is None
-    assert missive.sender_name is None
-    assert missive.sender_email is None
-    assert missive.reply_to_name is None
-    assert missive.reply_to_email is None
-    assert missive.brand_name is None
+    assert missive.body_text == "Old body"
+    assert missive.body_rich == "<p>Old</p>"
+    assert missive.sender_name == "Old Sender"
+    assert missive.sender_email == "old@example.com"
+    assert missive.reply_to_name == "Old Reply"
+    assert missive.reply_to_email == "reply@example.com"
+    assert missive.brand_name == "OldBrand"
 
 
 def test_refresh_from_provider_keeps_metadata_context_and_processors():
@@ -423,14 +404,6 @@ def test_refresh_from_provider_restores_billed_flag_on_recreated_billings():
         currency="EUR",
     )
 
-    def recreate_billings(self):
-        MissiveBilling.objects.create(
-            missive=self,
-            billing_amount=Decimal("2.0000"),
-            is_billed=False,
-            currency="EUR",
-        )
-
     with patch.object(Missive, "has_service", return_value=True), patch.object(
         Missive,
         "call_provider_service",
@@ -440,8 +413,15 @@ def test_refresh_from_provider_restores_billed_flag_on_recreated_billings():
             "recipients": [{"name": "Alice", "email": "alice@example.com"}],
             "events": [],
         },
-    ), patch.object(Missive, "handle_events"), patch.object(
-        Missive, "get_billings", recreate_billings
+    ), patch.object(Missive, "handle_events"), patch(
+        "django_pymissive.billings.load_provider_billings",
+        return_value=[
+            {
+                "billing_amount": Decimal("2.0000"),
+                "currency": "EUR",
+                "invoice": "INV-2",
+            }
+        ],
     ):
         retrieve_from_provider(missive=missive)
     assert not MissiveBilling.objects.filter(pk=old.pk).exists()
@@ -462,13 +442,6 @@ def test_refresh_from_provider_does_not_mark_unbilled_missive():
         is_billed=False,
     )
 
-    def recreate_billings(self):
-        MissiveBilling.objects.create(
-            missive=self,
-            billing_amount=Decimal("3.0000"),
-            is_billed=False,
-        )
-
     with patch.object(Missive, "has_service", return_value=True), patch.object(
         Missive,
         "call_provider_service",
@@ -477,8 +450,14 @@ def test_refresh_from_provider_does_not_mark_unbilled_missive():
             "subject": "From provider",
             "events": [],
         },
-    ), patch.object(Missive, "handle_events"), patch.object(
-        Missive, "get_billings", recreate_billings
+    ), patch.object(Missive, "handle_events"), patch(
+        "django_pymissive.billings.load_provider_billings",
+        return_value=[
+            {
+                "billing_amount": Decimal("3.0000"),
+                "invoice": "INV-3",
+            }
+        ],
     ):
         retrieve_from_provider(missive=missive)
     billing = MissiveBilling.objects.get(missive=missive)
@@ -536,9 +515,66 @@ def test_refresh_from_provider_replaces_recipients_and_events():
     handle_events.assert_called_once_with([{"event": "delivered"}])
 
 
+def test_events_only_retrieve_keeps_body_recipients_and_billings():
+    from decimal import Decimal
+
+    from django_pymissive.models.billing import MissiveBilling
+
+    missive = _email_missive(
+        external_id="ext-events-only",
+        subject="Keep me",
+        body_text="Local body",
+        body_rich="<p>Local</p>",
+    )
+    recipient = MissiveRecipient.objects.create(
+        missive=missive,
+        name="Alice",
+        email="alice@example.com",
+        recipient_support="email",
+    )
+    billing = MissiveBilling.objects.create(
+        missive=missive,
+        billing_amount=Decimal("4.0000"),
+        currency="EUR",
+        invoice="INV-KEEP",
+    )
+    local_event = MissiveEvent.objects.create(
+        missive=missive,
+        recipient=recipient,
+        event="request",
+        occurred_at=timezone.now(),
+    )
+    with patch.object(Missive, "has_service", return_value=True), patch.object(
+        Missive,
+        "call_provider_service",
+        return_value={
+            "events": [
+                {
+                    "event": "accepted",
+                    "occurred_at": "2026-06-12T09:30:16Z",
+                    "external_id": "ext-events-only",
+                }
+            ]
+        },
+    ), patch.object(Missive, "handle_events") as handle_events, patch(
+        "django_pymissive.billings.load_provider_billings",
+        side_effect=RuntimeError("billing down"),
+    ):
+        retrieve_from_provider(missive=missive)
+
+    missive.refresh_from_db()
+    assert missive.subject == "Keep me"
+    assert missive.body_text == "Local body"
+    assert missive.body_rich == "<p>Local</p>"
+    assert MissiveRecipient.objects.get(pk=recipient.pk).email == "alice@example.com"
+    assert MissiveBilling.objects.get(pk=billing.pk).invoice == "INV-KEEP"
+    handle_events.assert_called_once()
+    assert not MissiveEvent.objects.filter(pk=local_event.pk).exists()
+
+
 def test_refresh_from_provider_fills_missing_address_without_duplicating():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         provider="maileva",
         external_id="ext-addr",
         acknowledgement=AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT,
@@ -580,9 +616,9 @@ def test_refresh_from_provider_fills_missing_address_without_duplicating():
     assert missive.missive_support == "address"
 
 
-def test_retrieve_lre_sets_address_support_on_missive_and_recipients():
+def test_retrieve_registered_letter_sets_address_support_on_missive_and_recipients():
     response = {
-        "external_id": "ext-lre-support",
+        "external_id": "ext-registered_letter-support",
         "subject": "LRAR",
         "recipients": [
             {
@@ -603,9 +639,8 @@ def test_retrieve_lre_sets_address_support_on_missive_and_recipients():
     ), patch.object(Missive, "handle_events"):
         missive, created = retrieve_from_provider(
             provider="maileva",
-            missive_type=MissiveType.LRE,
-            partner_id="ext-lre-support",
-            acknowledgement=AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT,
+            missive_type=MissiveType.REGISTERED_LETTER,
+            partner_id="ext-registered_letter-support",
         )
     assert created is True
     assert missive.missive_support == "address"
@@ -654,9 +689,8 @@ def test_retrieve_from_provider_maps_maileva_lines_to_geoaddress():
     ), patch.object(Missive, "handle_events"):
         missive, created = retrieve_from_provider(
             provider="maileva",
-            missive_type=MissiveType.LRE,
+            missive_type=MissiveType.REGISTERED_LETTER,
             partner_id="sending-fr",
-            acknowledgement=AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT,
         )
     assert created is True
     assert missive.sender_name == "Service Courrier"
@@ -677,9 +711,9 @@ def test_retrieve_from_provider_maps_maileva_lines_to_geoaddress():
     assert rec.address.get("name") is None
 
 
-def test_refresh_from_provider_forwards_current_missive_levels():
+def test_refresh_from_provider_does_not_forward_levels():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         provider="maileva",
         external_id="ext-levels",
         acknowledgement=AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT,
@@ -694,9 +728,9 @@ def test_refresh_from_provider_forwards_current_missive_levels():
     ) as retrieve, patch.object(Missive, "handle_events"):
         retrieve_from_provider(missive=missive)
     kwargs = retrieve.call_args.kwargs
-    assert kwargs["acknowledgement"] == AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT
-    assert kwargs["delivery_mode"] == MissiveDeliveryMode.PREMIUM
-    assert kwargs["priority"] == MissivePriority.URGENT
+    assert "acknowledgement" not in kwargs
+    assert "delivery_mode" not in kwargs
+    assert "priority" not in kwargs
     assert kwargs["external_id"] == "ext-levels"
     assert kwargs["internal_id"] == str(missive.pk)
 

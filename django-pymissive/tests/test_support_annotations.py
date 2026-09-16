@@ -106,26 +106,27 @@ def _with_counts(campaign) -> MissiveCampaign:
 # Support vocabulary (pymissive.config)
 # ---------------------------------------------------------------------------
 
-def test_postal_is_an_alias_not_a_type():
-    """Plain mail is ``lre`` without AR; ``postal`` only survives as a synonym."""
+def test_postal_is_neither_a_type_nor_a_support():
+    """``postal`` is preview chrome; the simple-mail type is ``letter``."""
     from pymissive.config import MISSIVE_TYPES, normalize_support
 
     assert "postal" not in MISSIVE_TYPES
-    assert normalize_support("postal") == "address"
+    assert normalize_support("postal") == ""
 
 
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
         ("address", "address"),
-        ("lre", "address"),
-        ("postal", "address"),
-        ("courrier", "address"),
+        ("registered_letter", "address"),
+        ("letter", "address"),
+        ("postal", ""),
+        ("courrier", ""),
         ("hand-delivery", "address"),
         ("hand_delivery", "address"),
         ("sms", "phone"),
         ("ere", "email"),
-        ("app", "application"),
+        ("app", ""),
         ("notification", "application"),
         ("nope", ""),
         ("", ""),
@@ -138,10 +139,10 @@ def test_normalize_support(value, expected):
     assert normalize_support(value) == expected
 
 
-def test_missive_types_for_support_covers_every_postal_flavour():
+def test_missive_types_for_support_covers_every_address_flavour():
     from pymissive.config import missive_types_for_support
 
-    assert set(missive_types_for_support("courrier")) == {"lre", "hand_delivery"}
+    assert set(missive_types_for_support("address")) == {"letter", "registered_letter", "hand_delivery"}
 
 
 def test_missive_type_filter_prefix_and_unknown_support():
@@ -179,7 +180,7 @@ def test_count_support_groups_every_type_of_the_channel():
     _missive(campaign, missive_type=MissiveType.EMAIL)
     _missive(campaign, missive_type=MissiveType.ERE)
     _missive(campaign, missive_type=MissiveType.HAND_DELIVERY)
-    _missive(campaign, missive_type=MissiveType.LRE)
+    _missive(campaign, missive_type=MissiveType.REGISTERED_LETTER)
     _missive(campaign, missive_type=MissiveType.SMS)
 
     annotated = _annotated(campaign)
@@ -187,6 +188,18 @@ def test_count_support_groups_every_type_of_the_channel():
     assert annotated.count_support_address == 2
     assert annotated.count_support_phone == 1
     assert annotated.count_support_application == 0
+
+
+def test_count_type_distinguishes_letter_from_registered_letter():
+    campaign = _campaign()
+    _missive(campaign, missive_type=MissiveType.LETTER)
+    _missive(campaign, missive_type=MissiveType.REGISTERED_LETTER)
+    _missive(campaign, missive_type=MissiveType.REGISTERED_LETTER)
+
+    annotated = _annotated(campaign)
+    assert annotated.count_support_address == 3
+    assert annotated.count_type_letter == 1
+    assert annotated.count_type_registered_letter == 2
 
 
 def test_count_support_sent_ignores_pending_missives():
@@ -218,7 +231,7 @@ def test_count_support_error_is_the_failures_of_the_channel():
     campaign = _campaign()
     _missive(campaign, missive_type=MissiveType.EMAIL, status=MissiveStatus.FAILED)
     _missive(campaign, missive_type=MissiveType.EMAIL, status=MissiveStatus.SUCCESS)
-    _missive(campaign, missive_type=MissiveType.LRE, status=MissiveStatus.ERROR)
+    _missive(campaign, missive_type=MissiveType.REGISTERED_LETTER, status=MissiveStatus.ERROR)
 
     annotated = _annotated(campaign)
     assert annotated.count_support_email_error == 1
@@ -342,7 +355,7 @@ def test_the_default_queryset_aggregates_nothing():
     # The joins and aggregates every campaign lookup used to pay for.
     opted_in = str(MissiveCampaign.objects.with_counts().query)
     assert opted_in.count("JOIN") == 5
-    assert opted_in.count("COUNT(DISTINCT") == 66
+    assert opted_in.count("COUNT(DISTINCT") == 67
 
 
 def test_with_counts_annotates_only_the_names_it_is_given():
@@ -517,7 +530,7 @@ def test_send_preview_payload_groups_by_support():
     campaign = _campaign()
     _missive(campaign, missive_type=MissiveType.EMAIL)
     _missive(campaign, missive_type=MissiveType.HAND_DELIVERY)
-    _missive(campaign, missive_type=MissiveType.LRE)
+    _missive(campaign, missive_type=MissiveType.REGISTERED_LETTER)
     _missive(campaign, missive_type=MissiveType.SMS)
     _missive(campaign, missive_type=MissiveType.EMAIL, status=MissiveStatus.SUCCESS)
 
@@ -527,7 +540,7 @@ def test_send_preview_payload_groups_by_support():
         "email": 1, "phone": 1, "address": 2, "application": 0,
     }
     assert payload["by_type"] == {
-        "email": 1, "hand_delivery": 1, "lre": 1, "sms": 1,
+        "email": 1, "hand_delivery": 1, "registered_letter": 1, "sms": 1,
     }
 
 
@@ -689,7 +702,7 @@ def test_missive_changelist_still_renders_the_opt_in_counters():
 def test_targets_by_missive_returns_the_value_of_each_support():
     email_missive = _missive(missive_type=MissiveType.EMAIL)
     email_missive.to_missiverecipient.create(name="Alice", email="alice@example.com")
-    postal_missive = _missive(missive_type=MissiveType.LRE)
+    postal_missive = _missive(missive_type=MissiveType.REGISTERED_LETTER)
     postal_missive.to_missiverecipient.create(
         name="Bob", address={"address_line1": "1 rue Test", "city": "Lyon"},
     )
@@ -795,14 +808,14 @@ def test_with_last_missive_carries_the_send_date():
 def test_with_last_missive_scoped_per_support():
     contact = _contact()
     email = _missive(missive_type=MissiveType.EMAIL)
-    courrier = _missive(missive_type=MissiveType.LRE)
+    courrier = _missive(missive_type=MissiveType.REGISTERED_LETTER)
     _link(email, contact)
     _link(courrier, contact)
 
     row = (
         Contact.objects
         .with_last_missive(prefix="last_email", support="email")
-        .with_last_missive(prefix="last_courrier", support="courrier")
+        .with_last_missive(prefix="last_courrier", support="address")
         .get(pk=contact.pk)
     )
     assert uuid.UUID(str(row.last_email["uid"])) == email.pk
@@ -831,13 +844,13 @@ def test_with_missive_count_per_support_and_sent_flag():
     other_contact = _contact(email="other@example.com")
     _link(_missive(missive_type=MissiveType.EMAIL, status=MissiveStatus.SUCCESS), contact)
     _link(_missive(missive_type=MissiveType.EMAIL), contact)
-    _link(_missive(missive_type=MissiveType.LRE), contact)
+    _link(_missive(missive_type=MissiveType.REGISTERED_LETTER), contact)
     _link(_missive(missive_type=MissiveType.EMAIL), other_contact)
 
     row = (
         Contact.objects
         .with_missive_count(name="email_count", support="email")
-        .with_missive_count(name="courrier_count", support="courrier")
+        .with_missive_count(name="courrier_count", support="address")
         .with_missive_count(name="sent_count", sent=True)
         .get(pk=contact.pk)
     )
@@ -931,7 +944,7 @@ def test_mixin_annotates_a_uuid_pk_model():
     nothing on SQLite, where a UUID is stored without dashes.
     """
     target = _campaign()
-    courrier = _missive(missive_type=MissiveType.LRE)
+    courrier = _missive(missive_type=MissiveType.REGISTERED_LETTER)
     _link(_missive(missive_type=MissiveType.EMAIL, status=MissiveStatus.SUCCESS), target)
     _link(courrier, target)
     _link(_missive(missive_type=MissiveType.EMAIL), _campaign())
@@ -939,7 +952,7 @@ def test_mixin_annotates_a_uuid_pk_model():
     row = (
         _UUIDTargetQuerySet(model=MissiveCampaign)
         .with_missive_count(name="email_count", support="email")
-        .with_last_missive(prefix="last_courrier", support="courrier")
+        .with_last_missive(prefix="last_courrier", support="address")
         .get(pk=target.pk)
     )
     assert row.email_count == 1
@@ -950,7 +963,7 @@ def test_missive_related_queryset_orders_newest_first():
     contact = _contact()
     older = _missive(missive_type=MissiveType.EMAIL)
     newer = _missive(missive_type=MissiveType.EMAIL)
-    courrier = _missive(missive_type=MissiveType.LRE)
+    courrier = _missive(missive_type=MissiveType.REGISTERED_LETTER)
     for missive in (older, newer, courrier):
         _link(missive, contact)
 
@@ -1077,7 +1090,7 @@ def test_summaries_by_object_takes_the_link_filters():
     contact = _contact()
     email = _missive(missive_type=MissiveType.EMAIL)
     _link(email, contact)
-    _link(_missive(missive_type=MissiveType.LRE), contact)
+    _link(_missive(missive_type=MissiveType.REGISTERED_LETTER), contact)
 
     summaries = missive_summaries_by_object(Contact, [contact.pk], support="email")
     summary = summaries[object_id_value(contact.pk)]

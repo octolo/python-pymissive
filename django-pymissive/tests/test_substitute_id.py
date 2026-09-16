@@ -95,7 +95,7 @@ def test_form_accepts_non_uuid_uid():
     form = RetrieveMissiveForm(
         data={
             "provider": "maileva",
-            "missive_type": MissiveType.LRE,
+            "missive_type": MissiveType.REGISTERED_LETTER,
             "uid": "legacy-custom-id",
         }
     )
@@ -188,7 +188,7 @@ def _billing_provider():
     return provider
 
 
-def test_get_billings_lre_user_reference_is_substitute_id_not_external_id():
+def test_get_billings_registered_letter_user_reference_is_substitute_id_not_external_id():
     from pymissive.providers.maileva import MailevaProvider
 
     captured = {}
@@ -208,7 +208,7 @@ def test_get_billings_lre_user_reference_is_substitute_id_not_external_id():
         return FakeResponse()
 
     with patch("pymissive.providers.maileva.requests.request", fake_request):
-        MailevaProvider.get_billings_lre(
+        MailevaProvider.get_billings_registered_letter(
             _billing_provider(),
             id="new-pk",
             substitute_id="753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686",
@@ -218,7 +218,7 @@ def test_get_billings_lre_user_reference_is_substitute_id_not_external_id():
     assert captured["params"]["user_reference"] == "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686"
 
 
-def test_get_billings_lre_user_reference_falls_back_to_missive_pk():
+def test_get_billings_registered_letter_user_reference_falls_back_to_missive_pk():
     from pymissive.providers.maileva import MailevaProvider
 
     captured = {}
@@ -238,7 +238,7 @@ def test_get_billings_lre_user_reference_falls_back_to_missive_pk():
         return FakeResponse()
 
     with patch("pymissive.providers.maileva.requests.request", fake_request):
-        MailevaProvider.get_billings_lre(
+        MailevaProvider.get_billings_registered_letter(
             _billing_provider(),
             id="c880d57c-4dc8-4cd7-90dc-76c33b824ad6",
             substitute_id=None,
@@ -248,7 +248,7 @@ def test_get_billings_lre_user_reference_falls_back_to_missive_pk():
     assert captured["params"]["user_reference"] == "c880d57c-4dc8-4cd7-90dc-76c33b824ad6"
 
 
-def test_get_billings_lre_returns_empty_when_not_invoiced():
+def test_get_billings_registered_letter_returns_empty_when_not_invoiced():
     from pymissive.providers.maileva import MailevaProvider
 
     class FakeResponse:
@@ -263,7 +263,7 @@ def test_get_billings_lre_returns_empty_when_not_invoiced():
     with patch(
         "pymissive.providers.maileva.requests.request", lambda *a, **k: FakeResponse()
     ):
-        billings = MailevaProvider.get_billings_lre(
+        billings = MailevaProvider.get_billings_registered_letter(
             _billing_provider(),
             id="pk",
             substitute_id="753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686",

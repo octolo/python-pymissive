@@ -237,7 +237,7 @@ def test_add_attachments_linked_appends_html_and_text():
 def test_email_snippet_processors_skip_postal_and_subject():
     from django_pymissive.processors.body import add_attachments_linked, add_preview_browser
 
-    missive = _email_missive(missive_type="lre")
+    missive = _email_missive(missive_type="registered_letter")
     assert add_preview_browser("<p>x</p>", missive=missive, field_name="body_rich") == "<p>x</p>"
     assert add_preview_browser("subj", missive=missive, field_name="subject") == "subj"
     assert add_attachments_linked("<p>x</p>", missive=missive, field_name="body_rich") == "<p>x</p>"

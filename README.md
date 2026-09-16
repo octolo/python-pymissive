@@ -10,7 +10,7 @@ Lightweight, framework-agnostic Python library for sending multi-channel missive
 
 - **8 providers**: Brevo, Scaleway, Maileva, SMSPartner, Slack, Teams, Discord, hand delivery
 - **Modular architecture**: works with or without a framework
-- **Channels**: email, SMS, WhatsApp, registered electronic mail (LRE), team messaging
+- **Channels**: email, SMS, WhatsApp, registered electronic mail (registered letter), team messaging
 
 📁 Details: [python-pymissive/README.md](python-pymissive/README.md) | Docs: [python-pymissive/docs/](python-pymissive/docs/)
 

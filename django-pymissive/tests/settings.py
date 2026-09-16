@@ -2,6 +2,7 @@
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 # Add src to Python path for development
@@ -82,6 +83,14 @@ LOCALE_PATHS = [BASE_DIR / "src" / "django_pymissive" / "locale"]
 
 STATIC_URL = "/static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# FileField upload_to is ``pymissive/...``. Without MEDIA_ROOT Django writes
+# that path under cwd and PDFs land in the repo. Keep test media in /tmp;
+# conftest still rebinds it to tmp_path per test.
+_MEDIA_ROOT = Path(tempfile.gettempdir()) / "django-pymissive-test-media"
+_MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+MEDIA_ROOT = str(_MEDIA_ROOT)
+MEDIA_URL = "/media/"
 
 
 ROOT_URLCONF = "tests.urls"
@@ -226,11 +235,8 @@ PYMISSIVE_ALLOWED_ATTACHMENT_EXTENSIONS = {
     "email": [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png", ".tar"],
     "email_marketing": [".pdf", ".jpg", ".jpeg", ".png"],
     "ere": [".pdf"],
-    "lre": [".pdf"],
-    "lre_qualified": [".pdf"],
-    "postal": [".pdf"],
-    "postal_registered": [".pdf"],
-    "postal_signature": [".pdf"],
+    "letter": [".pdf"],
+    "registered_letter": [".pdf"],
     "sms": [],
     "rcs": [],
 }
@@ -263,5 +269,6 @@ PROVIDERKIT_PROVIDERS_CONFIG = {
     },
     "partner": {
         "SMS_API_KEY": os.getenv("PARTNER_SMS_API_KEY"),
+        "WEBHOOK_SECRET": os.getenv("PARTNER_WEBHOOK_SECRET"),
     }
 }

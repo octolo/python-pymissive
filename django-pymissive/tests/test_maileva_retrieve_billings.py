@@ -35,7 +35,7 @@ def test_retrieve_billings_paginates_and_maps_user_reference():
         "items": [
             {
                 "amount": 1.23,
-                "label": "LRE",
+                "label": "registered letter",
                 "user_reference": "sub-1",
                 "sending_id": "send-1",
                 "recipient_id": "rec-ext",

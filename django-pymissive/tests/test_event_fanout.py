@@ -1,6 +1,6 @@
 """Tests for sending-level webhook events fanned out to recipients.
 
-Some providers (e.g. Maileva LRE) emit lifecycle webhooks at the *sending*
+Some providers (e.g. Maileva registered letter) emit lifecycle webhooks at the *sending*
 level, with no recipient attached (``resource_name == "sendings"``). Status is
 derived from the latest event of each *recipient*, so a recipient-less event is
 ignored by ``get_event_counts`` and the missive would stay ``DRAFT``.
@@ -13,8 +13,9 @@ and are never fanned out.
 from __future__ import annotations
 
 import pytest
+from django.db import IntegrityError, transaction
 
-from django_pymissive.events import _process_event
+from django_pymissive.events import _get_occurred_at, _process_event, _upsert_event
 from django_pymissive.models import (
     MissiveEvent,
     MissiveRecipientEmail,
@@ -130,3 +131,88 @@ def test_recipient_scoped_event_attaches_directly():
     assert not MissiveEvent.objects.filter(
         missive=missive, recipient=recipients[1]
     ).exists()
+
+
+def test_missing_occurred_at_does_not_duplicate_on_retry():
+    missive, _recipients = _missive_with_recipients(0)
+
+    _process_event({"event": "archived", "raw": {}}, missive)
+    _process_event({"event": "archived", "raw": {}}, missive)
+
+    assert MissiveEvent.objects.filter(missive=missive, event="archived").count() == 1
+
+
+def test_recipientless_upsert_does_not_match_fanned_out_rows():
+    missive, recipients = _missive_with_recipients(2)
+    event = _event("accepted")
+    _process_event(event, missive)
+
+    _upsert_event(event, missive, None, _get_occurred_at(event["occurred_at"]))
+
+    assert (
+        MissiveEvent.objects.filter(
+            missive=missive, event="accepted", recipient__isnull=True
+        ).count()
+        == 1
+    )
+    assert (
+        MissiveEvent.objects.filter(
+            missive=missive, event="accepted", recipient__in=recipients
+        ).count()
+        == 2
+    )
+
+
+def test_identical_recipientless_event_is_unique():
+    missive, _recipients = _missive_with_recipients(0)
+    occurred = _get_occurred_at("2026-06-12T09:30:16Z")
+    MissiveEvent.objects.create(
+        missive=missive, event="accepted", occurred_at=occurred, reason="first"
+    )
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            MissiveEvent.objects.create(
+                missive=missive, event="accepted", occurred_at=occurred, reason="second"
+            )
+
+
+def test_identical_per_recipient_event_is_unique():
+    missive, recipients = _missive_with_recipients(1)
+    occurred = _get_occurred_at("2026-06-12T09:30:16Z")
+    MissiveEvent.objects.create(
+        missive=missive,
+        recipient=recipients[0],
+        event="delivered",
+        occurred_at=occurred,
+    )
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            MissiveEvent.objects.create(
+                missive=missive,
+                recipient=recipients[0],
+                event="delivered",
+                occurred_at=occurred,
+            )
+
+
+def test_upsert_recovers_from_integrity_error(monkeypatch):
+    missive, _recipients = _missive_with_recipients(0)
+    occurred = _get_occurred_at("2026-06-12T09:30:16Z")
+    MissiveEvent.objects.create(
+        missive=missive, event="accepted", occurred_at=occurred, reason="first"
+    )
+
+    def boom(*args, **kwargs):
+        raise IntegrityError("duplicate")
+
+    monkeypatch.setattr(MissiveEvent.objects, "update_or_create", boom)
+    _upsert_event(
+        {"event": "accepted", "reason": "replay", "raw": {"ok": True}},
+        missive,
+        None,
+        occurred,
+    )
+
+    row = MissiveEvent.objects.get(missive=missive, event="accepted")
+    assert row.reason == "replay"
+    assert row.trace == {"ok": True}

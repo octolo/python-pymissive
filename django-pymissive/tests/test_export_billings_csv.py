@@ -6,12 +6,15 @@ import csv
 from datetime import date, datetime, timezone as dt_timezone
 from decimal import Decimal
 from io import StringIO
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
+
+from django.http import StreamingHttpResponse
 
 from django_pymissive.billings import billings_export_queryset, render_billings_csv
 from django_pymissive.forms.billing import ExportBillingsForm
@@ -25,6 +28,12 @@ from tests.fakeapp.models import Category, Contact
 pytestmark = pytest.mark.django_db
 
 
+def _response_text(response):
+    if getattr(response, "streaming_content", None) is not None:
+        return b"".join(response.streaming_content).decode("utf-8-sig")
+    return response.content.decode("utf-8-sig")
+
+
 def _dt(year, month, day):
     naive = datetime(year, month, day, 12, 0, 0)
     if timezone.is_aware(timezone.now()):
@@ -34,7 +43,7 @@ def _dt(year, month, day):
 
 def _billing(*, created_on, **kwargs):
     missive = kwargs.pop("missive", None) or Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         subject="LRAR",
         external_id="ext-1",
         substitute_id="sub-1",
@@ -43,7 +52,7 @@ def _billing(*, created_on, **kwargs):
         "billing_amount": Decimal("1.2500"),
         "estimate_amount": Decimal("1.0000"),
         "currency": "EUR",
-        "invoice": "LRE",
+        "invoice": "registered letter",
     }
     defaults.update(kwargs)
     billing = MissiveBilling.objects.create(missive=missive, **defaults)
@@ -68,7 +77,7 @@ def test_export_form_accepts_optional_filters():
     form = ExportBillingsForm(
         data={
             "provider": "maileva",
-            "missive_type": MissiveType.LRE,
+            "missive_type": MissiveType.REGISTERED_LETTER,
             "start_date": "2026-01-01",
             "end_date": "2026-01-31",
         }
@@ -92,7 +101,7 @@ def test_queryset_filters_by_created_at():
 
 def test_csv_includes_recipient_and_amounts():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         subject="Facture",
         external_id="ext-csv",
         substitute_id="sub-csv",
@@ -167,9 +176,24 @@ def test_admin_export_csv_post_downloads_file():
     assert response.status_code == 200
     assert response["Content-Type"].startswith("text/csv")
     assert "billings_2026-08-01_2026-08-31.csv" in response["Content-Disposition"]
-    body = response.content.decode("utf-8-sig")
+    body = _response_text(response)
     assert "Billing Amount" in body or "1.2500" in body
     assert "1.2500" in body
+    assert isinstance(response, StreamingHttpResponse)
+
+
+def test_csv_without_extra_fields_does_not_resolve_related_objects():
+    _billing(created_on=(2026, 1, 10))
+    qs = billings_export_queryset(
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 31),
+    )
+    with patch(
+        "django_pymissive.billings.related_objects_by_content_type"
+    ) as related:
+        csv_text = render_billings_csv(qs)
+    related.assert_not_called()
+    assert "1.2500" in csv_text
 
 
 def test_export_form_accepts_related_object_fields():
@@ -201,7 +225,7 @@ def test_export_form_rejects_invalid_fields():
 
 def _billing_with_contact(*, last_name, category_name=None, created_on=(2026, 1, 10)):
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         subject="Facture",
         external_id="ext-contact",
         substitute_id="sub-contact",
@@ -249,7 +273,7 @@ def test_csv_related_object_fields_empty_without_match():
 
 def test_csv_related_object_fields_expand_one_column_per_object():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         subject="Facture",
         external_id="ext-multi",
         substitute_id="sub-multi",
@@ -308,7 +332,7 @@ def test_admin_export_csv_post_includes_related_fields():
         },
     )
     assert response.status_code == 200
-    body = response.content.decode("utf-8-sig")
+    body = _response_text(response)
     rows = list(csv.reader(StringIO(body)))
     assert "contact.last_name.1" in rows[0]
     assert "contact.category.name.1" in rows[0]
@@ -318,7 +342,7 @@ def test_admin_export_csv_post_includes_related_fields():
 
 def test_csv_one_row_pivots_invoice_labels_as_amount_columns():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         subject="Facture",
         external_id="ext-pivot",
         substitute_id="sub-pivot",
@@ -346,20 +370,20 @@ def test_csv_one_row_pivots_invoice_labels_as_amount_columns():
     )
     rows = list(csv.reader(StringIO(csv_text)))
     assert len(rows) == 2
-    assert "LRE" in rows[0]
+    assert "registered letter" in rows[0]
     assert "AR" in rows[0]
     assert "Billing Amount" not in rows[0]
     assert "Invoice" not in rows[0]
-    lre_idx = rows[0].index("LRE")
+    invoice_idx = rows[0].index("registered letter")
     ar_idx = rows[0].index("AR")
-    assert rows[1][lre_idx] == "1.2500"
+    assert rows[1][invoice_idx] == "1.2500"
     assert rows[1][ar_idx] == "0.5000"
     assert str(missive.pk) in rows[1]
 
 
 def test_csv_one_row_sums_duplicate_invoice_labels():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         subject="Facture",
         provider="maileva",
     )
@@ -372,7 +396,7 @@ def test_csv_one_row_sums_duplicate_invoice_labels():
         missive=missive,
         billing_amount=Decimal("0.2500"),
         currency="EUR",
-        invoice="LRE",
+        invoice="registered letter",
     )
     MissiveBilling.objects.filter(pk=extra.pk).update(created_at=_dt(2026, 1, 11))
     csv_text = render_billings_csv(
@@ -384,12 +408,12 @@ def test_csv_one_row_sums_duplicate_invoice_labels():
     )
     rows = list(csv.reader(StringIO(csv_text)))
     assert len(rows) == 2
-    assert rows[1][rows[0].index("LRE")] == "1.2500"
+    assert rows[1][rows[0].index("registered letter")] == "1.2500"
 
 
 def test_admin_export_csv_one_row_checkbox():
     missive = Missive.objects.create(
-        missive_type=MissiveType.LRE,
+        missive_type=MissiveType.REGISTERED_LETTER,
         subject="Facture",
         provider="maileva",
     )
@@ -413,7 +437,7 @@ def test_admin_export_csv_one_row_checkbox():
         },
     )
     assert response.status_code == 200
-    rows = list(csv.reader(StringIO(response.content.decode("utf-8-sig"))))
-    assert "LRE" in rows[0]
-    assert rows[1][rows[0].index("LRE")] == "2.0000"
+    rows = list(csv.reader(StringIO(_response_text(response))))
+    assert "registered letter" in rows[0]
+    assert rows[1][rows[0].index("registered letter")] == "2.0000"
 

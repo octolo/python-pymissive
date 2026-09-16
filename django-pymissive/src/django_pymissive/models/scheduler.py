@@ -27,6 +27,7 @@ from ..managers.scheduler import (
     total_annotation_name,
 )
 from ..models.choices import MissiveStatus, MissiveThreadType, MissiveType
+from ..models.missive import MissiveAlreadySending
 from ..utils import stale_processing_cutoff
 from ..models.mixins import CommentTimestampedModel
 
@@ -436,7 +437,8 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         cutoff = stale_processing_cutoff()
         if cutoff is None:
             return False
-        stamp = self.updated_at or self.send_date or self.created_at
+        stamps = [stamp for stamp in (self.updated_at, self.send_date) if stamp is not None]
+        stamp = max(stamps) if stamps else self.created_at
         return stamp is not None and stamp <= cutoff
 
     def heartbeat(self) -> None:
@@ -495,7 +497,11 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             claimed = (
                 type(self)
                 .objects.filter(pk=self.pk, send_date__isnull=True)
-                .update(send_date=now, campaign_snapshot=snapshot)
+                .update(
+                    send_date=now,
+                    campaign_snapshot=snapshot,
+                    updated_at=now,
+                )
             )
             if not claimed:
                 self.refresh_from_db()
@@ -507,6 +513,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
                     Missive.reclaim_stale_processing(scheduler=self)
                 return
             self.send_date = now
+            self.updated_at = now
             self.campaign_snapshot = snapshot
 
             # When retry_failed is set, re-queue the campaign's failures at claim
@@ -604,21 +611,16 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
     @staticmethod
     def claim_missive(missive) -> bool:
-        """Atomically flip ``missive`` from DRAFT to PROCESSING.
+        """Atomically flip ``missive`` from DRAFT/ERROR to PROCESSING.
 
-        Returns True only if this call won the claim.
+        Returns True only if this call won the claim. Prefer
+        :meth:`Missive.send_missive`, which claims itself — a pre-claim here
+        would make that second ``UPDATE`` lose.
         """
-        claimed = (
-            type(missive)
-            .objects.filter(pk=missive.pk, status=MissiveStatus.DRAFT)
-            .update(status=MissiveStatus.PROCESSING)
-        )
-        if claimed:
-            missive.status = MissiveStatus.PROCESSING
-        return bool(claimed)
+        return missive.claim_for_send()
 
     def iter_claimed_missives(self):
-        """Yield each missive this run successfully claimed (DRAFT→PROCESSING)."""
+        """Yield each missive this run successfully claimed (DRAFT/ERROR→PROCESSING)."""
         for missive in list(self.get_missives()):
             if self.claim_missive(missive):
                 yield missive
@@ -629,21 +631,24 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         missive._record_send_failure(exc)
 
     def process_missives(self, send_fn=None) -> list:
-        """Claim and send each DRAFT missive best-effort.
+        """Send each DRAFT missive best-effort.
 
-        ``send_fn(missive)`` defaults to ``missive.send_missive()``. Failures
-        are recorded on the missive (``ERROR`` status + event); the batch
-        continues. Returns a list of ``(missive_pk, error_message)`` for failed
-        missives.
+        ``send_fn(missive)`` defaults to ``missive.send_missive()``, which
+        claims the row. A lost claim is skipped (another worker owns the
+        send). Other failures are recorded on the missive (``ERROR`` status +
+        event); the batch continues. Returns a list of
+        ``(missive_pk, error_message)`` for failed missives.
         """
         if send_fn is None:
             def send_fn(missive):
                 missive.send_missive()
         failures = []
-        for missive in self.iter_claimed_missives():
+        for missive in list(self.get_missives()):
             self.heartbeat()
             try:
                 send_fn(missive)
+            except MissiveAlreadySending:
+                continue
             except Exception as exc:
                 self._mark_missive_error(missive, exc)
                 failures.append((missive.pk, str(exc)))

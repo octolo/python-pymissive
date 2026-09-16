@@ -51,12 +51,12 @@ def _attachment_command(args: list[str]) -> bool:
         if hasattr(provider, "retrieve_attachments"):
             provider.call_service("retrieve_attachments")
             data = provider.get_service_normalize("retrieve_attachments")
-        elif hasattr(provider, "get_attachments_lre"):
+        elif hasattr(provider, "get_attachments_registered_letter"):
             ext_id = parsed.get("external_id", "")
             if not ext_id:
-                print("Error: --external-id required for LRE attachments", file=sys.stderr)
+                print("Error: --external-id required for postal attachments", file=sys.stderr)
                 return False
-            data = provider.get_attachments_lre(external_id=ext_id)
+            data = provider.get_attachments_registered_letter(external_id=ext_id)
         else:
             print("Error: Provider does not support attachment retrieval", file=sys.stderr)
             return False
@@ -73,11 +73,11 @@ def _attachment_command(args: list[str]) -> bool:
         if not external_id or not document_id:
             print("Error: --external-id and --document-id required for delete", file=sys.stderr)
             return False
-        if hasattr(provider, "delete_attachment_lre"):
-            provider.delete_attachment_lre(external_id=external_id, document_id=document_id)
+        if hasattr(provider, "delete_attachment_registered_letter"):
+            provider.delete_attachment_registered_letter(external_id=external_id, document_id=document_id)
             print("Attachment deleted.")
         else:
-            print("Error: Provider does not support delete_attachment_lre", file=sys.stderr)
+            print("Error: Provider does not support delete_attachment_registered_letter", file=sys.stderr)
             return False
     else:
         print(f"Error: Unknown subcommand '{subcommand}'. Use: retrieve, add, delete", file=sys.stderr)

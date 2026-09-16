@@ -17,7 +17,7 @@ class MissiveConfig(models.Model):
         choices=MissiveType.choices,
         unique=True,
         verbose_name=_("Missive type"),
-        help_text=_("Type of missive (email, sms, postal, etc.)"),
+        help_text=_("Type of missive (email, sms, letter, registered_letter, etc.)"),
     )
     default_provider = ProviderField(
         package_name="pymissive",

@@ -16,7 +16,7 @@ pytestmark = pytest.mark.django_db
 
 def _postal_missive(**kwargs) -> Missive:
     defaults = {
-        "missive_type": MissiveType.LRE,
+        "missive_type": MissiveType.REGISTERED_LETTER,
         "subject": "LRAR",
         "status": MissiveStatus.DRAFT,
         "sender_name": "Octolo",

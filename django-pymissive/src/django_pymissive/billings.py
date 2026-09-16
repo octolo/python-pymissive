@@ -1,6 +1,7 @@
 """Billing handling: fetch via provider.get_billings_{missive_type}, then process each billing."""
 
 import csv
+import logging
 from collections import OrderedDict
 from decimal import Decimal
 from io import StringIO
@@ -10,10 +11,29 @@ from django.db.models.query import QuerySet
 from django.urls import NoReverseMatch, reverse
 from django.utils.translation import gettext as _
 
+from pymissive.config import provider_service_name
+
 from .models.billing import MissiveBilling
 from .models.missive import Missive
 from .retrieve import lookup_missive
 from .utils import get_base_url, get_recipient
+
+logger = logging.getLogger(__name__)
+
+
+def fetch_missive_billings(missive_id):
+    """Fetch provider billings for one missive. Safe to run from a task.
+
+    Failures are logged, never raised: a billing outage must not turn a
+    successful send into ``ERROR`` or fail a webhook.
+    """
+    try:
+        missive = Missive.objects.filter(pk=missive_id).first()
+        if missive is None:
+            return
+        missive.get_billings()
+    except Exception:
+        logger.exception("get_billings failed for missive %s", missive_id)
 
 
 def _process_billing(missive, bill):
@@ -48,16 +68,22 @@ def _lookup_billing_missive(bill) -> Missive | None:
     )
 
 
-def handle_billings(**kwargs) -> None:
-    """Fetch billings from provider and process each one."""
+def load_provider_billings(**kwargs) -> list:
+    """Fetch billing lines from the provider. Empty when unsupported or unpaid."""
     from .models.provider import MissiveProviderModel
 
     provider = kwargs.get("provider")
     provider = MissiveProviderModel.objects.get(name=provider)
-    service_name = f"get_billings_{kwargs.get('missive_type')}"
+    service_name = provider_service_name("get_billings", kwargs.get("missive_type"))
     if not hasattr(provider._provider, service_name):
-        return
+        return []
     billings = provider._provider.call_service_formatted(service_name, **kwargs)
+    return list(billings or [])
+
+
+def handle_billings(**kwargs) -> None:
+    """Fetch billings from provider and process each one."""
+    billings = load_provider_billings(**kwargs)
     if not billings:
         return
     missive = Missive.objects.get_by_external_id(kwargs.get("external_id"))
@@ -75,7 +101,7 @@ def retrieve_billings(*, provider, missive_type, start_date, end_date):
     from .models.provider import MissiveProviderModel
 
     provider_obj = MissiveProviderModel.objects.get(name=str(provider))
-    service = f"retrieve_billings_{missive_type}"
+    service = provider_service_name("retrieve_billings", missive_type)
     if not hasattr(provider_obj._provider, service):
         raise ValidationError(
             _("This provider does not support billings for this missive type.")
@@ -345,54 +371,73 @@ def _pivot_identity_row(group) -> list[str]:
 
 
 def _extra_columns(billings, extra_fields):
+    if not extra_fields:
+        return [{} for _ in billings], {}
     grouped_list = [
         related_objects_by_content_type(billing.missive) if billing.missive else {}
         for billing in billings
     ]
-    widths = extra_field_widths(grouped_list, extra_fields) if extra_fields else {}
+    widths = extra_field_widths(grouped_list, extra_fields)
     return grouped_list, widths
 
 
-def render_billings_csv(queryset, extra_fields=None, one_row=False) -> str:
-    """CSV text (UTF-8) for the given billing queryset."""
-    extra_fields = list(extra_fields or [])
-    billings = list(queryset)
-    if one_row:
-        groups = _group_billings_by_missive(billings)
-        representatives = [group[0] for group in groups]
-        grouped_list, widths = _extra_columns(representatives, extra_fields)
-        labels = _invoice_labels(billings)
-        headers = [
-            _("Created At"),
-            _("Missive"),
-            _("Admin"),
-            _("External ID"),
-            _("Substitute ID"),
-            _("Subject"),
-            _("Provider"),
-            _("Missive type"),
-            _("Recipient"),
-            _("Recipient Email"),
-            _("Phone"),
-            _("Address"),
-            _("Currency"),
-            _("Billed"),
-            *labels,
-            *extra_field_headers(extra_fields, widths),
-        ]
-        buffer = StringIO()
-        writer = csv.writer(buffer)
-        writer.writerow(headers)
-        for group, grouped in zip(groups, grouped_list):
-            amounts = _amounts_by_invoice(group)
-            row = _pivot_identity_row(group)
-            row.extend(_csv_value(amounts.get(label)) for label in labels)
-            if extra_fields:
-                row.extend(extra_field_values(grouped, extra_fields, widths))
-            writer.writerow(row)
-        return buffer.getvalue()
+def _csv_chunk(rows) -> str:
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    for row in rows:
+        writer.writerow(row)
+    return buffer.getvalue()
 
-    grouped_list, widths = _extra_columns(billings, extra_fields)
+
+def _one_row_csv(queryset, extra_fields) -> str:
+    billings = list(queryset)
+    groups = _group_billings_by_missive(billings)
+    representatives = [group[0] for group in groups]
+    grouped_list, widths = _extra_columns(representatives, extra_fields)
+    labels = _invoice_labels(billings)
+    headers = [
+        _("Created At"),
+        _("Missive"),
+        _("Admin"),
+        _("External ID"),
+        _("Substitute ID"),
+        _("Subject"),
+        _("Provider"),
+        _("Missive type"),
+        _("Recipient"),
+        _("Recipient Email"),
+        _("Phone"),
+        _("Address"),
+        _("Currency"),
+        _("Billed"),
+        *labels,
+        *extra_field_headers(extra_fields, widths),
+    ]
+    rows = [headers]
+    for group, grouped in zip(groups, grouped_list):
+        amounts = _amounts_by_invoice(group)
+        row = _pivot_identity_row(group)
+        row.extend(_csv_value(amounts.get(label)) for label in labels)
+        if extra_fields:
+            row.extend(extra_field_values(grouped, extra_fields, widths))
+        rows.append(row)
+    return _csv_chunk(rows)
+
+
+def iter_billings_csv(queryset, extra_fields=None, one_row=False):
+    """Yield UTF-8 CSV chunks. Linear exports stream row by row."""
+    extra_fields = list(extra_fields or [])
+    if one_row:
+        yield _one_row_csv(queryset, extra_fields)
+        return
+
+    if extra_fields:
+        billings = list(queryset)
+        grouped_list, widths = _extra_columns(billings, extra_fields)
+    else:
+        billings = queryset.iterator(chunk_size=500)
+        grouped_list, widths = None, {}
+
     headers = [
         _("Created At"),
         _("Missive"),
@@ -413,12 +458,17 @@ def render_billings_csv(queryset, extra_fields=None, one_row=False) -> str:
         _("Invoice"),
         *extra_field_headers(extra_fields, widths),
     ]
-    buffer = StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(headers)
-    for billing, grouped in zip(billings, grouped_list):
-        row = _billing_base_row(billing)
-        if extra_fields:
+    yield _csv_chunk([headers])
+    if extra_fields:
+        for billing, grouped in zip(billings, grouped_list):
+            row = _billing_base_row(billing)
             row.extend(extra_field_values(grouped, extra_fields, widths))
-        writer.writerow(row)
-    return buffer.getvalue()
+            yield _csv_chunk([row])
+        return
+    for billing in billings:
+        yield _csv_chunk([_billing_base_row(billing)])
+
+
+def render_billings_csv(queryset, extra_fields=None, one_row=False) -> str:
+    """CSV text (UTF-8) for the given billing queryset."""
+    return "".join(iter_billings_csv(queryset, extra_fields=extra_fields, one_row=one_row))

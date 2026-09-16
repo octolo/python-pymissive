@@ -6,6 +6,7 @@ from contextvars import ContextVar
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
+from .models.choices import MissiveEventType
 from .models.event import MissiveEvent
 
 _suppress_event_billings = ContextVar("pymissive_suppress_event_billings", default=False)
@@ -22,19 +23,26 @@ def suppress_event_billings():
 
 
 def trigger_billings(missive):
-    """Fetch billings for ``missive`` when its provider supports them.
+    """Queue a billing fetch for ``missive`` when its provider supports them.
 
-    Callable directly so a caller creating several events for the *same*
-    missive can make this provider call once instead of once per event.
+    Runs through the configured task backend so a provider outage cannot
+    fail ``send_missive`` or a webhook. Callable directly so a caller
+    creating several events for the *same* missive can enqueue once.
     """
-    if missive is not None and missive.can_billings():
-        missive.get_billings()
+    if missive is None or not missive.can_billings():
+        return
+    from .billings import fetch_missive_billings
+    from .task import get_task_backend
+
+    get_task_backend().enqueue(fetch_missive_billings, str(missive.pk))
 
 
 @receiver(post_save, sender=MissiveEvent)
 def trigger_billings_on_event(sender, instance, created, **kwargs):
-    """Call get_billings on the missive after a new event is saved."""
+    """Queue get_billings after a new non-REQUEST event is saved."""
     if not created or _suppress_event_billings.get():
+        return
+    if instance.event == MissiveEventType.REQUEST:
         return
     if instance.missive_id:
         trigger_billings(instance.missive)

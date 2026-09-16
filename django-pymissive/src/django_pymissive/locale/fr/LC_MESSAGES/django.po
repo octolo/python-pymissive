@@ -67,8 +67,8 @@ msgstr "Ce fournisseur ne propose pas la prévisualisation pour ce type de missi
 msgid "Provider preview is only available when the missive is in draft status."
 msgstr "La prévisualisation fournisseur n'est disponible que lorsque la missive est en brouillon."
 
-msgid "Run provider preview? This calls the provider API (e.g. preview_lre on Maileva)."
-msgstr "Lancer la prévisualisation fournisseur ? Cela appelle l'API du fournisseur (ex. preview_lre sur Maileva)."
+msgid "Run provider preview? This calls the provider API (e.g. preview_registered_letter on Maileva)."
+msgstr "Lancer la prévisualisation fournisseur ? Cela appelle l'API du fournisseur (ex. preview_registered_letter sur Maileva)."
 
 msgid "Provider preview result"
 msgstr "Résultat de la prévisualisation fournisseur"
@@ -755,8 +755,8 @@ msgstr "Niveau de priorité"
 msgid "First Document"
 msgstr "Premier document"
 
-msgid "First document content (HTML, converted to PDF for LRE)"
-msgstr "Contenu du premier document (HTML, converti en PDF pour LRE)"
+msgid "First document content (HTML, converted to PDF for postal letters)"
+msgstr "Contenu du premier document (HTML, converti en PDF pour le courrier)"
 
 msgid "Additional context"
 msgstr "Contexte supplémentaire"
@@ -971,16 +971,14 @@ msgstr "Type de missive"
 
 #, fuzzy
 #| msgid "Type of missive (email, SMS, postal, etc.)"
-msgid "Type of missive (email, sms, lre, ere, etc.)"
+msgid "Type of missive (email, sms, letter, registered_letter, ere, etc.)"
 msgstr "Type de missive (e-mail, SMS, courrier, etc.)"
 
 msgid "Subject line (for email, SMS, etc.)"
 msgstr "Ligne d'objet (pour e-mail, SMS, etc.)"
 
-#, fuzzy
-#| msgid "HTML message body (email) or rich content (postal)"
-msgid "HTML message body (email) or rich content (LRE)"
-msgstr "Corps du message HTML (e-mail) ou contenu riche (courrier)"
+msgid "Rich content body (HTML, RTF, …) — email, letter, registered letter, etc."
+msgstr "Corps riche (HTML, RTF, …) — e-mail, lettre, lettre recommandée, etc."
 
 msgid "Body Text"
 msgstr "Texte brut"
@@ -1387,10 +1385,11 @@ msgstr "Signature qualifiée eIDAS"
 msgid "Electronic registered email (ERE)"
 msgstr "E-mail recommandé électronique (ERE)"
 
-#, fuzzy
-#| msgid "Electronic registered letter"
-msgid "Electronic registered letter (LRE)"
-msgstr "Lettre recommandée électronique"
+msgid "Registered letter"
+msgstr "Lettre recommandée"
+
+msgid "Simple letter"
+msgstr "Lettre simple"
 
 msgid "Error occurred while processing"
 msgstr "Erreur lors du traitement"
@@ -1657,11 +1656,6 @@ msgstr "Aperçu : {}"
 
 #~ msgid "SMS: Show and Preview"
 #~ msgstr "SMS : afficher et prévisualiser"
-
-#, fuzzy
-#~| msgid "Show and Preview"
-#~ msgid "LRE: Show and Preview"
-#~ msgstr "Afficher et prévisualiser"
 
 #~ msgid "Show and Preview"
 #~ msgstr "Afficher et prévisualiser"

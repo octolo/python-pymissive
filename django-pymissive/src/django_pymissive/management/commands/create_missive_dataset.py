@@ -1,7 +1,7 @@
 """
 Create a synthetic dataset of missives for testing/development.
 
-Generates batches of DRAFT missives (email, sms, lre by default).
+Generates batches of DRAFT missives (email, sms, registered_letter by default).
 Optionally attaches them to an existing campaign or creates one on the fly.
 
 Usage examples
@@ -27,7 +27,7 @@ from math import ceil
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-DEFAULT_TYPES = ["email", "sms", "lre"]
+DEFAULT_TYPES = ["email", "sms", "registered_letter"]
 
 # Fake data pools
 _FIRST_NAMES = ["Alice", "Bob", "Carol", "David", "Eve", "Frank", "Grace", "Hugo"]
@@ -54,7 +54,8 @@ _PHONE_NUMBERS = [
 # Minimal rich/text bodies per type
 _BODY_RICH = {
     "email": "<p>Hello {name},</p><p>This is a test email. Reference: {ref}.</p>",
-    "lre": "<p>Madame, Monsieur {name},</p><p>Courrier de test. Référence : {ref}.</p>",
+    "registered_letter": "<p>Madame, Monsieur {name},</p><p>Courrier de test. Référence : {ref}.</p>",
+    "letter": "<p>Madame, Monsieur {name},</p><p>Courrier de test. Référence : {ref}.</p>",
 }
 _BODY_TEXT = {
     "sms": "Bonjour {name}, ceci est un SMS de test. Ref: {ref}.",
@@ -247,7 +248,7 @@ class Command(BaseCommand):
                         name=name,
                         phone=_phone(idx),
                     ))
-                elif missive_type in ("lre", "ere", "hand_delivery"):
+                elif missive_type in ("letter", "registered_letter", "ere", "hand_delivery"):
                     recipients.append(MissiveRecipient(
                         missive=m,
                         recipient_type=MissiveRecipientType.RECIPIENT,

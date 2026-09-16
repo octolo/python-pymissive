@@ -192,7 +192,7 @@ def test_retrieve_tracking_numbers_skips_when_unsupported():
 
 def _postal_missive(**kwargs) -> Missive:
     defaults = {
-        "missive_type": MissiveType.LRE,
+        "missive_type": MissiveType.REGISTERED_LETTER,
         "subject": "LRAR",
     }
     defaults.update(kwargs)

@@ -256,9 +256,9 @@ class MissiveBaseAttachment(CommentTimestampedModel):
     def is_publicly_downloadable(self) -> bool:
         """Anonymous GET is for access-link and postal-preview files only.
 
-        ``PROOF`` (LRE delivery evidence, PII) is never public, even when
+        ``PROOF`` (registered letter delivery evidence, PII) is never public, even when
         ``linked`` was left at its default True. Physically attached email
-        files (``linked=False``) are not world-downloadable by id. Postal/LRE
+        files (``linked=False``) are not world-downloadable by id. Postal/registered letter
         preview still needs the letter and annexes without a login; campaign
         annexes render in that same public preview.
         """
