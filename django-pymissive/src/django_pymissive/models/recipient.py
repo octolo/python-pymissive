@@ -41,7 +41,7 @@ class MissiveRecipient(CommentTimestampedModel):
         choices=MissiveRecipientType.choices,
         default=MissiveRecipientType.RECIPIENT,
         verbose_name=_("Recipient Type"),
-        help_text=_("Type of recipient"),
+        help_text=_("Type of recipient (recipient, cc, bcc, notification)"),
     )
     status = models.CharField(
         max_length=20,

@@ -52,6 +52,30 @@ def test_email_context_lists_persisted_recipients():
     assert ctx["sender"]["email"] == "hello@example.com"
     assert ctx["to_recipients"] == [{"name": "Alice", "email": "alice@example.com"}]
     assert ctx["cc_recipients"] == [{"name": "Bob", "email": "bob@example.com"}]
+    assert "notification_recipients" not in ctx
+
+
+def test_email_context_ignores_notification_recipients():
+    missive = _email_missive()
+    MissiveRecipient.objects.create(
+        missive=missive,
+        name="Alice",
+        email="alice@example.com",
+        recipient_type=MissiveRecipientType.RECIPIENT,
+    )
+    MissiveRecipient.objects.create(
+        missive=missive,
+        name="Ops",
+        email="ops@example.com",
+        recipient_type=MissiveRecipientType.NOTIFICATION,
+    )
+
+    ctx = build_preview_context(missive)
+
+    assert ctx["to_recipients"] == [{"name": "Alice", "email": "alice@example.com"}]
+    assert ctx["cc_recipients"] == []
+    assert ctx["bcc_recipients"] == []
+    assert "notification_recipients" not in ctx
 
 
 def test_unsaved_campaign_missive_skips_recipients_without_raising():
@@ -62,6 +86,7 @@ def test_unsaved_campaign_missive_skips_recipients_without_raising():
 
     assert ctx["to_recipients"] == []
     assert ctx["cc_recipients"] == []
+    assert "notification_recipients" not in ctx
 
 
 def test_postal_context_exposes_letter_chrome():

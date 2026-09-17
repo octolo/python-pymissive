@@ -752,6 +752,18 @@ msgstr "Mode de livraison (e-mail, SMS, courrier, etc.)"
 msgid "Priority level"
 msgstr "Niveau de priorité"
 
+msgid "Duplex printing"
+msgstr "Impression recto verso"
+
+msgid "Print the letter on both sides (recto verso)"
+msgstr "Imprimer la lettre en recto verso"
+
+msgid "Color printing"
+msgstr "Impression couleur"
+
+msgid "Print the letter in color"
+msgstr "Imprimer la lettre en couleur"
+
 msgid "First Document"
 msgstr "Premier document"
 
@@ -848,6 +860,9 @@ msgstr "CC"
 
 msgid "BCC"
 msgstr "CCI"
+
+msgid "Notification"
+msgstr "Notification"
 
 msgid "Inbound"
 msgstr "Entrant"
@@ -1104,8 +1119,8 @@ msgstr "Modèle de destinataire"
 msgid "Model of recipient"
 msgstr "Modèle du destinataire"
 
-msgid "Type of recipient"
-msgstr "Type de destinataire"
+msgid "Type of recipient (recipient, cc, bcc, notification)"
+msgstr "Type de destinataire (destinataire, cc, cci, notification)"
 
 msgid "Full name or company name"
 msgstr "Nom complet ou raison sociale"

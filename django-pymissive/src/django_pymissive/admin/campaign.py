@@ -135,6 +135,8 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
                 "acknowledgement_letter",
                 "delivery_mode_letter",
                 "priority_letter",
+                "duplex_printing_letter",
+                "color_printing_letter",
                 "first_document",
             ],
         )

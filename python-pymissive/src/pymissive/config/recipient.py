@@ -54,7 +54,7 @@ REPLY_TO_FIELDS = {
 RECIPIENT_FIELDS = {
     "recipient_type": {
         "label": "Recipient Type",
-        "description": "Recipient Type (recipient, cc, bcc, etc.)",
+        "description": "Recipient Type (recipient, cc, bcc, notification)",
         "format": "str",
     },
     "name": {

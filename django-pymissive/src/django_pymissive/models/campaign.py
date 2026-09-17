@@ -182,6 +182,16 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         verbose_name=_("Priority"),
         help_text=_("Priority level"),
     )
+    duplex_printing_letter = models.BooleanField(
+        default=True,
+        verbose_name=_("Duplex printing"),
+        help_text=_("Print the letter on both sides (recto verso)"),
+    )
+    color_printing_letter = models.BooleanField(
+        default=False,
+        verbose_name=_("Color printing"),
+        help_text=_("Print the letter in color"),
+    )
     first_document = RichTextField(
         blank=True,
         verbose_name=_("First Document"),

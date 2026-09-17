@@ -107,6 +107,66 @@ def test_default_resend_clears_campaign_sourced_fields():
     assert new.body_text is None
 
 
+def _letter_missive(campaign=None, **kw) -> Missive:
+    return Missive.objects.create(
+        campaign=campaign,
+        missive_type=MissiveType.LETTER,
+        status=MissiveStatus.DRAFT,
+        **kw,
+    )
+
+
+def test_letter_printing_defaults_to_duplex_true_color_false():
+    missive = _letter_missive()
+
+    assert missive.duplex_printing is True
+    assert missive.color_printing is False
+    assert missive.get_duplex_printing() is True
+    assert missive.get_color_printing() is False
+    data = missive.get_serialized_data(attachments=False)
+    assert data["duplex_printing"] is True
+    assert data["color_printing"] is False
+
+
+def test_letter_printing_local_false_is_kept():
+    campaign = _campaign(
+        subject="Postal campaign",
+        duplex_printing_letter=True,
+        color_printing_letter=True,
+    )
+    missive = _letter_missive(
+        campaign,
+        duplex_printing=False,
+        color_printing=False,
+    )
+
+    assert missive.get_duplex_printing() is False
+    assert missive.get_color_printing() is False
+    missive.set_locally_ifnull()
+    missive.refresh_from_db()
+    assert missive.duplex_printing is False
+    assert missive.color_printing is False
+
+
+def test_sync_campaign_applies_letter_printing_false():
+    campaign = _campaign(
+        subject="Postal campaign",
+        duplex_printing_letter=False,
+        color_printing_letter=False,
+    )
+    missive = _letter_missive(
+        campaign,
+        duplex_printing=True,
+        color_printing=True,
+    )
+
+    new = missive.duplicate_missive(resend=True, sync_campaign=True)
+    new.refresh_from_db()
+
+    assert new.duplex_printing is False
+    assert new.color_printing is False
+
+
 def test_clear_is_noop_without_campaign():
     missive = _email_missive(
         subject="Keep me",

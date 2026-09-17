@@ -116,6 +116,24 @@ _MAILEVA_PO_BOX_RE = re.compile(
 )
 
 
+def _notification_email(**kwargs: Any) -> str:
+    """Maileva accepts a single progress-alert email.
+
+    An explicit ``notification_email`` string wins (additional_config / callers).
+    Otherwise the first email on ``notification`` recipients is used.
+    """
+    explicit = kwargs.get("notification_email")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    for recipient in kwargs.get("notification") or []:
+        if not isinstance(recipient, dict):
+            continue
+        email = (recipient.get("email") or "").strip()
+        if email:
+            return email
+    return ""
+
+
 def _provider_custom_id(data: dict[str, Any] | None) -> str | None:
     """Maileva ``custom_id`` is the client substitute_id, else the local id."""
     if not data:
@@ -845,8 +863,12 @@ class MailevaProvider(MissiveProviderBase):
         if custom_id:
             data["custom_id"] = custom_id
         data.update({
-            "color_printing": kwargs.get("color_printing", self._get_config_or_env("COLOR_PRINTING", False)),
-            "duplex_printing": kwargs.get("duplex_printing", self._get_config_or_env("DUPLEX_PRINTING", True)),
+            "color_printing": _truthy(
+                kwargs.get("color_printing", self._get_config_or_env("COLOR_PRINTING", False))
+            ),
+            "duplex_printing": _truthy(
+                kwargs.get("duplex_printing", self._get_config_or_env("DUPLEX_PRINTING", True))
+            ),
             "optional_address_sheet": kwargs.get(
                 "optional_address_sheet", self._get_config_or_env("OPTIONAL_ADDRESS_SHEET", False)
             ),
@@ -876,8 +898,9 @@ class MailevaProvider(MissiveProviderBase):
             code = sender_address.get("country_code")
             data["sender_country_code"] = code.upper() if code else code
 
-        if kwargs.get("notification_email"):
-            data["notification_email"] = kwargs.get("notification_email", self._get_config_or_env("NOTIFICATION_EMAIL", ""))
+        notification_email = _notification_email(**kwargs)
+        if notification_email:
+            data["notification_email"] = notification_email
         if kwargs.get("custom_data") is not None:
             data["custom_data"] = kwargs["custom_data"]
         return data

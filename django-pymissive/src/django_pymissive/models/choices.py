@@ -200,6 +200,10 @@ MISSIVE_STYLE_MAP = {
     "history": "secondary",
     "message": "primary",
     "missive": "info",
+    "recipient": "info",
+    "cc": "secondary",
+    "bcc": "secondary",
+    "notification": "primary",
 }
 
 
@@ -279,6 +283,7 @@ class MissiveRecipientType(models.TextChoices):
     RECIPIENT = "recipient", _("Recipient")
     CC = "cc", _("CC")
     BCC = "bcc", _("BCC")
+    NOTIFICATION = "notification", _("Notification")
 
 
 class MessageDirection(models.TextChoices):
