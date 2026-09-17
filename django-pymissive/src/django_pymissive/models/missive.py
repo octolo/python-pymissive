@@ -194,6 +194,16 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         verbose_name=_("Priority"),
         help_text=_("Priority level"),
     )
+    duplex_printing = models.BooleanField(
+        default=True,
+        verbose_name=_("Duplex printing"),
+        help_text=_("Print the letter on both sides (recto verso)"),
+    )
+    color_printing = models.BooleanField(
+        default=False,
+        verbose_name=_("Color printing"),
+        help_text=_("Print the letter in color"),
+    )
     subject = models.TextField(
         verbose_name=_("Subject"),
         help_text=_("Subject line (for email, SMS, etc.)"),
@@ -503,6 +513,8 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "acknowledgement": "acknowledgement_letter",
             "delivery_mode":  "delivery_mode_letter",
             "priority":       "priority_letter",
+            "duplex_printing": "duplex_printing_letter",
+            "color_printing": "color_printing_letter",
             "body_rich":      "first_document",
         },
     }
@@ -521,6 +533,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         "address": [
             "subject", "body_rich", "body_text",
             "acknowledgement", "delivery_mode", "priority",
+            "duplex_printing", "color_printing",
             "sender_name", "sender_address",
             "reply_to_name", "reply_to_address",
         ],
@@ -538,22 +551,33 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                 names.append(field)
         return names + (["additional_context"] if self.campaign_id else [])
 
+    @staticmethod
+    def _value_is_set(value):
+        """True when a local/campaign value should win over the next fallback.
+
+        ``False`` is a real BooleanField choice; only ``None`` and ``""`` are unset.
+        """
+        return value is not None and value != ""
+
     def get_campaign_value(self, field, fallback=None):
         """Campaign value mapped to a missive *field* (via ``_CAMPAIGN_FIELD_MAP``).
 
-        Falsy campaign values (``None``, ``""``, …) resolve to *fallback* so
-        the truthiness semantics match :meth:`get_locally_or_campaign_value`.
+        Unset campaign values (``None``, ``""``) resolve to *fallback* so the
+        semantics match :meth:`get_locally_or_campaign_value`. ``False`` is kept.
         """
         if not self.campaign:
             return fallback
         support = (self.missive_support or "").lower()
         campaign_field = self._CAMPAIGN_FIELD_MAP.get(support, {}).get(field, field)
-        return getattr(self.campaign, campaign_field, None) or fallback
+        value = getattr(self.campaign, campaign_field, None)
+        if self._value_is_set(value):
+            return value
+        return fallback
 
     def get_locally_or_campaign_value(self, field, fallback=None):
         """Local value if set, else campaign field (via ``_CAMPAIGN_FIELD_MAP``)."""
         locally = getattr(self, field, None)
-        if locally:
+        if self._value_is_set(locally):
             return locally
         return self.get_campaign_value(field, fallback)
 
@@ -569,8 +593,10 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             if not hasattr(self, field):
                 continue
             local = getattr(self, field, None)
-            val = self.get_locally_or_campaign_value(field, local)
-            if not local and val:
+            if self._value_is_set(local):
+                continue
+            val = self.get_campaign_value(field)
+            if self._value_is_set(val):
                 setattr(self, field, val)
                 updates.append(field)
 
@@ -596,7 +622,11 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         for attr in fields_to_clear:
             if not hasattr(missive, attr):
                 continue
-            empty = {} if attr == "additional_context" else None
+            if attr == "additional_context":
+                empty = {}
+            else:
+                field = missive._meta.get_field(attr)
+                empty = None if field.null else field.get_default()
             setattr(missive, attr, empty)
         missive.save(update_fields=fields_to_clear)
 
@@ -605,10 +635,10 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
         Unlike :meth:`set_locally_ifnull` (which only fills *null* fields at
         send time), this method overwrites every campaign-sourced field for
-        which the campaign currently holds a (truthy) value, discarding the
-        local override copied during duplication. Fields for which the campaign
-        has no value are left untouched, so the duplicated missive's own value
-        is preserved.
+        which the campaign currently holds a set value (including ``False``),
+        discarding the local override copied during duplication. Fields for
+        which the campaign has no value are left untouched, so the duplicated
+        missive's own value is preserved.
 
         Does nothing when *missive* has no campaign attached.
         """
@@ -679,6 +709,12 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "priority", fallback=MissivePriority.NORMAL
         )
 
+    def get_duplex_printing(self):
+        return self.get_locally_or_campaign_value("duplex_printing", fallback=True)
+
+    def get_color_printing(self):
+        return self.get_locally_or_campaign_value("color_printing", fallback=False)
+
     def get_webhook_url(self):
         scheme = get_default_scheme()
         domain = get_default_domain()
@@ -735,6 +771,10 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         if self.bcc:
             missive_data["bcc"] = [
                 recipient.get_serialized_data() for recipient in self.bcc
+            ]
+        if self.notification:
+            missive_data["notification"] = [
+                recipient.get_serialized_data() for recipient in self.notification
             ]
         missive_data["sender"] = self.get_sender()
         missive_data["reply_to"] = self.get_reply_to()
@@ -1770,7 +1810,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     @property
     def first_recipient(self):
-        """Return the first RECIPIENT (excludes CC/BCC).
+        """Return the first RECIPIENT (excludes CC/BCC/notification).
 
         Uses the ``_first_recipients_cache`` populated by
         :meth:`BaseMissiveManager.first_recipients_prefetch` when iterating a
@@ -1793,6 +1833,13 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     @property
     def bcc(self):
         return self.to_missiverecipient.filter(recipient_type=MissiveRecipientType.BCC)
+
+    @property
+    def notification(self):
+        """Progress-watchers (provider alerts), not delivery targets."""
+        return self.to_missiverecipient.filter(
+            recipient_type=MissiveRecipientType.NOTIFICATION
+        )
 
     #########################################################
     # Clean methods

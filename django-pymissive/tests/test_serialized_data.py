@@ -7,7 +7,9 @@ from unittest.mock import patch
 import pytest
 from django.test import override_settings
 
+from django_pymissive.models.choices import MissiveRecipientType
 from django_pymissive.models.missive import Missive
+from django_pymissive.models.recipient import MissiveRecipient
 from tests.processors import SIGNATURE_TEXT
 
 pytestmark = pytest.mark.django_db
@@ -64,3 +66,36 @@ def test_get_serialized_data_without_attachments_skips_first_document_generation
 
     assert "attachments" not in data
     assert data["body_rich"] == "<p>letter</p>"
+
+
+def test_get_serialized_data_includes_notification_recipients():
+    missive = Missive.objects.create(missive_type="letter", subject="Letter")
+    MissiveRecipient.objects.create(
+        missive=missive,
+        name="Alice",
+        email="alice@example.com",
+        recipient_type=MissiveRecipientType.RECIPIENT,
+    )
+    MissiveRecipient.objects.create(
+        missive=missive,
+        name="Ops",
+        email="ops@example.com",
+        recipient_type=MissiveRecipientType.NOTIFICATION,
+    )
+    MissiveRecipient.objects.create(
+        missive=missive,
+        name="Backup",
+        email="backup@example.com",
+        recipient_type=MissiveRecipientType.NOTIFICATION,
+    )
+
+    with patch.object(missive, "get_webhook_url", return_value="https://example.com/hook"):
+        data = missive.get_serialized_data(attachments=False)
+
+    assert [r["email"] for r in data["recipients"]] == ["alice@example.com"]
+    assert [r["email"] for r in data["notification"]] == [
+        "ops@example.com",
+        "backup@example.com",
+    ]
+    assert "cc" not in data
+    assert "bcc" not in data

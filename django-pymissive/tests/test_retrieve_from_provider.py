@@ -18,6 +18,7 @@ from django_pymissive.models.choices import (
     AcknowledgementLevel,
     MissiveDeliveryMode,
     MissivePriority,
+    MissiveRecipientType,
     MissiveStatus,
     MissiveType,
 )
@@ -305,6 +306,42 @@ def test_refresh_from_provider_updates_fields_and_creates_recipients():
     assert rec.email == "alice@example.com"
     assert rec.external_id == "mv-1"
     assert rec.recipient_support == "email"
+
+
+def test_refresh_from_provider_keeps_notification_recipients():
+    missive = _email_missive(external_id="ext-keep-notif", subject="Old")
+    MissiveRecipient.objects.create(
+        missive=missive,
+        name="Ops",
+        email="ops@example.com",
+        recipient_type=MissiveRecipientType.NOTIFICATION,
+    )
+    MissiveRecipient.objects.create(
+        missive=missive,
+        name="Old recipient",
+        email="old@example.com",
+        recipient_type=MissiveRecipientType.RECIPIENT,
+    )
+    response = {
+        "external_id": "ext-keep-notif",
+        "recipients": [
+            {"name": "Alice", "email": "alice@example.com", "external_id": "mv-1"}
+        ],
+        "events": [],
+    }
+    with patch.object(Missive, "has_service", return_value=True), patch.object(
+        Missive, "call_provider_service", return_value=response
+    ), patch.object(Missive, "handle_events"):
+        retrieve_from_provider(missive=missive)
+
+    emails = {
+        (r.recipient_type, r.email)
+        for r in MissiveRecipient.objects.filter(missive=missive)
+    }
+    assert emails == {
+        (MissiveRecipientType.RECIPIENT, "alice@example.com"),
+        (MissiveRecipientType.NOTIFICATION, "ops@example.com"),
+    }
 
 
 def test_refresh_from_provider_updates_only_fields_the_payload_provides():

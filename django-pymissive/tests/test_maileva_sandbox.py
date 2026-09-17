@@ -187,12 +187,58 @@ def test_registered_letter_explicit_ar_flag_wins():
     assert data.get("acknowledgement_of_receipt") is False
 
 
+def test_letter_payload_sends_printing_flags_as_bools():
+    provider = _PostalProvider()
+    data = provider.get_letter_data(
+        subject="Letter",
+        color_printing=False,
+        duplex_printing=True,
+    )
+    assert data["color_printing"] is False
+    assert data["duplex_printing"] is True
+
+
+def test_registered_letter_payload_sends_printing_flags_as_bools():
+    provider = _PostalProvider()
+    data = provider.get_registered_letter_data(
+        subject="registered letter",
+        color_printing=True,
+        duplex_printing=False,
+    )
+    assert data["color_printing"] is True
+    assert data["duplex_printing"] is False
+
+
 def test_registered_letter_keeps_notification_types_when_email_is_set():
     provider = _PostalProvider()
     data = provider.get_registered_letter_data(
         subject="registered letter", notification_email="ops@example.com"
     )
     assert data["notification_email"] == "ops@example.com"
+    assert data["notification_types"] == ["ALL_MAILEVA", "ALL_LAPOSTE"]
+
+
+def test_letter_payload_uses_first_notification_recipient_email():
+    provider = _PostalProvider()
+    data = provider.get_letter_data(
+        subject="Letter",
+        notification=[
+            {"name": "Ops", "email": "ops@example.com"},
+            {"name": "Backup", "email": "backup@example.com"},
+        ],
+    )
+    assert data["notification_email"] == "ops@example.com"
+    assert "notification_types" not in data
+
+
+def test_registered_letter_explicit_notification_email_wins_over_recipients():
+    provider = _PostalProvider()
+    data = provider.get_registered_letter_data(
+        subject="registered letter",
+        notification_email="override@example.com",
+        notification=[{"email": "ops@example.com"}],
+    )
+    assert data["notification_email"] == "override@example.com"
     assert data["notification_types"] == ["ALL_MAILEVA", "ALL_LAPOSTE"]
 
 

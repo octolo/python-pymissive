@@ -260,7 +260,9 @@ def _replace_retrieve_recipients(missive: Missive, response: dict) -> None:
 
     Caller must have checked that the payload actually lists recipients.
     """
-    missive.to_missiverecipient.all().delete()
+    missive.to_missiverecipient.exclude(
+        recipient_type=MissiveRecipientType.NOTIFICATION
+    ).delete()
     for rec in _recipients_from_response(response):
         if not isinstance(rec, dict):
             continue
