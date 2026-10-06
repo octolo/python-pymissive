@@ -99,3 +99,49 @@ def test_get_serialized_data_includes_notification_recipients():
     ]
     assert "cc" not in data
     assert "bcc" not in data
+
+
+def test_duplicate_missive_copies_tags():
+    source = Missive.objects.create(
+        missive_type="email",
+        subject="Hello",
+        tags=["welcome", "invoice"],
+    )
+    clone = source.duplicate_missive()
+    clone.refresh_from_db()
+    assert clone.pk != source.pk
+    assert clone.tags == ["welcome", "invoice"]
+
+
+def test_duplicate_action_saves_posted_tags_first():
+    from django.contrib import admin as django_admin
+    from django.contrib.messages.storage.fallback import FallbackStorage
+    from django.test import RequestFactory
+
+    source = Missive.objects.create(
+        missive_type="email",
+        subject="Hello",
+        tags=[],
+    )
+    request = RequestFactory().post("/", {"tags": '["welcome", "invoice"]'})
+    request.session = {}
+    request._messages = FallbackStorage(request)
+    missive_admin = django_admin.site._registry[Missive]
+    missive_admin.handle_duplicate_missive(request, source.pk)
+
+    source.refresh_from_db()
+    clone = Missive.objects.exclude(pk=source.pk).get()
+    assert source.tags == ["welcome", "invoice"]
+    assert clone.tags == ["welcome", "invoice"]
+
+
+def test_serialized_tags_are_kept_for_the_provider():
+    missive = Missive.objects.create(
+        missive_type="email",
+        subject="Hello",
+        tags=["welcome", "invoice"],
+        additional_config={"tags": ["config"]},
+    )
+    with patch.object(missive, "get_webhook_url", return_value=None):
+        data = missive.get_serialized_data(attachments=False)
+    assert data["tags"] == ["welcome", "invoice"]

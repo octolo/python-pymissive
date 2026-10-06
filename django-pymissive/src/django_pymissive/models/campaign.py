@@ -26,6 +26,7 @@ from ..models.choices import (
     sent_missive_q,
 )
 from django_geoaddress.fields import GeoaddressField
+from namedid import NamedIDField
 from phonenumber_field.modelfields import PhoneNumberField
 from ..fields import RichTextField
 from ..utils import (
@@ -51,6 +52,13 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         default=uuid.uuid4,
         editable=False,
         verbose_name=_("ID"),
+    )
+    named_id = NamedIDField(
+        source_fields=["subject"],
+        generator="django_pymissive.generators.campaign_named_id",
+        max_length=255,
+        verbose_name=_("Named ID"),
+        help_text=_("Unique identifier generated from the campaign subject"),
     )
     subject = models.TextField(
         verbose_name=_("Subject"),
@@ -184,13 +192,23 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     )
     duplex_printing_letter = models.BooleanField(
         default=True,
-        verbose_name=_("Duplex printing"),
-        help_text=_("Print the letter on both sides (recto verso)"),
+        verbose_name=_("Duplex printing (letter)"),
+        help_text=_("Print the simple letter on both sides (recto verso)"),
     )
     color_printing_letter = models.BooleanField(
         default=False,
-        verbose_name=_("Color printing"),
-        help_text=_("Print the letter in color"),
+        verbose_name=_("Color printing (letter)"),
+        help_text=_("Print the simple letter in color"),
+    )
+    duplex_printing_registered_letter = models.BooleanField(
+        default=True,
+        verbose_name=_("Duplex printing (registered letter)"),
+        help_text=_("Print the registered letter on both sides (recto verso)"),
+    )
+    color_printing_registered_letter = models.BooleanField(
+        default=False,
+        verbose_name=_("Color printing (registered letter)"),
+        help_text=_("Print the registered letter in color"),
     )
     first_document = RichTextField(
         blank=True,

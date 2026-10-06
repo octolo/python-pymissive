@@ -40,6 +40,11 @@ FIELDS = {
         "description": "Normalized events for handle_events()",
         "format": "list",
     },
+    "tags": {
+        "label": "Tags",
+        "description": "Tags",
+        "format": "list",
+    },
     "start_date": {
         "label": "Start date",
         "description": "Start date for bulk event retrieval",

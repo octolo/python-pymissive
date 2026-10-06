@@ -4,6 +4,7 @@ import json
 import mimetypes
 
 from django.contrib import admin
+from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.template.response import TemplateResponse
 from django.urls import reverse
@@ -471,7 +472,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         )
         self.add_to_fieldset(
             _("Content"),
-            ["subject", "body_rich", "body_text", "duplex_printing", "color_printing"],
+            ["subject", "tags", "body_rich", "body_text", "duplex_printing", "color_printing"],
         )
         self.add_to_fieldset(
             _("Tracking"),
@@ -792,9 +793,35 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     def has_duplicate_missive_permission(self, request, obj=None):
         return bool(self.has_action_rights(request, obj) and obj and obj.pk)
 
+    def _tags_from_post(self, request):
+        """Tags typed on the change form, which Duplicate submits unsaved."""
+        if "tags" not in request.POST:
+            return None
+        raw = request.POST.get("tags")
+        if raw is None or str(raw).strip() == "":
+            return None
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValidationError(_("Tags must be a JSON list.")) from exc
+        if isinstance(value, str):
+            text = value.strip()
+            return [text] if text else []
+        if not isinstance(value, list):
+            raise ValidationError(_("Tags must be a JSON list."))
+        return value
+
     @admin_boost_action("duplicate_missive", _("Duplicate"))
     def handle_duplicate_missive(self, request, object_id):
         missive = self.get_action_object(request, object_id)
+        try:
+            tags = self._tags_from_post(request)
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0])
+            return self.redirect_to_change(missive)
+        if tags is not None:
+            missive.tags = tags
+            missive.save(update_fields=["tags"])
         new_missive = missive.duplicate_missive()
         messages.success(request, _("Missive duplicated successfully."))
         return self.redirect_to_change(new_missive)

@@ -277,6 +277,43 @@ class BrevoAPIProvider(MissiveProviderBase):
                 return None
         return None
 
+    def _tags(self, value) -> list[str]:
+        """Normalize tags to Brevo's list (max 10, non-empty strings).
+
+        Accepts a list, a single string, or the JSON-encoded array Brevo
+        sometimes returns on webhooks (``'["welcome"]'``).
+        """
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("["):
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
+                    parsed = json.loads(text)
+                    if isinstance(parsed, list):
+                        return self._tags(parsed)
+            return [text] if text else []
+        if not isinstance(value, (list, tuple)):
+            return []
+        tags: list[str] = []
+        for item in value:
+            for tag in self._tags(item):
+                if tag not in tags:
+                    tags.append(tag)
+                if len(tags) == 10:
+                    return tags
+        return tags
+
+    def get_normalize_tags(self, data: dict[str, Any]) -> list[str] | None:
+        """Return tags as a list. Brevo events expose a single ``tag`` string."""
+        if not isinstance(data, dict) or ("tags" not in data and "tag" not in data):
+            return None
+        raw = data.get("tags")
+        if raw in (None, ""):
+            raw = data.get("tag")
+        tags = self._tags(raw)
+        return tags or None
+
     def _response_to_dict(self, response) -> dict[str, Any]:
         """Convert v4 Pydantic response to dict."""
         if isinstance(response, dict):
@@ -398,6 +435,9 @@ class BrevoAPIProvider(MissiveProviderBase):
             send_kwargs["bcc"] = [SendTransacEmailRequestBccItem(email=r["email"], name=r.get("name", "")) for r in bcc]
         if attachments:
             send_kwargs["attachment"] = attachments
+        tags = self._tags(kwargs.get("tags"))
+        if tags:
+            send_kwargs["tags"] = tags
 
         if is_disable_send():
             return self._disabled_send_response("send_email", external_id=kwargs.get("external_id"))
@@ -431,6 +471,7 @@ class BrevoAPIProvider(MissiveProviderBase):
                     self._as_report_date(chunk_start),
                     self._as_report_date(chunk_end),
                     message_id=external_id,
+                    tags=kwargs.get("tags"),
                 )
             )
         return {"message_id": external_id, "events": events}
@@ -445,10 +486,11 @@ class BrevoAPIProvider(MissiveProviderBase):
         """
         missive_type = str(kwargs.get("missive_type") or "email").lower()
         start, end = self._report_date_range(start_date, end_date)
+        tags = kwargs.get("tags")
         if missive_type in ("sms", "rcs"):
-            events = self._retrieve_sms_event_report(start, end)
+            events = self._retrieve_sms_event_report(start, end, tags=tags)
         elif missive_type in ("email", "email_marketing", "ere"):
-            events = self._retrieve_email_event_report(start, end)
+            events = self._retrieve_email_event_report(start, end, tags=tags)
         else:
             raise NotImplementedError(
                 f"retrieve_events is not implemented for {missive_type}"
@@ -460,6 +502,7 @@ class BrevoAPIProvider(MissiveProviderBase):
         start_date: str,
         end_date: str,
         message_id: str | None = None,
+        tags=None,
     ) -> list[dict[str, Any]]:
         client = self._get_email_client()
         limit = 2500
@@ -475,6 +518,9 @@ class BrevoAPIProvider(MissiveProviderBase):
             }
             if message_id:
                 params["message_id"] = message_id
+            tag_list = self._tags(tags)
+            if tag_list:
+                params["tags"] = json.dumps(tag_list)
             response = client.transactional_emails.get_email_event_report(**params)
             page = getattr(response, "events", None)
             if page is None and isinstance(response, dict):
@@ -486,18 +532,24 @@ class BrevoAPIProvider(MissiveProviderBase):
             offset += limit
         return events
 
-    def _retrieve_sms_event_report(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
+    def _retrieve_sms_event_report(
+        self, start_date: str, end_date: str, tags=None
+    ) -> list[dict[str, Any]]:
         limit = 100
         offset = 0
         events: list[dict[str, Any]] = []
+        tag_list = self._tags(tags)
         while True:
-            params = urlencode({
+            query = {
                 "startDate": start_date,
                 "endDate": end_date,
                 "limit": limit,
                 "offset": offset,
                 "sort": "desc",
-            })
+            }
+            if tag_list:
+                query["tags"] = json.dumps(tag_list)
+            params = urlencode(query)
             req = Request(
                 f"https://api.brevo.com/v3/transactionalSMS/statistics/events?{params}",
                 headers={"api-key": self._sms_api_key, "Accept": "application/json"},
@@ -610,10 +662,14 @@ class BrevoAPIProvider(MissiveProviderBase):
         recipient = str(kwargs["recipients"][0].get("phone", ""))
         sender_name = sender.get("phone") or sender.get("name") or "Missive"
         content = kwargs.get("body_text", "")
+        payload = {"sender": sender_name, "recipient": recipient, "content": content}
+        tags = self._tags(kwargs.get("tags"))
+        if tags:
+            payload["tag"] = tags
 
         if is_disable_send():
             return self._disabled_send_response("send_sms", external_id=kwargs.get("external_id"))
-        body = _json.dumps({"sender": sender_name, "recipient": recipient, "content": content}).encode("utf-8")
+        body = _json.dumps(payload).encode("utf-8")
         req = Request(
             "https://api.brevo.com/v3/transactionalSMS/sms",
             data=body,
