@@ -38,9 +38,10 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         "last_send_date_display",
         "last_ended_at_display",
     ]
-    search_fields = ["subject"]
+    search_fields = ["subject", "named_id"]
     ordering = ["-id"]
     readonly_fields = [
+        "named_id",
         "created_at",
         "updated_at",
     ]
@@ -97,7 +98,7 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         (
             None,
             {
-                "fields": ("subject", "description"),
+                "fields": ("named_id", "subject", "description"),
             },
         ),
     ]
@@ -137,6 +138,8 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
                 "priority_letter",
                 "duplex_printing_letter",
                 "color_printing_letter",
+                "duplex_printing_registered_letter",
+                "color_printing_registered_letter",
                 "first_document",
             ],
         )

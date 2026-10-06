@@ -294,3 +294,50 @@ def test_recipient_registered_letter_custom_id_falls_back_to_id():
     )
     assert data["custom_id"] == "uuid-or-pk"
 
+
+_RECIPIENT = {
+    "id": "local-pk",
+    "name": "Alice",
+    "address": {
+        "address_line1": "1 rue",
+        "postal_code": "75001",
+        "city": "Paris",
+        "country_code": "FR",
+    },
+}
+
+
+def test_registered_letter_recipient_tags_become_custom_fields():
+    provider = MailevaProvider.__new__(MailevaProvider)
+    data = provider.get_recipient_registered_letter_data(
+        {**_RECIPIENT, "tags": [" relance ", "", "relance", "vip"]}
+    )
+    assert data["custom_fields"] == {"relance": "relance", "vip": "vip"}
+
+
+def test_registered_letter_recipient_uses_sending_tags_when_recipient_has_none():
+    provider = MailevaProvider.__new__(MailevaProvider)
+    data = provider.get_recipient_registered_letter_data(
+        _RECIPIENT, tags=["campagne"]
+    )
+    assert data["custom_fields"] == {"campagne": "campagne"}
+
+
+def test_letter_recipient_does_not_send_custom_fields():
+    provider = MailevaProvider.__new__(MailevaProvider)
+    data = provider.get_recipient_letter_data({**_RECIPIENT, "tags": ["relance"]})
+    assert "custom_fields" not in data
+
+
+def test_registered_letter_recipient_ref_reads_tags_back():
+    provider = MailevaProvider.__new__(MailevaProvider)
+    ref = provider._serialize_recipient_ref(
+        _RECIPIENT,
+        {
+            "id": "maileva-rec",
+            "custom_id": "local-pk",
+            "custom_fields": {"relance": "relance", "client": "42"},
+        },
+    )
+    assert ref["tags"] == ["relance"]
+

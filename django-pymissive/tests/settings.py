@@ -178,6 +178,9 @@ PYMISSIVE_DEFAULT_SENDER = {
     },
 }
 
+# Optional campaign named_id generator. Unset: django-namedid's generate_namedid.
+# Dotted path or callable (instance, source_fields, separator) -> str.
+PYMISSIVE_CAMPAIGN_NAMED_ID_GENERATOR = "tests.generators.test_campaign_named_id"
 # PYMISSIVE_SAVE_UNTREATED_EVENTS = True  # Save events that could not be processed (default: False)
 PYMISSIVE_ATTACHMENT_PATH_MAX_LENGTH = 4000
 # Dry-run: full local pipeline, no provider calls (prepare + send).

@@ -16,6 +16,7 @@ These exercise the duplication layer directly (no provider call / no send).
 from __future__ import annotations
 
 import pytest
+from django.test import override_settings
 
 from django_pymissive.models.campaign import MissiveCampaign
 from django_pymissive.models.choices import MissiveStatus, MissiveType
@@ -146,6 +147,54 @@ def test_letter_printing_local_false_is_kept():
     missive.refresh_from_db()
     assert missive.duplex_printing is False
     assert missive.color_printing is False
+
+
+def test_registered_letter_printing_uses_registered_campaign_fields():
+    campaign = _campaign(
+        subject="Postal campaign",
+        duplex_printing_letter=True,
+        color_printing_letter=False,
+        duplex_printing_registered_letter=False,
+        color_printing_registered_letter=True,
+    )
+    missive = Missive.objects.create(
+        campaign=campaign,
+        missive_type=MissiveType.REGISTERED_LETTER,
+        status=MissiveStatus.DRAFT,
+        duplex_printing=True,
+        color_printing=False,
+    )
+
+    new = missive.duplicate_missive(resend=True, sync_campaign=True)
+    new.refresh_from_db()
+
+    assert new.duplex_printing is False
+    assert new.color_printing is True
+    letter = _letter_missive(
+        campaign,
+        duplex_printing=True,
+        color_printing=True,
+    )
+    letter_new = letter.duplicate_missive(resend=True, sync_campaign=True)
+    letter_new.refresh_from_db()
+    assert letter_new.duplex_printing is True
+    assert letter_new.color_printing is False
+
+
+def test_campaign_named_id_is_generated_from_subject():
+    campaign = _campaign(subject="Summer Campaign")
+    campaign.refresh_from_db()
+    assert campaign.named_id == "summer-campaign"
+
+
+def test_campaign_named_id_uses_settings_generator():
+    with override_settings(
+        PYMISSIVE_CAMPAIGN_NAMED_ID_GENERATOR="tests.generators.test_campaign_named_id"
+    ):
+        first = _campaign(subject="Summer Campaign")
+        second = _campaign(subject="Summer Campaign")
+    assert first.named_id == "test-summer-campaign"
+    assert second.named_id == "test-summer-campaign-1"
 
 
 def test_sync_campaign_applies_letter_printing_false():

@@ -34,7 +34,7 @@ from ..managers import (
     MissiveHistoryManager,
 )
 from ..models.mixins import CommentTimestampedModel, ConfigMixin, ProcessorsMixin
-from ..fields import RichTextField
+from ..fields import JSONField, RichTextField
 from ..dispatch_signals import (
     missive_post_duplicate,
     missive_post_send,
@@ -209,6 +209,12 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         help_text=_("Subject line (for email, SMS, etc.)"),
         blank=True,
         null=True,
+    )
+    tags = JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("Tags"),
+        help_text=_("Tags sent to the provider"),
     )
 
     body_rich = RichTextField(
@@ -517,6 +523,14 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "color_printing": "color_printing_letter",
             "body_rich":      "first_document",
         },
+        "letter": {
+            "duplex_printing": "duplex_printing_letter",
+            "color_printing": "color_printing_letter",
+        },
+        "registered_letter": {
+            "duplex_printing": "duplex_printing_registered_letter",
+            "color_printing": "color_printing_registered_letter",
+        },
     }
 
     _CAMPAIGN_SOURCED_FIELDS: dict[str, list[str]] = {
@@ -559,6 +573,15 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """
         return value is not None and value != ""
 
+    def _campaign_field_name(self, field: str) -> str:
+        """Campaign attribute for a missive *field* (type map wins over support)."""
+        mtype = (self.missive_type or "").lower()
+        type_map = self._CAMPAIGN_FIELD_MAP.get(mtype, {})
+        if field in type_map:
+            return type_map[field]
+        support = (self.missive_support or "").lower()
+        return self._CAMPAIGN_FIELD_MAP.get(support, {}).get(field, field)
+
     def get_campaign_value(self, field, fallback=None):
         """Campaign value mapped to a missive *field* (via ``_CAMPAIGN_FIELD_MAP``).
 
@@ -567,8 +590,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """
         if not self.campaign:
             return fallback
-        support = (self.missive_support or "").lower()
-        campaign_field = self._CAMPAIGN_FIELD_MAP.get(support, {}).get(field, field)
+        campaign_field = self._campaign_field_name(field)
         value = getattr(self.campaign, campaign_field, None)
         if self._value_is_set(value):
             return value
@@ -781,8 +803,27 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         if attachments:
             missive_data["attachments"] = self.get_serialized_attachments(linked=False)
         missive_data["webhook_url"] = self.get_webhook_url()
-        missive_data.update(self.additional_config)
+        missive_data.update(self.additional_config or {})
+        tags = self.resolved_tags()
+        if tags:
+            missive_data["tags"] = tags
         return missive_data
+
+    def resolved_tags(self) -> list:
+        """Tags sent to the provider: the missive list, or the campaign list."""
+        tags = self._tag_list(self.tags)
+        if tags or not self.campaign_id:
+            return tags
+        return self._tag_list(getattr(self.campaign, "tags", None))
+
+    @staticmethod
+    def _tag_list(value) -> list:
+        if isinstance(value, str):
+            text = value.strip()
+            return [text] if text else []
+        if isinstance(value, (list, tuple)):
+            return [item for item in value if str(item).strip()]
+        return []
 
     def call_provider_service(self, service: str, **kwargs):
         """Call a provider service."""

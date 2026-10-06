@@ -752,17 +752,56 @@ msgstr "Mode de livraison (e-mail, SMS, courrier, etc.)"
 msgid "Priority level"
 msgstr "Niveau de priorité"
 
+msgid "Tags"
+msgstr "Tags"
+
+msgid "Tags sent to the provider"
+msgstr "Tags envoyés au fournisseur"
+
+msgid "Tags must be a JSON list."
+msgstr "Les tags doivent être une liste JSON."
+
+msgid "Named ID"
+msgstr "Identifiant nommé"
+
+msgid "Unique identifier generated from the campaign subject"
+msgstr "Identifiant unique généré à partir du sujet de la campagne"
+
 msgid "Duplex printing"
 msgstr "Impression recto verso"
+
+msgid "Duplex printing (letter)"
+msgstr "Impression recto verso (lettre)"
 
 msgid "Print the letter on both sides (recto verso)"
 msgstr "Imprimer la lettre en recto verso"
 
+msgid "Print the simple letter on both sides (recto verso)"
+msgstr "Imprimer la lettre simple en recto verso"
+
 msgid "Color printing"
 msgstr "Impression couleur"
 
+msgid "Color printing (letter)"
+msgstr "Impression couleur (lettre)"
+
 msgid "Print the letter in color"
 msgstr "Imprimer la lettre en couleur"
+
+msgid "Print the simple letter in color"
+msgstr "Imprimer la lettre simple en couleur"
+
+msgid "Duplex printing (registered letter)"
+msgstr "Impression recto verso (lettre recommandée)"
+
+msgid "Print the registered letter on both sides (recto verso)"
+msgstr "Imprimer la lettre recommandée en recto verso"
+
+msgid "Color printing (registered letter)"
+msgstr "Impression couleur (lettre recommandée)"
+
+msgid "Print the registered letter in color"
+msgstr "Imprimer la lettre recommandée en couleur"
 
 msgid "First Document"
 msgstr "Premier document"
