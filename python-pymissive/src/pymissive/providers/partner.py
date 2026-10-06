@@ -99,32 +99,6 @@ class PartnerProvider(MissiveProviderBase):
         timestamp = data.get("date") or data.get("occurred_at") or datetime.now().timestamp()
         return datetime.fromtimestamp(int(timestamp)).isoformat()
 
-    def _sms_partner_tag(self, value: Any) -> str | None:
-        """One SMS Partner tag: lowercase, no spaces, 20 characters max.
-
-        The service field is a list. SMS Partner accepts a single ``tag``.
-        """
-        if value is None or value == "":
-            return None
-        if isinstance(value, (list, tuple)):
-            for item in value:
-                tag = self._sms_partner_tag(item)
-                if tag:
-                    return tag
-            return None
-        text = "".join(str(value).split()).lower()[:20]
-        return text or None
-
-    def get_normalize_tags(self, data: dict[str, Any]) -> list[str] | None:
-        """Read the single SMS Partner ``tag`` back as a one-item list."""
-        if not isinstance(data, dict):
-            return None
-        raw = data.get("tags")
-        if raw in (None, "", []):
-            raw = data.get("tag")
-        tag = self._sms_partner_tag(raw)
-        return [tag] if tag else None
-
     def get_normalize_invoice(self, data: dict[str, Any]) -> str:
         for key in ["nb_sms", "nb_emails", "nb_voice", "nbSms", "nbEmails", "nbVoice"]:
             if key in data:
@@ -164,12 +138,6 @@ class PartnerProvider(MissiveProviderBase):
             "urlDlr": kwargs.get("webhook_url"),
             "urlResponse": kwargs.get("webhook_url"),
         }
-        source = kwargs.get("tags")
-        if source in (None, "", []):
-            source = kwargs.get("tag")
-        tag = self._sms_partner_tag(source)
-        if tag:
-            data["tag"] = tag
         if is_disable_send():
             return self._disabled_send_response("send_sms", external_id=kwargs.get("external_id"))
         response = self._request(self._api_base_sms + "/send", "POST", data)

@@ -121,23 +121,6 @@ def test_partner_send_sms_posts_to_smspartner():
     assert request.call_args[0][0].endswith("/send")
     assert request.call_args[0][1] == "POST"
     assert result["messageId"] == "m1"
-
-
-def test_partner_send_sms_sends_one_lowercase_tag():
-    provider = _provider(PartnerProvider, SMS_API_KEY="k")
-    with patch.object(provider, "_request", return_value={"success": True}) as request:
-        provider.send_sms(
-            body_text="hi",
-            recipients=[{"phone": "+33600000000"}],
-            tags=["Relance Client VIP Extra", "other"],
-        )
-    assert request.call_args[0][2]["tag"] == "relanceclientvipextr"
-
-
-def test_partner_send_sms_omits_empty_tag():
-    provider = _provider(PartnerProvider, SMS_API_KEY="k")
-    with patch.object(provider, "_request", return_value={"success": True}) as request:
-        provider.send_sms(body_text="hi", recipients=[{"phone": "+33600000000"}])
     assert "tag" not in request.call_args[0][2]
 
 
