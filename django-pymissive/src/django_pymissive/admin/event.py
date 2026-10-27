@@ -6,7 +6,7 @@ from django.urls import reverse
 from django.utils.formats import date_format
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
-from django_boosted import AdminBoostFormat, AdminBoostModel, admin_boost_view
+from django_boosted import AdminBoostFormat, AdminBoostModel, admin_boost_view  # type: ignore[import-untyped]
 from urllib.parse import unquote
 
 from django.contrib import messages
@@ -15,6 +15,7 @@ from ..events import delay_retrieve_events, retrieve_events as do_retrieve_event
 from ..forms.event import RetrieveEventsForm
 from ..models.event import MissiveEvent
 from .permissions import ActionRightsMixin
+
 
 class UntreatedListFilter(admin.SimpleListFilter):
     """Custom filter for untreated events."""
@@ -49,6 +50,7 @@ class MissiveEventInline(admin.TabularInline, AdminBoostFormat):
     show_change_link = False
     can_delete = False
 
+    @admin.display(description=_("Event"))
     def event_display(self, obj):
         if not obj or not obj.pk:
             return "-"
@@ -58,12 +60,12 @@ class MissiveEventInline(admin.TabularInline, AdminBoostFormat):
         reason = (obj.reason or obj.get_reason() or "").strip()
         return self.format_with_help_text(event_html, reason or None)
 
-    event_display.short_description = _("Event")
-
+    @admin.display(description=_("Recipient"))
     def recipient_display(self, obj):
         if not obj:
             return "-"
         recipient = obj.recipient
+        name: str
         if recipient and recipient.pk:
             url = reverse(
                 "admin:django_pymissive_missiverecipient_change",
@@ -78,8 +80,6 @@ class MissiveEventInline(admin.TabularInline, AdminBoostFormat):
             name = "—"
         when = date_format(obj.occurred_at, "DATETIME_FORMAT") if obj.occurred_at else None
         return self.format_with_help_text(name, when)
-
-    recipient_display.short_description = _("Recipient")
 
     def has_add_permission(self, request, obj=None):
         return False
@@ -150,7 +150,12 @@ class MissiveEventAdmin(ActionRightsMixin, AdminBoostModel):
         """Configure fieldsets for change view."""
         self.add_to_fieldset(
             _("Details"),
-            ["occurred_at", "trace", "client_initiated", "metadata",],
+            [
+                "occurred_at",
+                "trace",
+                "client_initiated",
+                "metadata",
+            ],
         )
         self.add_to_fieldset(_("Comment/Timestamps"), ["comment", "created_at", "updated_at"])
 
@@ -161,9 +166,7 @@ class MissiveEventAdmin(ActionRightsMixin, AdminBoostModel):
         return False
 
     def has_replay_permission(self, request, obj=None):
-        return bool(
-            self.has_action_rights(request, obj) and obj and obj.pk and obj.can_replay()
-        )
+        return bool(self.has_action_rights(request, obj) and obj and obj.pk and obj.can_replay())
 
     @admin.display(ordering="missive__provider", description=_("Provider"))
     def missive_provider(self, obj):

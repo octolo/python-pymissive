@@ -1,3 +1,6 @@
+from typing import Any
+
+
 class AttachmentsMixin:
     """Mixin for attachments.
 
@@ -6,6 +9,8 @@ class AttachmentsMixin:
     cooperative ``__init__`` on this mixin would never run.
     """
 
-    def get_attachments(self):
+    attachments: list[Any]
+
+    def get_attachments(self) -> list[Any]:
         """Get the attachments."""
         return self.attachments

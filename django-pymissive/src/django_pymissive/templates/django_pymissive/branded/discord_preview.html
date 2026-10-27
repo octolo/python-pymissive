@@ -1,0 +1,11 @@
+{% extends "django_pymissive/base_preview.html" %}
+{% load static %}
+
+{% block preview_stylesheet %}
+<link rel="stylesheet" href="{% static 'django_pymissive/css/branded_preview.css' %}">
+<link rel="stylesheet" href="{% static 'django_pymissive/css/branded/discord_preview.css' %}">
+{% endblock %}
+
+{% block preview_content %}
+{% include "django_pymissive/branded/_message.html" with brand="discord" %}
+{% endblock %}

@@ -31,12 +31,8 @@ def test_set_status_keeps_cancelled_even_without_events():
 
 def test_set_status_does_not_leave_cancelled_for_later_delivery_events():
     missive = _missive(status=MissiveStatus.CANCELLED)
-    recipient = MissiveRecipientEmail.objects.create(
-        missive=missive, email="ok@example.com"
-    )
-    MissiveEvent.objects.create(
-        missive=missive, recipient=recipient, event="delivered"
-    )
+    recipient = MissiveRecipientEmail.objects.create(missive=missive, email="ok@example.com")
+    MissiveEvent.objects.create(missive=missive, recipient=recipient, event="delivered")
     missive.set_status()
     missive.refresh_from_db()
     assert missive.status == MissiveStatus.CANCELLED
@@ -44,12 +40,8 @@ def test_set_status_does_not_leave_cancelled_for_later_delivery_events():
 
 def test_set_status_derives_cancelled_from_cancelled_events():
     missive = _missive()
-    recipient = MissiveRecipientEmail.objects.create(
-        missive=missive, email="stop@example.com"
-    )
-    MissiveEvent.objects.create(
-        missive=missive, recipient=recipient, event="cancelled"
-    )
+    recipient = MissiveRecipientEmail.objects.create(missive=missive, email="stop@example.com")
+    MissiveEvent.objects.create(missive=missive, recipient=recipient, event="cancelled")
     missive.set_status()
     missive.refresh_from_db()
     assert missive.status == MissiveStatus.CANCELLED

@@ -5,8 +5,8 @@ from urllib.parse import unquote
 from django.conf import settings
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
-from django_boosted import AdminBoostModel
-from django_boosted.decorators import admin_boost_view
+from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
+from django_boosted.decorators import admin_boost_view  # type: ignore[import-untyped]
 
 from pymissive.config import provider_service_name
 from pymissive.webhook_secret import generate_webhook_secret as make_webhook_secret
@@ -66,9 +66,7 @@ class ProviderListFilter(admin.SimpleListFilter):
         if rows is None:
             rows = list(queryset)
         kept = [obj for obj in rows if _webhook_provider_name(obj) == value]
-        return queryset.model.objects.queryset_class(
-            model=queryset.model, data=kept
-        )
+        return queryset.model.objects.queryset_class(model=queryset.model, data=kept)
 
 
 @admin.register(MissiveWebhook)
@@ -148,9 +146,7 @@ class MissiveWebhookAdmin(ActionRightsMixin, AdminBoostModel):
         webhook_id = unquote(object_id)
         provider = webhook_id.split("-")[0]
         qs = self.model.objects.get_queryset(provider)
-        return next(
-            (item for item in qs if str(item.webhook_id) == str(webhook_id)), None
-        )
+        return next((item for item in qs if str(item.webhook_id) == str(webhook_id)), None)
 
     def get_queryset(self, request):
         provider = request.GET.get(ProviderListFilter.parameter_name)
@@ -161,9 +157,7 @@ class MissiveWebhookAdmin(ActionRightsMixin, AdminBoostModel):
     def has_generate_webhook_secret_permission(self, request, obj=None):
         return self.has_action_rights(request, obj)
 
-    @admin_boost_view(
-        "adminform", _("Generate webhook secret"), requires_object=False
-    )
+    @admin_boost_view("adminform", _("Generate webhook secret"), requires_object=False)
     def generate_webhook_secret(self, request, form=None):
         """Show a secret seeded by provider name, UTC date, and SECRET_KEY."""
         self.require_action_rights(request)

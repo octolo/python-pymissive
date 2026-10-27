@@ -39,17 +39,21 @@ class WebhookView(DetailView):
             # an unknown provider name in the URL would answer 500.
             raise Http404("Unknown provider") from exc
         missive_type = kwargs.get("missive_type")
+        if not isinstance(missive_type, str):
+            raise Http404("Unknown missive type")
         inner = getattr(provider, "_provider", None)
         verify = getattr(inner, "verify_inbound_webhook", None)
-        if callable(verify) and verify(
-            authorization=request.headers.get("Authorization", ""),
-            url_token=kwargs.get("token") or "",
-        ) is False:
+        if (
+            callable(verify)
+            and verify(
+                authorization=request.headers.get("Authorization", ""),
+                url_token=kwargs.get("token") or "",
+            )
+            is False
+        ):
             return HttpResponse(status=403)
         try:
-            lost = handle_events(
-                request.body, provider=provider, missive_type=missive_type
-            )
+            lost = handle_events(request.body, provider=provider, missive_type=missive_type)
         except Exception as e:
             # Normalization failed: the body is not something this provider can
             # read, and no retry will change that. 400 instead of 500 so the

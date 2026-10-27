@@ -3,11 +3,11 @@
 import logging
 import uuid
 
-from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models.deletion import ProtectedError
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.module_loading import import_string
@@ -26,9 +26,16 @@ from ..managers.scheduler import (
     thread_annotation_name,
     total_annotation_name,
 )
-from ..models.choices import MissiveStatus, MissiveThreadType, MissiveType
+from ..models.choices import MissiveStatus, MissiveThreadType, MissiveType, sent_missive_q
 from ..models.missive import MissiveAlreadySending
-from ..utils import stale_processing_cutoff
+from ..utils import (
+    get_progress_hooks,
+    is_import_allowed,
+    progress_step_default,
+    send_chunk_size,
+    stale_processing_cutoff,
+    validate_import_paths,
+)
 from ..models.mixins import CommentTimestampedModel
 
 logger = logging.getLogger(__name__)
@@ -36,35 +43,39 @@ logger = logging.getLogger(__name__)
 MISSIVE_TYPE_ALL = "*"
 
 
-def _allowed_task_backends():
-    """Return the configured allowlist for ``external_task_backend`` paths."""
-    return getattr(settings, "PYMISSIVE_ALLOWED_TASK_BACKENDS", None)
-
-
-def _is_task_backend_allowed(path: str) -> bool:
-    allowed = _allowed_task_backends()
-    if allowed is None:
-        return True
-    for entry in allowed:
-        if path == entry or path.startswith(f"{entry}."):
-            return True
-    return False
-
-
 def _resolve_task_method(obj, method_name: str):
     """Resolve a callable method on ``obj`` enforcing safety rules."""
     if not method_name or method_name.startswith("_"):
         raise ValidationError(
-            _("Invalid task method '%(name)s': private/dunder methods are not allowed.")
-            % {"name": method_name}
+            _("Invalid task method '%(name)s': private/dunder methods are not allowed.") % {"name": method_name}
         )
     method = getattr(obj, method_name, None)
     if not callable(method):
         raise ValidationError(
-            _("Task method '%(name)s' on %(obj)s is not callable.")
-            % {"name": method_name, "obj": type(obj).__name__}
+            _("Task method '%(name)s' on %(obj)s is not callable.") % {"name": method_name, "obj": type(obj).__name__}
         )
     return method
+
+
+#: ``external_task_backend`` of a run that sends from the campaign targets.
+SELECTION_TASK = "django_pymissive.services.send.run_selection"
+
+SENDING_RUN_DELETE_MESSAGE = _("A campaign send in progress cannot be deleted: cancel it first.")
+
+
+def format_average_send_speed(seconds) -> str:
+    """Human duration for one send. Empty when the speed is not known yet."""
+    if seconds is None:
+        return ""
+    # Round to each unit's precision before picking it, so 59.996 s never
+    # shows as "60.00 s" and 119.7 s never as "1 min 60 s".
+    milliseconds = round(seconds * 1000)
+    if milliseconds < 1000:
+        return f"{milliseconds} ms"
+    if round(seconds, 2) < 60:
+        return f"{seconds:.2f} s"
+    minutes, rest = divmod(round(seconds), 60)
+    return f"{minutes} min {rest} s"
 
 
 class MissiveScheduledCampaign(CommentTimestampedModel):
@@ -80,6 +91,9 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
     total of an ended run drops when a newer run reclaims a draft this one never
     sent. What the run *did* send stays put — see ``counts_by_status`` and
     ``history_count``, which keep the attempts a retry has archived.
+
+    ``average_send_speed`` is stored, not derived: seconds per missive sent,
+    rewritten at each progress step from the sent count just refreshed.
     """
 
     id = models.UUIDField(
@@ -99,9 +113,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         null=True,
         blank=True,
         verbose_name=_("Scheduled send date"),
-        help_text=_(
-            "Scheduled send date for the campaign (leave blank for immediate sending)"
-        ),
+        help_text=_("Scheduled send date for the campaign (leave blank for immediate sending)"),
     )
     send_date = models.DateTimeField(
         null=True,
@@ -117,15 +129,22 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         verbose_name=_("Ended at"),
         help_text=_("Actual ended date for the campaign"),
     )
+    average_send_speed = models.FloatField(
+        null=True,
+        blank=True,
+        editable=False,
+        verbose_name=_("Average speed per send"),
+        help_text=_(
+            "Average seconds per missive sent, measured from the start of this run. "
+            "Refreshed at each progress step, together with the sent count."
+        ),
+    )
     missive_type = models.CharField(
         max_length=50,
         default=MISSIVE_TYPE_ALL,
         choices=[(MISSIVE_TYPE_ALL, _("All types"))] + MissiveType.choices,
         verbose_name=_("Missive type"),
-        help_text=_(
-            "Restrict sending to missives of this type. "
-            "'*' sends every type (default)."
-        ),
+        help_text=_("Restrict sending to missives of this type. '*' sends every type (default)."),
     )
     retry_failed = models.BooleanField(
         default=False,
@@ -135,6 +154,37 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             "as fresh drafts when this run starts, then sent by it "
             "(already archived attempts and conversation messages excluded)."
         ),
+    )
+    progress_hook = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name=_("Progress hook"),
+        help_text=_(
+            "Dotted path of a callable invoked with this run at each progress step. "
+            "Leave blank to use settings.PYMISSIVE_PROGRESS_HOOK."
+        ),
+    )
+    progress_step = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name=_("Progress step"),
+        help_text=_(
+            "How many times a full run notifies its progress hook. "
+            "Leave blank to use settings.PYMISSIVE_PROGRESS_STEP (default 20)."
+        ),
+    )
+    cancelled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Cancelled at"),
+        help_text=_("When set, the send loop stops before the next missive. Missives not yet sent stay in draft."),
+    )
+    cancel_reason = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("Cancel reason"),
+        help_text=_("Optional note stored with the cancellation."),
     )
 
     # Optional external task object — replaces the built-in campaign backend.
@@ -160,8 +210,8 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         help_text=_(
             "Arguments for the external task object. "
             "Supported keys: "
-            "\"run_method\" (method called on the task object, default \"run_campaign\"), "
-            "\"kwargs\" (dict of extra keyword arguments forwarded to the method). "
+            '"run_method" (method called on the task object, default "run_campaign"), '
+            '"kwargs" (dict of extra keyword arguments forwarded to the method). '
             "The method must be synchronous."
         ),
     )
@@ -172,7 +222,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         verbose_name=_("External task backend"),
         help_text=_(
             "Dotted path to a callable invoked with ``(scheduled_id)`` to run "
-            "the campaign (e.g. \"myapp.tasks.send_campaign\"). "
+            'the campaign (e.g. "myapp.tasks.send_campaign"). '
             "Must match settings.PYMISSIVE_ALLOWED_TASK_BACKENDS when set."
         ),
     )
@@ -181,6 +231,16 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         blank=True,
         verbose_name=_("Additional configuration"),
         help_text=_("Additional configuration as JSON"),
+    )
+    build_target_processors = JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("Build target processors"),
+        help_text=_(
+            "Chain that builds missives for this run. Leave empty to copy "
+            "the campaign's chain when this run is saved. A target with its "
+            "own chain still replaces it."
+        ),
     )
     campaign_snapshot = JSONField(
         default=dict,
@@ -194,9 +254,6 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
     )
 
     objects = MissiveScheduledCampaignManager()
-
-    # Target number of progress notifications for a full run, whatever the volume.
-    PROGRESS_SAVE_STEPS = 20
 
     class Meta:
         verbose_name = _("Campaign send")
@@ -216,6 +273,32 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
     def get_absolute_url(self):
         """Used by Django admin "View on site"."""
         return self.get_progress_path()
+
+    def save(self, *args, **kwargs):
+        self.validate_cancellation()
+        if self._state.adding:
+            self._copy_build_target_processors_from_campaign()
+        super().save(*args, **kwargs)
+
+    def _copy_build_target_processors_from_campaign(self) -> None:
+        """Fill an empty chain from the campaign, once, when the run is created.
+
+        Later saves leave the chain alone, so it can be emptied on purpose.
+        """
+        if self.build_target_processors or not self.campaign_id:
+            return
+        if "campaign" in self._state.fields_cache:
+            source = self.campaign.build_target_processors
+        else:
+            from .campaign import MissiveCampaign
+
+            source = (
+                MissiveCampaign.objects.filter(pk=self.campaign_id)
+                .values_list("build_target_processors", flat=True)
+                .first()
+            )
+        if source:
+            self.build_target_processors = list(source)
 
     # ------------------------------------------------------------------
     # Live counters (annotated — no stored fields)
@@ -252,7 +335,71 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         for key, value in self._fetch_counts().items():
             self.__dict__[key] = value
         self.__dict__.pop("_counts_cache", None)
+        self.__dict__.pop("_pending_targets_cache", None)
         return self
+
+    def selection_channels(self) -> list[str]:
+        """Channels a selection run builds, narrowed by ``missive_type``."""
+        channels = list((self.additional_config or {}).get("missive_types") or [])
+        if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
+            channels = [channel for channel in channels if channel == self.missive_type]
+        return channels
+
+    def pending_targets_by_type(self) -> dict:
+        """Targets of an open selection run with no missive yet, per channel.
+
+        They count in the total before their missive is built, so the
+        progress has its final denominator from the start of the run.
+        """
+        if self.external_task_backend != SELECTION_TASK or self.ended_at:
+            return {}
+        cache = self.__dict__.get("_pending_targets_cache")
+        if cache is None:
+            from django.db.models import Count
+
+            from .campaign_target import CampaignTarget
+
+            rows = (
+                CampaignTarget.objects.filter(
+                    CampaignTarget.active_q(),
+                    campaign_id=self.campaign_id,
+                    missive_type__in=self.selection_channels(),
+                )
+                .values("missive_type")
+                .order_by()
+                .annotate(n=Count("id"))
+            )
+            cache = {row["missive_type"]: row["n"] for row in rows}
+            self.__dict__["_pending_targets_cache"] = cache
+        return cache
+
+    @classmethod
+    def prefetch_pending_targets(cls, runs) -> None:
+        """Fill :meth:`pending_targets_by_type` for many runs in one query."""
+        from django.db.models import Count
+
+        from .campaign_target import CampaignTarget
+
+        open_runs = [run for run in runs if run.external_task_backend == SELECTION_TASK and not run.ended_at]
+        if not open_runs:
+            return
+        rows = (
+            CampaignTarget.objects.filter(
+                CampaignTarget.active_q(),
+                campaign_id__in={run.campaign_id for run in open_runs},
+            )
+            .values("campaign_id", "missive_type")
+            .order_by()
+            .annotate(n=Count("id"))
+        )
+        by_campaign: dict = {}
+        for row in rows:
+            by_campaign.setdefault(row["campaign_id"], {})[row["missive_type"]] = row["n"]
+        for run in open_runs:
+            pending = by_campaign.get(run.campaign_id, {})
+            run.__dict__["_pending_targets_cache"] = {
+                channel: pending[channel] for channel in run.selection_channels() if channel in pending
+            }
 
     def _count(self, name):
         """Annotated counter if present on the instance, else a live lookup."""
@@ -265,9 +412,11 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
         With ``only_active=True`` channels with ``total == 0`` are omitted.
         """
-        result = {}
+        result: dict[str, dict[str, int]] = {}
+        pending_targets = self.pending_targets_by_type()
         for missive_type in MISSIVE_TYPES:
             total = self._count(total_annotation_name(missive_type))
+            total += pending_targets.get(missive_type, 0)
             if only_active and not total:
                 continue
             sent = self._count(sent_annotation_name(missive_type))
@@ -295,12 +444,11 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         # counts over reverse FKs whose LEFT JOINs survive .values(), which would
         # make Count group multiplied rows.
         rows = (
-            Missive._base_manager
-            .filter(scheduler=self, thread_type__in=ATTEMPT_THREADS)
+            Missive._base_manager.filter(scheduler=self, thread_type__in=ATTEMPT_THREADS)
             .values("missive_type", "status")
             .annotate(n=Count("id"))
         )
-        result = {}
+        result: dict[str, dict[str, int]] = {}
         for row in rows:
             result.setdefault(row["missive_type"], {})[row["status"]] = row["n"]
         return result
@@ -324,8 +472,11 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
     @property
     def total_count(self):
-        """Missives attached to this run (any status, archived attempts excluded)."""
-        return self._count("count_total")
+        """Missives attached to this run (any status, archived attempts excluded).
+
+        An open selection run also counts its targets still without a missive.
+        """
+        return self._count("count_total") + sum(self.pending_targets_by_type().values())
 
     @property
     def history_count(self):
@@ -339,8 +490,8 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
     @property
     def total_pending_count(self):
-        """Missives of this run still waiting to be sent."""
-        return self._count("count_pending")
+        """Missives of this run still waiting to be sent, unbuilt targets included."""
+        return self._count("count_pending") + sum(self.pending_targets_by_type().values())
 
     @property
     def total_error_count(self):
@@ -396,17 +547,19 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             "missive_type": self.missive_type,
             "status": self.run_status,
             "running": self.is_running,
-            "scheduled_send_date": (
-                self.scheduled_send_date.isoformat() if self.scheduled_send_date else None
-            ),
+            "scheduled_send_date": (self.scheduled_send_date.isoformat() if self.scheduled_send_date else None),
             "send_date": self.send_date.isoformat() if self.send_date else None,
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
+            "cancelled_at": self.cancelled_at.isoformat() if self.cancelled_at else None,
+            "cancel_reason": self.cancel_reason or "",
             "total_count": self.total_count,
             "total_sent_count": self.total_sent_count,
             "total_pending_count": self.total_pending_count,
             "total_error_count": self.total_error_count,
             "history_count": self.history_count,
             "progress": self.progress,
+            "average_send_speed": self.average_send_speed,
+            "average_send_speed_display": format_average_send_speed(self.average_send_speed),
             "by_type": by_type,
             "by_status": by_status,
         }
@@ -441,6 +594,20 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         stamp = max(stamps) if stamps else self.created_at
         return stamp is not None and stamp <= cutoff
 
+    @property
+    def is_sending(self) -> bool:
+        """True while a live worker is sending this run: it cannot be deleted.
+
+        A stale run is not sending: its worker is dead and no loop would read
+        a cancellation, so it must stay deletable.
+        """
+        return self.is_running and not self.is_stale
+
+    def delete(self, using=None, keep_parents=False):
+        if self.is_sending:
+            raise ProtectedError(str(SENDING_RUN_DELETE_MESSAGE), {self})
+        return super().delete(using=using, keep_parents=keep_parents)
+
     def heartbeat(self) -> None:
         """Touch ``updated_at`` so a live worker is not mistaken for a crash."""
         now = timezone.now()
@@ -449,7 +616,9 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
     @property
     def run_status(self):
-        """``pending`` | ``running`` | ``completed``."""
+        """``pending`` | ``running`` | ``cancelled`` | ``completed``."""
+        if self.cancelled_at:
+            return "cancelled"
         if self.ended_at:
             return "completed"
         if self.send_date:
@@ -458,8 +627,8 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
     @property
     def can_send(self) -> bool:
-        """True when this run has not started, not ended, and is due."""
-        if self.send_date or self.ended_at:
+        """True when this run has not started, not ended, not cancelled, and is due."""
+        if self.send_date or self.ended_at or self.cancelled_at:
             return False
         if self.scheduled_send_date and self.scheduled_send_date > timezone.now():
             return False
@@ -470,10 +639,16 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
     # ------------------------------------------------------------------
 
     def start_scheduled_campaign(self):
-        """Async-dispatch the campaign run via the configured backend."""
+        """Async-dispatch the campaign run via the configured backend, once committed.
+
+        A worker started inside the caller's transaction could read the run
+        before it exists, or before its drafts are attached to it.
+        """
         from ..task import get_campaign_backend
+
         backend = get_campaign_backend()
-        backend.delay(str(self.id))
+        run_id = str(self.id)
+        transaction.on_commit(lambda: backend.delay(run_id))
 
     # ------------------------------------------------------------------
     # Execution
@@ -486,13 +661,13 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         send_date IS NULL``: atomic on every backend and safe against concurrent
         workers. The same UPDATE freezes ``campaign_snapshot`` so later edits
         of the campaign do not rewrite this run's history. On completion
-        (success or failure) ``ended_at`` is set and the campaign ``processing``
-        flag is cleared; on failure the error is recorded in
+        (success or failure) ``ended_at`` is set; on failure the error is recorded in
         ``additional_config['last_error']`` and re-raised.
         """
         now = timezone.now()
         with transaction.atomic():
             from .campaign import MissiveCampaign
+
             snapshot = MissiveCampaign.objects_plain.get(pk=self.campaign_id).to_snapshot()
             claimed = (
                 type(self)
@@ -506,10 +681,9 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             if not claimed:
                 self.refresh_from_db()
                 if self.is_stale:
-                    self._finalize_run(
-                        str(_("Stale run: timed out waiting for a heartbeat."))
-                    )
+                    self._finalize_run(str(_("Stale run: timed out waiting for a heartbeat.")))
                     from .missive import Missive
+
                     Missive.reclaim_stale_processing(scheduler=self)
                 return
             self.send_date = now
@@ -549,7 +723,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             self._finalize_run(error)
 
     def _finalize_run(self, error: str | None) -> None:
-        """Set ended_at (+ optional error) and clear the campaign processing flag."""
+        """Set ``ended_at`` and persist an optional error."""
         self.ended_at = timezone.now()
         update_fields = ["ended_at"]
         if error is not None:
@@ -558,27 +732,6 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             self.additional_config = config
             update_fields.append("additional_config")
         self.save(update_fields=update_fields)
-
-        still_open = (
-            type(self)
-            .objects.filter(campaign_id=self.campaign_id, ended_at__isnull=True)
-            .exclude(pk=self.pk)
-            .exists()
-        )
-        if still_open:
-            return
-
-        with transaction.atomic():
-            from .campaign import MissiveCampaign
-            campaign = (
-                MissiveCampaign.objects_plain
-                .select_for_update()
-                .get(pk=self.campaign_id)
-            )
-            metadata = dict(campaign.metadata or {})
-            metadata.pop("processing", None)
-            campaign.metadata = metadata
-            campaign.save(update_fields=["metadata"])
 
     def get_missives(self):
         """Return the queryset of DRAFT missives to process for this run.
@@ -630,6 +783,26 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         """Append an ERROR event for an unexpected send failure."""
         missive._record_send_failure(exc)
 
+    def resolve_progress_step(self) -> int:
+        """Notifications aimed at over this run.
+
+        ``progress_step`` when set, otherwise ``settings.PYMISSIVE_PROGRESS_STEP``.
+        """
+        if self.progress_step:
+            return self.progress_step
+        return progress_step_default()
+
+    def _progress_stride(self, total: int) -> int:
+        """Missives between two progress-hook calls.
+
+        :meth:`resolve_progress_step` is how many times a full run should notify.
+        A shorter run notifies after every missive.
+        """
+        steps = max(1, self.resolve_progress_step())
+        if total <= 0:
+            return 1
+        return max(1, (total + steps - 1) // steps)
+
     def process_missives(self, send_fn=None) -> list:
         """Send each DRAFT missive best-effort.
 
@@ -638,30 +811,92 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         send). Other failures are recorded on the missive (``ERROR`` status +
         event); the batch continues. Returns a list of
         ``(missive_pk, error_message)`` for failed missives.
+
+        Each progress step stores :attr:`average_send_speed` from the sent count
+        just refreshed, including after the last missive. The speed covers this
+        loop only: the time a selection run spent building its drafts, and
+        missives sent before the loop started, are left out. When a progress hook
+        is configured (this run's ``progress_hook``, or
+        ``settings.PYMISSIVE_PROGRESS_HOOK`` when that field is blank), each
+        hook receives this run about :meth:`resolve_progress_step` times.
+        The start, each step and a cancellation are also logged at ``INFO``.
+
+        Before each missive the loop re-reads ``cancelled_at``. A cancellation
+        stops the run and leaves the remaining drafts unsent.
+
+        Only the primary keys are read up front; the missives themselves are
+        loaded ``settings.PYMISSIVE_SEND_CHUNK_SIZE`` at a time. A missive
+        deleted meanwhile is skipped.
         """
         if send_fn is None:
+
             def send_fn(missive):
                 missive.send_missive()
-        failures = []
-        for missive in list(self.get_missives()):
-            self.heartbeat()
-            try:
-                send_fn(missive)
-            except MissiveAlreadySending:
-                continue
-            except Exception as exc:
-                self._mark_missive_error(missive, exc)
-                failures.append((missive.pk, str(exc)))
-                logger.exception(
-                    "send_missive failed for missive %s in scheduler %s",
-                    missive.pk,
+
+        pks = list(self.get_missives().values_list("pk", flat=True))
+        hooks = self.resolve_progress_hooks()
+        total = len(pks)
+        stride = self._progress_stride(total)
+        failures: list[tuple[object, str]] = []
+        logger.info("Scheduled campaign %s: sending %s missive(s)", self.pk, total)
+        self._refresh_sent_count()
+        speed_origin = (timezone.now(), self.total_sent_count)
+        for index, missive in enumerate(self._iter_in_chunks(pks), start=1):
+            if self.checkpoint():
+                if self.cancelled_at:
+                    self._record_step_progress(hooks, speed_origin)
+                    logger.info(
+                        "Scheduled campaign %s cancelled before missive %s/%s: %s",
+                        self.pk,
+                        index,
+                        total,
+                        self.cancel_reason or "no reason given",
+                    )
+                break
+            if missive is not None:
+                self._send_one(missive, send_fn, failures)
+            if index % stride == 0 or index == total:
+                self._record_step_progress(hooks, speed_origin)
+                logger.info(
+                    "Scheduled campaign %s: %s/%s processed, %s failed, %s s per send",
                     self.pk,
+                    index,
+                    total,
+                    len(failures),
+                    f"{self.average_send_speed:.2f}" if self.average_send_speed else "-",
                 )
-                continue
-            missive.refresh_from_db()
-            if missive.status == MissiveStatus.ERROR:
-                failures.append((missive.pk, missive.last_send_error() or str(_("Send failed."))))
         return failures
+
+    @staticmethod
+    def _iter_in_chunks(pks):
+        """Yield the missive of each pk in order, or ``None`` when it was deleted."""
+        from .missive import Missive
+
+        size = send_chunk_size()
+        for start in range(0, len(pks), size):
+            chunk = pks[start : start + size]
+            loaded = Missive.objects.in_bulk(chunk)
+            for pk in chunk:
+                yield loaded.pop(pk, None)
+
+    def _send_one(self, missive, send_fn, failures) -> None:
+        """Send *missive*; record it in *failures* when the send fails."""
+        try:
+            send_fn(missive)
+        except MissiveAlreadySending:
+            return
+        except Exception as exc:
+            self._mark_missive_error(missive, exc)
+            failures.append((missive.pk, str(exc)))
+            logger.exception(
+                "send_missive failed for missive %s in scheduler %s",
+                missive.pk,
+                self.pk,
+            )
+            return
+        missive.refresh_from_db(fields=["status"])
+        if missive.status == MissiveStatus.ERROR:
+            failures.append((missive.pk, missive.last_send_error() or str(_("Send failed."))))
 
     def _retry_error_missives(self) -> int:
         """Re-queue failed missives for another send attempt.
@@ -710,47 +945,225 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             method = _resolve_task_method(obj, method_name)
             method(self.id, **extra_kwargs)
         elif self.external_task_backend:
-            if not _is_task_backend_allowed(self.external_task_backend):
-                raise ValidationError(
-                    _("Backend '%(path)s' is not allowed.") % {"path": self.external_task_backend}
-                )
+            if not is_import_allowed(self.external_task_backend):
+                raise ValidationError(_("Backend '%(path)s' is not allowed.") % {"path": self.external_task_backend})
             import_string(self.external_task_backend)(self.id)
         else:
             self.process_missives()
 
-    def clean(self):
-        """Validate the configured runner."""
-        super().clean()
-        if self.external_task_backend and not _is_task_backend_allowed(self.external_task_backend):
-            raise ValidationError({
-                "external_task_backend": _(
-                    "Backend '%(path)s' is not allowed by "
-                    "settings.PYMISSIVE_ALLOWED_TASK_BACKENDS."
-                ) % {"path": self.external_task_backend}
-            })
+    def validate_cancellation(self) -> None:
+        """Only a started run carries a cancellation date."""
+        if self.cancelled_at and not self.send_date:
+            raise ValidationError(
+                {
+                    "cancelled_at": _("A run that has not started cannot be cancelled."),
+                }
+            )
+
+    def _validate_progress_hook(self):
+        progress_hook = (self.progress_hook or "").strip()
+        if not progress_hook:
+            return
+        try:
+            hooks = get_progress_hooks(progress_hook)
+        except ImportError:
+            raise ValidationError(
+                {
+                    "progress_hook": _("Progress hook %(path)s cannot be imported.") % {"path": progress_hook},
+                }
+            )
+        if not all(callable(hook) for hook in hooks):
+            raise ValidationError(
+                {
+                    "progress_hook": _("Progress hook %(path)s is not callable.") % {"path": progress_hook},
+                }
+            )
+
+    def _validate_ended_cancellation(self):
+        if not (self.cancelled_at and self.ended_at):
+            return
+        stored = type(self).objects.filter(pk=self.pk).values_list("cancelled_at", flat=True).first()
+        if stored is None:
+            raise ValidationError(
+                {
+                    "cancelled_at": _("A run that has ended cannot be cancelled."),
+                }
+            )
+
+    def _validate_backend(self):
+        if self.external_task_backend and not is_import_allowed(self.external_task_backend):
+            raise ValidationError(
+                {
+                    "external_task_backend": _(
+                        "Backend '%(path)s' is not allowed by settings.PYMISSIVE_ALLOWED_TASK_BACKENDS."
+                    )
+                    % {"path": self.external_task_backend}
+                }
+            )
+
+    def _validate_task_object_arguments(self):
         args = self.task_object_arguments or {}
         run_method = args.get("run_method", "run_campaign")
         if run_method.startswith("_"):
-            raise ValidationError({
-                "task_object_arguments": _(
-                    "run_method '%(name)s' is invalid: private/dunder methods are not allowed."
-                ) % {"name": run_method}
-            })
+            raise ValidationError(
+                {
+                    "task_object_arguments": _(
+                        "run_method '%(name)s' is invalid: private/dunder methods are not allowed."
+                    )
+                    % {"name": run_method}
+                }
+            )
         extra_kwargs = args.get("kwargs", {})
         if not isinstance(extra_kwargs, dict):
-            raise ValidationError({
-                "task_object_arguments": _(
-                    "\"kwargs\" must be a JSON object (dict), got %(type)s."
-                ) % {"type": type(extra_kwargs).__name__}
-            })
+            raise ValidationError(
+                {
+                    "task_object_arguments": _('"kwargs" must be a JSON object (dict), got %(type)s.')
+                    % {"type": type(extra_kwargs).__name__}
+                }
+            )
+
+    def clean(self):
+        """Validate the configured runner and the cancellation."""
+        super().clean()
+        self.validate_cancellation()
+        validate_import_paths(self, "progress_hook", "build_target_processors")
+        self._validate_progress_hook()
+        self._validate_ended_cancellation()
+        self._validate_backend()
+        self._validate_task_object_arguments()
 
     # ------------------------------------------------------------------
-    # Progress hooks (used when PYMISSIVE_PROGRESS_ENABLED is True)
+    # Progress hooks and cancellation
     # ------------------------------------------------------------------
+
+    def resolve_progress_hooks(self):
+        """Hooks for this run: ``progress_hook`` when set, otherwise the setting.
+
+        A hook that cannot be imported is logged and dropped: like a hook
+        that raises, it must not fail the send.
+        """
+        override = (self.progress_hook or "").strip()
+        try:
+            return get_progress_hooks(override or None)
+        except ImportError:
+            logger.exception(
+                "Progress hook %r cannot be imported for scheduled campaign %s",
+                override or "settings.PYMISSIVE_PROGRESS_HOOK",
+                self.pk,
+            )
+            return []
+
+    def pull_cancellation(self) -> bool:
+        """Reload ``cancelled_at`` and ``cancel_reason`` from the database.
+
+        True when the run was cancelled, was ended by another process (a
+        stale-run finalization), or the row no longer exists. The in-memory
+        copy is what a worker loaded at the start; an admin save during the
+        send is only visible through this read.
+        """
+        row = type(self).objects.filter(pk=self.pk).values_list("cancelled_at", "cancel_reason", "ended_at").first()
+        if row is None:
+            return True
+        self.cancelled_at = row[0]
+        self.cancel_reason = row[1] or ""
+        if row[2] is not None:
+            logger.warning(
+                "Scheduled campaign %s was ended by another process: stopping its send loop",
+                self.pk,
+            )
+            return True
+        return self.cancelled_at is not None
+
+    def cancel(self, reason: str = "") -> bool:
+        """Ask the worker to stop before its next missive.
+
+        Only a run that started, has not ended and is not cancelled yet is
+        touched, in one conditional ``UPDATE`` so the worker cannot race it.
+        Returns whether this call cancelled the run.
+        """
+        now = timezone.now()
+        updated = (
+            type(self)
+            .objects.filter(
+                pk=self.pk,
+                send_date__isnull=False,
+                ended_at__isnull=True,
+                cancelled_at__isnull=True,
+            )
+            .update(cancelled_at=now, cancel_reason=reason, updated_at=now)
+        )
+        if updated:
+            self.cancelled_at = now
+            self.cancel_reason = reason
+        return bool(updated)
+
+    def checkpoint(self) -> bool:
+        """Heartbeat, then tell whether the worker must stop.
+
+        One ``UPDATE`` per missive in the usual case: it only touches a run
+        still open and not cancelled. When it matches no row, the cancellation
+        is read back with :meth:`pull_cancellation`.
+        """
+        now = timezone.now()
+        touched = (
+            type(self)
+            .objects.filter(
+                pk=self.pk,
+                ended_at__isnull=True,
+                cancelled_at__isnull=True,
+            )
+            .update(updated_at=now)
+        )
+        if touched:
+            self.updated_at = now
+            return False
+        return self.pull_cancellation()
+
+    def _record_step_progress(self, hooks, speed_origin):
+        """Refresh the sent count, store the average speed, then notify hooks.
+
+        Called at each progress step, including the last missive and a
+        cancellation. Without hooks, only the sent count is read: the full
+        set of counters is what a hook may look at, not the speed.
+        *speed_origin* is ``(started_at, sent_before)`` taken when the send
+        loop started.
+        """
+        if hooks:
+            self.refresh_counts()
+        else:
+            self._refresh_sent_count()
+        self._update_average_send_speed(*speed_origin)
+        if hooks:
+            self._notify_progress(hooks)
+
+    def _refresh_sent_count(self) -> None:
+        """Reload ``count_sent`` alone and drop the other cached counters."""
+        from .missive import Missive
+
+        for key in self._count_fields():
+            self.__dict__.pop(key, None)
+        self.__dict__.pop("_counts_cache", None)
+        self.__dict__.pop("_pending_targets_cache", None)
+        self.__dict__["count_sent"] = Missive._base_manager.filter(
+            sent_missive_q(),
+            scheduler_id=self.pk,
+            thread_type=MissiveThreadType.MISSIVE,
+        ).count()
+
+    def _update_average_send_speed(self, started_at, sent_before) -> None:
+        """Seconds per missive sent since *started_at*, from the current counts."""
+        sent = self.total_sent_count - sent_before
+        if sent <= 0:
+            return
+        elapsed = (timezone.now() - started_at).total_seconds()
+        if elapsed < 0:
+            return
+        speed = elapsed / sent
+        self.average_send_speed = speed
+        type(self).objects.filter(pk=self.pk).update(average_send_speed=speed)
 
     def _notify_progress(self, hooks):
-        """Refresh counters then call each progress hook, isolating hook errors."""
-        self.refresh_counts()
+        """Call each progress hook, isolating hook errors."""
         for hook in hooks:
             try:
                 hook(self)

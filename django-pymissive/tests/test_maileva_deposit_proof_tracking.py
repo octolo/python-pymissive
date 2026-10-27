@@ -24,10 +24,7 @@ pytestmark = pytest.mark.deposit_proof
 
 def _require_fixture(path: Path) -> Path:
     if not path.exists():
-        pytest.skip(
-            f"{path.name} is not committed (personal data). "
-            f"Copy it to {FIXTURES} to run this test."
-        )
+        pytest.skip(f"{path.name} is not committed (personal data). Copy it to {FIXTURES} to run this test.")
     return path
 
 

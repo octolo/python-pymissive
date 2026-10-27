@@ -15,9 +15,7 @@ pytestmark = pytest.mark.django_db
 
 
 def _qs(*rows):
-    return MissiveWebhook.objects.queryset_class(
-        model=MissiveWebhook, data=list(rows)
-    )
+    return MissiveWebhook.objects.queryset_class(model=MissiveWebhook, data=list(rows))
 
 
 def _webhook(*, webhook_id, provider_name, type="email"):
@@ -55,9 +53,7 @@ def test_provider_filter_without_value_keeps_every_row():
 def test_changelist_without_provider_does_not_redirect():
     webhook_admin = admin.site._registry[MissiveWebhook]
     request = RequestFactory().get("/admin/django_pymissive/missivewebhook/")
-    with patch.object(
-        MissiveWebhook.objects, "all_providers", return_value=_qs()
-    ) as all_providers:
+    with patch.object(MissiveWebhook.objects, "all_providers", return_value=_qs()) as all_providers:
         qs = webhook_admin.get_queryset(request)
     all_providers.assert_called_once()
     assert qs.count() == 0
@@ -67,9 +63,7 @@ def test_changelist_with_provider_uses_that_provider_only():
     webhook_admin = admin.site._registry[MissiveWebhook]
     request = RequestFactory().get("/", {"provider": "brevo"})
     scoped = _qs(_webhook(webhook_id="brevo-1", provider_name="brevo"))
-    with patch.object(
-        MissiveWebhook.objects, "get_queryset", return_value=scoped
-    ) as get_qs:
+    with patch.object(MissiveWebhook.objects, "get_queryset", return_value=scoped) as get_qs:
         qs = webhook_admin.get_queryset(request)
     get_qs.assert_called_once_with("brevo")
     assert [w.webhook_id for w in qs] == ["brevo-1"]

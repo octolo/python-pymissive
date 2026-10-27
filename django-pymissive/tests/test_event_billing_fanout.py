@@ -49,9 +49,10 @@ def _accepted_event():
 def test_a_fanned_out_event_bills_once_for_ten_recipients():
     missive = _missive_with_recipients(10)
 
-    with patch.object(Missive, "can_billings", return_value=True), patch.object(
-        Missive, "get_billings"
-    ) as get_billings:
+    with (
+        patch.object(Missive, "can_billings", return_value=True),
+        patch.object(Missive, "get_billings") as get_billings,
+    ):
         _process_event(_accepted_event(), missive)
 
     assert get_billings.call_count == 1
@@ -61,9 +62,10 @@ def test_a_recipient_scoped_event_still_bills_once():
     missive = _missive_with_recipients(3)
     target = missive.recipients.first()
 
-    with patch.object(Missive, "can_billings", return_value=True), patch.object(
-        Missive, "get_billings"
-    ) as get_billings:
+    with (
+        patch.object(Missive, "can_billings", return_value=True),
+        patch.object(Missive, "get_billings") as get_billings,
+    ):
         _process_event(
             {
                 "event": "delivered",
@@ -80,9 +82,10 @@ def test_a_recipient_scoped_event_still_bills_once():
 def test_nothing_is_billed_when_the_provider_has_no_billing_service():
     missive = _missive_with_recipients(4)
 
-    with patch.object(Missive, "can_billings", return_value=False), patch.object(
-        Missive, "get_billings"
-    ) as get_billings:
+    with (
+        patch.object(Missive, "can_billings", return_value=False),
+        patch.object(Missive, "get_billings") as get_billings,
+    ):
         _process_event(_accepted_event(), missive)
 
     get_billings.assert_not_called()
@@ -95,9 +98,10 @@ def test_nothing_is_billed_when_the_provider_has_no_billing_service():
 def test_early_lifecycle_events_do_not_fetch_billings(event):
     missive = _missive_with_recipients(1)
 
-    with patch.object(Missive, "can_billings", return_value=True), patch.object(
-        Missive, "get_billings"
-    ) as get_billings:
+    with (
+        patch.object(Missive, "can_billings", return_value=True),
+        patch.object(Missive, "get_billings") as get_billings,
+    ):
         MissiveEvent.objects.create(
             missive=missive,
             event=event,
@@ -110,7 +114,5 @@ def test_early_lifecycle_events_do_not_fetch_billings(event):
 def test_fetch_missive_billings_swallows_provider_errors():
     missive = _missive_with_recipients(1)
 
-    with patch.object(
-        Missive, "get_billings", side_effect=RuntimeError("billing down")
-    ):
+    with patch.object(Missive, "get_billings", side_effect=RuntimeError("billing down")):
         fetch_missive_billings(str(missive.pk))

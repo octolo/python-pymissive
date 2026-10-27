@@ -24,24 +24,39 @@ SIGNATURE_HTML = (
     "</p>"
 )
 
-SIGNATURE_TEXT = (
-    "\n\n--\n"
-    "Best regards,\n"
-    "The django-pymissive team\n"
-    "(signature appended by the test processor)"
-)
+SIGNATURE_TEXT = "\n\n--\nBest regards,\nThe django-pymissive team\n(signature appended by the test processor)"
 
 SIGNATURE_SMS = " - django-pymissive"
+
+_APPLICATION_TYPES = frozenset({"notification", "push_notification", "branded"})
+_CHAT_PROVIDERS = frozenset({"discord", "slack", "teams"})
+
+
+def _is_application_missive(missive) -> bool:
+    """In-app and chat messages: an email HTML signature does not belong there."""
+    if missive is None:
+        return False
+    if (getattr(missive, "missive_support", None) or "").lower() == "application":
+        return True
+    if (getattr(missive, "missive_type", None) or "").lower() in _APPLICATION_TYPES:
+        return True
+    provider = getattr(missive, "provider", None)
+    inner = getattr(provider, "_provider", None)
+    name = getattr(inner, "name", None) or getattr(provider, "_value", None)
+    if not name and isinstance(provider, str):
+        name = provider
+    return str(name or "").strip().lower() in _CHAT_PROVIDERS
 
 
 def add_signature(content, *, missive=None, campaign=None, field_name=None, context=None, **kwargs):
     """Append a signature to a missive body, picking the right format per field.
 
-    Skips ``subject`` and SMS first_document; appends HTML markup for
-    ``body_rich`` / ``first_document``, plain text for ``body_text``, and a
-    short suffix for ``phone_body_text``.
+    Skips ``subject``, SMS, and application missives (notification, push,
+    Discord, Slack, Teams). Appends HTML markup for ``body_rich`` /
+    ``first_document``, plain text for ``body_text``, and a short suffix for
+    ``phone_body_text``.
     """
-    if not content:
+    if not content or _is_application_missive(missive):
         return content
     if field_name in ("body_rich", "first_document"):
         return f"{content}{SIGNATURE_HTML}"
@@ -62,7 +77,7 @@ class SignatureProcessor(MissiveBodyProcessor):
     """
 
     def process(self, content, *, missive=None, campaign=None, field_name=None, context=None, team=None, **kwargs):
-        if not content:
+        if not content or _is_application_missive(missive):
             return content
         team = team or "django-pymissive"
         if field_name in ("body_rich", "first_document"):
@@ -98,7 +113,7 @@ class SignatureProcessor(MissiveBodyProcessor):
 
 BANNER_HTML = (
     '<div style="background:#fff3cd;border:1px solid #ffeeba;'
-    'padding:12px;margin-bottom:16px;border-radius:4px;'
+    "padding:12px;margin-bottom:16px;border-radius:4px;"
     'font-size:13px;color:#856404">'
     "{label}"
     "</div>"

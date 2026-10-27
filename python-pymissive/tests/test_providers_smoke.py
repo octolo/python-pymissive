@@ -1,7 +1,7 @@
 """Instantiate every shipped provider and call its normalizers.
 
-``providers/todo/`` is backlog and is not imported. A missing extra (discord,
-boto3) must not prevent instantiation: those imports stay lazy.
+A missing extra (discord, boto3) must not prevent instantiation: those imports
+stay lazy.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ SHIPPED = (
     ("pymissive.providers.teams", "TeamsProvider"),
     ("pymissive.providers.discord", "DiscordProvider"),
     ("pymissive.providers.hand_delivery", "HandDeliveryProvider"),
+    ("pymissive.providers.fake", "FakeProvider"),
 )
 
 
@@ -50,8 +51,6 @@ def test_todo_is_not_among_the_shipped_provider_modules():
     names = {module.name for module in pkgutil.iter_modules(providers_pkg.__path__)}
     shipped_modules = {module for module, _cls in SHIPPED}
     discovered = {
-        f"pymissive.providers.{name}"
-        for name in names
-        if name not in {"base", "todo"}
+        f"pymissive.providers.{name}" for name in names if name not in {"base", "todo"} and not name.startswith("_")
     }
     assert discovered == shipped_modules

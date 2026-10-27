@@ -1,0 +1,27 @@
+{% load i18n %}
+<div class="brand-app brand-{{ brand|default:'generic' }}">
+    <div class="brand-message">
+        <div class="brand-avatar" aria-hidden="true">{{ author_initial|default:"B" }}</div>
+        <div class="brand-main">
+            <div class="brand-meta">
+                <span class="brand-author">{% if author %}{{ author }}{% else %}{% trans "Bot" %}{% endif %}</span>
+                {% if brand == "discord" %}
+                <span class="brand-bot">{% trans "BOT" %}</span>
+                {% endif %}
+                <time class="brand-time">{% now "H:i" %}</time>
+            </div>
+            {% if brand == "teams" and missive.subject_compiled %}
+            <div class="brand-title">{{ missive.subject_compiled }}</div>
+            {% endif %}
+            <div class="brand-text">
+                {% if missive.body_text_compiled %}
+                    {{ missive.body_text_compiled|force_escape|urlize }}
+                {% elif missive.body_rich_compiled %}
+                    {{ missive.body_rich_compiled|striptags|urlize }}
+                {% else %}
+                    <span class="brand-empty">{% trans "No content" %}</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>

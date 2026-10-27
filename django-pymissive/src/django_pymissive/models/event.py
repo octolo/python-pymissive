@@ -85,7 +85,9 @@ class MissiveEvent(CommentTimestampedModel):
     class Meta:
         verbose_name = _("Event")
         verbose_name_plural = _("Events")
-        ordering = ["-occurred_at",]
+        ordering = [
+            "-occurred_at",
+        ]
         indexes = [
             # get_event_counts windows the events of a missive per recipient by
             # descending occurred_at, and _upsert_event looks a row up by the
@@ -125,7 +127,7 @@ class MissiveEvent(CommentTimestampedModel):
 
     def can_replay(self):
         """Return True if the event can be replayed."""
-        return (self.missive_id and not self.client_initiated)
+        return self.missive_id and not self.client_initiated
 
     def replay(self):
         """Replay the event against this row's missive.
@@ -147,12 +149,15 @@ class MissiveEvent(CommentTimestampedModel):
         if not isinstance(event, dict):
             raise ValueError("No replayable event in trace")
         event = dict(event)
-        provider = self.missive.provider
+        missive = self.missive
+        if missive is None:
+            raise ValueError("Cannot replay event without associated missive")
+        provider = missive.provider
         backend = getattr(provider, "_provider", None)
         if backend is None:
             raise ValueError("Cannot replay event without a provider backend")
         events_normalized = backend.call_service_formatted(
-            provider_service_name("handle_webhook", self.missive.missive_type), payload=[event]
+            provider_service_name("handle_webhook", missive.missive_type), payload=[event]
         )
         if isinstance(events_normalized, dict):
             events_normalized = [events_normalized]
@@ -160,4 +165,4 @@ class MissiveEvent(CommentTimestampedModel):
             raise ValueError("Provider did not return a replayable event")
         for normalized in events_normalized:
             if isinstance(normalized, dict):
-                _process_event(normalized, self.missive, pk=self.pk)
+                _process_event(normalized, missive, pk=self.pk)

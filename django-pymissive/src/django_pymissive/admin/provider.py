@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from django_providerkit.admin.provider import BaseProviderAdmin
+from django_providerkit.admin.provider import BaseProviderAdmin  # type: ignore[import-untyped]
 
 from ..models.provider import MissiveProviderModel
 

@@ -44,13 +44,16 @@ def watermark_pdf_attachments(
 
     from django_pymissive.processors.pdf.watermark import watermark_processor
 
-    return watermark_processor(
+    watermarked = watermark_processor(
         missive,
         content_bytes,
         campaign=campaign,
         context=context,
         **kwargs,
     )
+    if watermarked is None:
+        raise RuntimeError("The watermark processor returned no content for a non-empty PDF")
+    return watermarked
 
 
 class WatermarkPdfAttachmentsProcessor(MissiveAttachmentProcessor):

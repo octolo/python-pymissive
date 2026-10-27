@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django-pymissive"
-version = "1.4.3"
+version = "1.5.0"
 description = "Django library for multi-channel missive management (email, SMS, push, postal, etc.)"
 readme = "README.md"
 authors = [
@@ -24,14 +24,14 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Internet :: WWW/HTTP",
     "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
 ]
 keywords = ["django", "missive"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "Django>=5.0",
     "django-providerkit>=1.1.1",
@@ -40,15 +40,18 @@ dependencies = [
     "django-geoaddress>=1.0.3",
     "django-namedid>=1.2.0",
     "django-phonenumber-field[phonenumbers]>=7.0",
-    "pymissive>=1.4.3,<2",
+    "pymissive>=1.5.0,<2",
     "phonenumbers>=8.13",  # Phone number validation
 ]
 
 [project.optional-dependencies]
 dev = [
     "django-debug-toolbar>=6.3.0",
+    "django-stubs>=6.1.2",
+    "mypy>=2.4.0",
     "pytest>=8.0",
     "pytest-django>=4.8",
+    "types-reportlab>=5.0.0.20261008",
 ]
 # Provider SDKs live in pymissive, next to the code that imports them.
 brevo = [
@@ -57,9 +60,13 @@ brevo = [
 scaleway = [
     "pymissive[scaleway]",
 ]
+discord = [
+    "pymissive[discord]",
+]
 pdf = [
     "weasyprint>=60.0",
-    "pypdf>=4.0",
+    "pillow>=13.0.0",
+    "pypdf>=6.21.2",
     "reportlab>=4.0",
 ]
 test = [
@@ -73,7 +80,7 @@ test = [
 [project.urls]
 Homepage = "https://github.com/octolo/python-missive"
 Repository = "https://github.com/octolo/python-missive"
-Documentation = "https://github.com/octolo/python-missive/django-missive#readme"
+Documentation = "https://github.com/octolo/python-missive/tree/main/django-pymissive#readme"
 Issues = "https://github.com/octolo/python-missive/issues"
 
 [tool.setuptools.packages.find]
@@ -82,7 +89,7 @@ include = ["django_pymissive*"]
 exclude = ["tests*", "docs*"]
 
 [tool.setuptools.package-data]
-django_pymissive = ["templates/**/*", "static/**/*", "locale/**/*", "migrations/**/*"]
+django_pymissive = ["templates/**/*", "static/**/*", "locale/**/*", "migrations/**/*", "py.typed"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
@@ -92,5 +99,14 @@ pythonpath = ["src"]
 [tool.pylint.main]
 ignore = ["migrations"]
 
+[tool.mypy]
+python_version = "3.11"
+plugins = ["mypy_django_plugin.main"]
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_configs = true
+exclude = ["migrations/"]
+
 [tool.django-stubs]
 django_settings_module = "tests.settings"
+strict_settings = false

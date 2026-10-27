@@ -48,13 +48,15 @@ _attachment_calls: list[dict] = []
 def _capturing_attachment_processor(
     missive, attachment, content_bytes, *, campaign=None, context=None, **kwargs
 ) -> bytes:
-    _attachment_calls.append({
-        "missive": missive,
-        "attachment_pk": attachment.pk,
-        "is_first_document": attachment.is_first_document,
-        "content_in": content_bytes,
-        "campaign": campaign,
-    })
+    _attachment_calls.append(
+        {
+            "missive": missive,
+            "attachment_pk": attachment.pk,
+            "is_first_document": attachment.is_first_document,
+            "content_in": content_bytes,
+            "campaign": campaign,
+        }
+    )
     return content_bytes + b" + processed"
 
 
@@ -264,10 +266,10 @@ def test_duplicate_missive_copies_regular_and_virtual_attachments(settings):
     settings.PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS = []  # avoid watermark side effects
 
     source = _make_registered_letter_missive()
-    regular = _attach_pdf(source, name="brief.pdf")
+    _attach_pdf(source, name="brief.pdf")
     doc = PdfDocument.objects.create(name="virtual.pdf")
     virtual = _attach_virtual_pdf(source, doc)
-    first_doc = source.generate_first_document()  # priority 0
+    source.generate_first_document()  # priority 0
 
     new_missive = source.duplicate_missive(thread_type=MissiveThreadType.MISSIVE)
     new_attachments = new_missive.to_missiveattachment.all().order_by("priority")
@@ -283,9 +285,7 @@ def test_duplicate_missive_copies_regular_and_virtual_attachments(settings):
     assert new_attachments.count() == 2  # regular + virtual
 
     # Virtual reference is preserved (same target object).
-    duplicated_virtual = new_attachments.filter(
-        attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT
-    ).first()
+    duplicated_virtual = new_attachments.filter(attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT).first()
     assert str(duplicated_virtual.attachment_object_id) == str(doc.pk)
     assert duplicated_virtual.attachment_content_type == virtual.attachment_content_type
     assert duplicated_virtual.pk != virtual.pk
@@ -473,9 +473,9 @@ def test_default_watermark_chain_stamps_pdf_attachments(small_pdf_bytes, setting
     from pypdf import PdfReader
 
     reader = PdfReader(BytesIO(pdf_payload["content"]))
-    assert any(
-        "WATERMARK_SENTINEL" in (p.extract_text() or "") for p in reader.pages
-    ), "Watermark should be visible on the PDF attachment"
+    assert any("WATERMARK_SENTINEL" in (p.extract_text() or "") for p in reader.pages), (
+        "Watermark should be visible on the PDF attachment"
+    )
 
     # Non-PDFs are untouched.
     assert txt_payload["content"] == b"plain text"

@@ -16,14 +16,10 @@ def test_brevo_prefers_utc_timestamp_over_naive_account_date():
         provider,
         {
             "date": "2024-08-22 16:03:29",
-            "ts_event": int(
-                datetime(2024, 8, 22, 14, 3, 29, tzinfo=dt_timezone.utc).timestamp()
-            ),
+            "ts_event": int(datetime(2024, 8, 22, 14, 3, 29, tzinfo=dt_timezone.utc).timestamp()),
         },
     )
-    assert _get_occurred_at(occurred) == datetime(
-        2024, 8, 22, 14, 3, 29, tzinfo=dt_timezone.utc
-    )
+    assert _get_occurred_at(occurred) == datetime(2024, 8, 22, 14, 3, 29, tzinfo=dt_timezone.utc)
 
 
 def test_brevo_retrieve_utc_date_matches_webhook_timestamp():

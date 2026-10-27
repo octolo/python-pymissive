@@ -1,17 +1,19 @@
-from datetime import datetime, timezone as dt_timezone
-
-from providerkit import ProviderBase
 import base64
 import mimetypes
+import re
+import unicodedata
+from datetime import datetime, timezone as dt_timezone
 from typing import Any
+
+from providerkit import ProviderBase
+
+from pymissive import config
+
 from .acknowledgement import AcknowledgementMixin
 from .attachments import AttachmentsMixin
 from .branded import BrandedMixin
-import re
-import unicodedata
-from pymissive import config
 
-defaults_services = {
+defaults_services: dict[str, dict[str, Any]] = {
     "retrieve_webhooks": {
         "fields": config.WEBHOOK_FIELDS,
     },
@@ -23,7 +25,7 @@ for category, service_cfg in config.MISSIVE_SERVICES.items():
         for missive_type in config.MISSIVE_TYPES.keys():
             defaults_services[f"{service[0]}_{missive_type}"] = {
                 "description": service[1],
-                "fields": service_cfg["config"]
+                "fields": service_cfg["config"],
             }
 
 
@@ -34,10 +36,11 @@ class MissiveProviderBase(
     BrandedMixin,
 ):
     """Base class for Missive providers."""
+
     _default_services_cfg = defaults_services
     provider_key = "key"
-    events_association = None
-    fields_associations: dict = {}
+    events_association: dict[str, str] | None = None
+    fields_associations: dict[str, Any] = {}
 
     def __init__(self, **kwargs: str | None) -> None:
         super().__init__(**kwargs)
@@ -53,15 +56,11 @@ class MissiveProviderBase(
         """True when the provider cannot send an Authorization header (SNS)."""
         return False
 
-    def verify_inbound_webhook(
-        self, *, authorization: str = "", url_token: str = ""
-    ) -> bool:
+    def verify_inbound_webhook(self, *, authorization: str = "", url_token: str = "") -> bool:
         """Opt-in inbound check. See ``pymissive.webhook_auth``."""
         from pymissive.webhook_auth import verify_inbound_webhook
 
-        return verify_inbound_webhook(
-            self, authorization=authorization, url_token=url_token
-        )
+        return verify_inbound_webhook(self, authorization=authorization, url_token=url_token)
 
     def _to_base64(self, content):
         if isinstance(content, bytes):
@@ -77,7 +76,9 @@ class MissiveProviderBase(
         """Return mapping of provider events to missive event."""
         return self.events_association or {}
 
-    def retrieve_events(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
+    def retrieve_events(
+        self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any
+    ) -> list[Any] | dict[str, Any]:
         """Retrieve events in bulk between ``start_date`` and ``end_date``.
 
         Typed services (``retrieve_events_email``, ``retrieve_events_sms``, …)
@@ -98,7 +99,12 @@ class MissiveProviderBase(
         """
         raise NotImplementedError("retrieve_events is not implemented")
 
-    def retrieve_billings(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
+    def retrieve_billings(
+        self,
+        start_date: datetime | str,
+        end_date: datetime | str,
+        **kwargs: Any,
+    ) -> list[Any] | dict[str, Any]:
         """Retrieve billings in bulk between ``start_date`` and ``end_date``.
 
         Typed services (``retrieve_billings_registered_letter``, ``retrieve_billings_email``, …)
@@ -119,19 +125,26 @@ class MissiveProviderBase(
 
     def get_normalize_event(self, data: dict[str, Any]) -> str:
         """Return the normalized event of webhook/email/SMS."""
-        return (self.events_association or {}).get(data.get("event"), "unknown")
+        event = data.get("event")
+        if not isinstance(event, str):
+            return "unknown"
+        return (self.events_association or {}).get(event, "unknown")
 
-    def get_normalize_webhook_id(self, data: dict) -> str:
+    def get_normalize_webhook_id(self, data: dict[str, Any]) -> str | None:
         cfg = config.WEBHOOK_FIELDS.get("webhook_id")
-        source = cfg.get("source", self.fields_associations.get("webhook_id", "webhook_id"))
+        source = (
+            cfg.get("source", self.fields_associations.get("webhook_id", "webhook_id"))
+            if cfg is not None
+            else self.fields_associations.get("webhook_id", "webhook_id")
+        )
         webhook_id = self._normalize_recursive(data, "webhook_id", source)
         if webhook_id:
             return f"{self.name}-{webhook_id}"
         return None
 
-    def normalize_filename(self, name):
+    def normalize_filename(self, name: str) -> str:
         name = unicodedata.normalize("NFKD", name)
-        name = re.sub(r"\s+", "_", name)      # spaces -> _
+        name = re.sub(r"\s+", "_", name)  # spaces -> _
         name = re.sub(r"[^\w\.-]", "", name)  # strip special characters
         return name
 
@@ -160,7 +173,9 @@ class MissiveProviderBase(
 
 
 def _retrieve_events_for_type(missive_type: str):
-    def retrieve_events_type(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
+    def retrieve_events_type(
+        self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any
+    ) -> list[Any] | dict[str, Any]:
         return self.retrieve_events(start_date, end_date, missive_type=missive_type, **kwargs)
 
     retrieve_events_type.__name__ = f"retrieve_events_{missive_type}"
@@ -170,7 +185,12 @@ def _retrieve_events_for_type(missive_type: str):
 
 
 def _retrieve_billings_for_type(missive_type: str):
-    def retrieve_billings_type(self, start_date: datetime | str, end_date: datetime | str, **kwargs: Any) -> list:
+    def retrieve_billings_type(
+        self,
+        start_date: datetime | str,
+        end_date: datetime | str,
+        **kwargs: Any,
+    ) -> list[Any] | dict[str, Any]:
         return self.retrieve_billings(start_date, end_date, missive_type=missive_type, **kwargs)
 
     retrieve_billings_type.__name__ = f"retrieve_billings_{missive_type}"

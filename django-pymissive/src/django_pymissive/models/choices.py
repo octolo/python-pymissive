@@ -1,11 +1,13 @@
 """Missive model choices."""
 
-from typing import Optional
+from collections.abc import Mapping
+from typing import Any, Optional, TypeAlias, cast
 
+from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy as _
-from django.conf import settings
 
 from pymissive.config import (
     MISSIVE_ACKNOWLEDGEMENT_LEVELS,
@@ -20,13 +22,22 @@ from pymissive.config import (
     missive_types_for_support,
 )
 
+ChoiceLabel: TypeAlias = str | Promise
+ChoiceMember: TypeAlias = tuple[str, ChoiceLabel]
 
-def is_enable_setting(setting):
+
+def _text_choices(name: str, members: Mapping[str, ChoiceMember]) -> Any:
+    """Create settings-driven TextChoices unsupported by Django's static stubs."""
+    factory = cast(Any, models.TextChoices)
+    return factory(name, members)
+
+
+def is_enable_setting(setting: str) -> bool:
     return getattr(settings, f"MISSIVE_{setting}".upper(), True)
 
 
 # Python UPPERCASE, DB lowercase (config key), label capitalize
-MissiveSupport = models.TextChoices(
+MissiveSupport = _text_choices(
     "MissiveSupport",
     {k.upper(): (k, _(k.capitalize())) for k in GENERIC_SUPPORT},
 )
@@ -37,7 +48,7 @@ def get_missive_support_from_type(missive_type: str) -> str:
     return missive_support_for_type(missive_type)
 
 
-def missive_type_filter(support: str, prefix: str = "") -> dict:
+def missive_type_filter(support: str, prefix: str = "") -> dict[str, list[str]]:
     """ORM filter kwargs selecting every missive type of ``support``.
 
     ``prefix`` is the lookup path leading to the missive: ``""`` on a ``Missive``
@@ -124,27 +135,28 @@ def error_missive_q(prefix: str = "") -> Q:
 
 
 # Python UPPERCASE, DB lowercase, label from config (already localized in translation_catalog)
-def _event_key(k):
+def _event_key(k: str) -> str:
     return k.upper().replace("-", "_").replace(" ", "_")
 
-def _event_label(v):
+
+def _event_label(v: str | tuple[str, ...]) -> str:
     """Extract translatable label from config value (str or (label, description) tuple)."""
     return v[0] if isinstance(v, tuple) else v
 
 
-def _event_reason(v):
+def _event_reason(v: str | tuple[str, ...]) -> str:
     """Extract reason from config value (second element of tuple, or empty string)."""
     return v[1] if isinstance(v, tuple) and len(v) > 1 else ""
 
 
 # Map event value (DB) -> translatable reason for get_description()
-_EVENT_REASONS = {
+_EVENT_REASONS: dict[str, ChoiceLabel] = {
     **{k: _(v[1]) if isinstance(v, tuple) and len(v) > 1 else "" for k, v in SUCCESSFUL_EVENTS.items()},
     **{k: _(v[1]) if isinstance(v, tuple) and len(v) > 1 else "" for k, v in INFO_EVENTS.items()},
     **{k: _(v[1]) if isinstance(v, tuple) and len(v) > 1 else "" for k, v in FAILED_EVENTS.items()},
 }
 
-MissiveEventType = models.TextChoices(
+MissiveEventType = _text_choices(
     "MissiveEventType",
     {
         **{_event_key(k): (k.lower(), _(_event_label(v))) for k, v in SUCCESSFUL_EVENTS.items()},
@@ -154,24 +166,22 @@ MissiveEventType = models.TextChoices(
 )
 
 
-def _get_event_reason(event_value: Optional[str]) -> str:
+def _get_event_reason(event_value: Optional[str]) -> ChoiceLabel:
     """Return config reason for event, or empty string if unknown."""
     return _EVENT_REASONS.get(event_value or "", "")
 
 
-MissiveEventType.get_description = classmethod(
-    lambda cls, event_value: _get_event_reason(event_value)
-)
+MissiveEventType.get_description = classmethod(lambda cls, event_value: _get_event_reason(event_value))
 
 # Python UPPERCASE, DB lowercase (from config), label capitalize
-MissiveDeliveryMode = models.TextChoices(
+MissiveDeliveryMode = _text_choices(
     "MissiveDeliveryMode",
     {
         **{k.upper(): (k, _(k.capitalize())) for k in DELIVERY_MODES if is_enable_setting(k)},
     },
 )
 
-MissivePriority = models.TextChoices(
+MissivePriority = _text_choices(
     "MissivePriority",
     {
         **{k.upper(): (k, _(k.capitalize())) for k in PRIORITIES if is_enable_setting(k)},
@@ -252,7 +262,7 @@ def status_from_event_counts(
 
 
 # Python UPPERCASE, DB lowercase (from config key), label from config
-MissiveType = models.TextChoices(
+MissiveType = _text_choices(
     "MissiveType",
     {
         **{k.upper().replace("-", "_"): (k, _(v)) for k, v in MISSIVE_TYPES.items()},
@@ -267,14 +277,22 @@ class WebhookScheme(models.TextChoices):
     HTTP = "http", _("HTTP")
 
 
-AcknowledgementLevel = models.TextChoices(
-    "AcknowledgementLevel", 
-    {
-        **{level["name"].upper(): (level["name"], _(level["display_name"])) 
-        for level in MISSIVE_ACKNOWLEDGEMENT_LEVELS if is_enable_setting(level["name"])},
-    }
-)
+def _acknowledgement_members() -> dict[str, ChoiceMember]:
+    members: dict[str, ChoiceMember] = {}
+    for level in MISSIVE_ACKNOWLEDGEMENT_LEVELS:
+        name = level["name"]
+        display_name = level["display_name"]
+        if not isinstance(name, str) or not isinstance(display_name, str):
+            raise TypeError("Acknowledgement names and labels must be strings")
+        if is_enable_setting(name):
+            members[name.upper()] = (name, _(display_name))
+    return members
 
+
+AcknowledgementLevel = _text_choices(
+    "AcknowledgementLevel",
+    _acknowledgement_members(),
+)
 
 
 class MissiveRecipientType(models.TextChoices):

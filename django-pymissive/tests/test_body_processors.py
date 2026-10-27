@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
 from django.test import override_settings
 
 from django_pymissive.processors.body import (
@@ -161,9 +160,7 @@ def test_django_template_processor_does_not_html_escape_plain_text_fields():
             context={"thing": "test & sample"},
             field_name=fname,
         )
-        assert out == "It's a test & sample", (
-            f"field_name={fname!r} unexpectedly HTML-escaped the output: {out!r}"
-        )
+        assert out == "It's a test & sample", f"field_name={fname!r} unexpectedly HTML-escaped the output: {out!r}"
 
 
 def test_django_template_processor_html_escapes_html_fields():
@@ -267,9 +264,7 @@ def test_html_snippet_is_separated_from_body_by_a_br():
         missive=missive,
         field_name="body_rich",
     )
-    assert chained == (
-        "<p>body</p><br><p>PREVIEW_HTML</p><br><p>ATTACH_HTML</p>"
-    )
+    assert chained == ("<p>body</p><br><p>PREVIEW_HTML</p><br><p>ATTACH_HTML</p>")
 
 
 def test_text_snippet_keeps_blank_line_separator():

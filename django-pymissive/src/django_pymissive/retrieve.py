@@ -90,13 +90,9 @@ def _normalize_retrieve_response(response) -> dict:
 
 def _call_retrieve(missive: Missive, partner_id=None, uid=None) -> dict:
     if not missive.has_service("retrieve"):
-        raise ValidationError(
-            _("This provider does not support retrieve for this missive type.")
-        )
+        raise ValidationError(_("This provider does not support retrieve for this missive type."))
     response = _normalize_retrieve_response(
-        missive.call_provider_service(
-            "retrieve", **_retrieve_kwargs(missive, partner_id=partner_id, uid=uid)
-        )
+        missive.call_provider_service("retrieve", **_retrieve_kwargs(missive, partner_id=partner_id, uid=uid))
     )
     if not _has_retrieve_payload(response):
         raise ValidationError(_("Missive not found."))
@@ -167,19 +163,20 @@ def retrieve_from_provider(
     the provider service (``retrieve_letter``, ``retrieve_registered_letter``, …).
     """
     created = missive is None
-    if created:
-        missive = Missive(
+    if missive is None:
+        resolved_missive = Missive(
             provider=provider,
             missive_type=missive_type,
             external_id=partner_id or None,
             substitute_id=str(uid) if uid else None,
         )
     else:
-        partner_id = partner_id or missive.external_id
-        uid = uid or missive.substitute_id or missive.pk
-    response = _call_retrieve(missive, partner_id=partner_id, uid=uid)
-    _ingest_retrieve_response(missive, response, partner_id=partner_id, uid=uid)
-    return missive, created
+        resolved_missive = missive
+        partner_id = partner_id or resolved_missive.external_id
+        uid = uid or resolved_missive.substitute_id or resolved_missive.pk
+    response = _call_retrieve(resolved_missive, partner_id=partner_id, uid=uid)
+    _ingest_retrieve_response(resolved_missive, response, partner_id=partner_id, uid=uid)
+    return resolved_missive, created
 
 
 def _nullable_substitute_id(value, pk=None) -> str | None:
@@ -204,11 +201,7 @@ def _substitute_id_from_payload(payload: dict, fallback=None) -> str | None:
 
 def _apply_retrieve_response(missive: Missive, response: dict, partner_id=None, uid=None) -> None:
     """Copy provided fields; leave local values when the payload omits them."""
-    external_id = missive.external_id or (
-        response.get("external_id")
-        or response.get("message_id")
-        or partner_id
-    )
+    external_id = missive.external_id or (response.get("external_id") or response.get("message_id") or partner_id)
     for name in _RETRIEVE_FIELDS:
         value = response.get(name)
         if value not in (None, ""):
@@ -227,20 +220,30 @@ def _recipients_from_response(response: dict) -> list[dict]:
     seen = set()
     collected = []
     for event in response.get("events") or []:
-        if not isinstance(event, dict):
+        recipient = _recipient_from_event(event)
+        if recipient is None:
             continue
-        rec = event.get("recipient") if isinstance(event.get("recipient"), dict) else {}
-        rec = dict(rec)
-        if event.get("email") and not rec.get("email"):
-            rec["email"] = event.get("email")
-        if event.get("phone") and not rec.get("phone"):
-            rec["phone"] = event.get("phone")
-        key = rec.get("email") or rec.get("phone") or rec.get("id")
+        key = _recipient_identity(recipient)
         if not key or key in seen:
             continue
         seen.add(key)
-        collected.append(rec)
+        collected.append(recipient)
     return collected
+
+
+def _recipient_from_event(event):
+    if not isinstance(event, dict):
+        return None
+    source = event.get("recipient")
+    recipient = dict(source) if isinstance(source, dict) else {}
+    for field in ("email", "phone"):
+        if event.get(field) and not recipient.get(field):
+            recipient[field] = event[field]
+    return recipient
+
+
+def _recipient_identity(recipient):
+    return recipient.get("email") or recipient.get("phone") or recipient.get("id")
 
 
 def _recipient_support_from_payload(rec: dict, missive: Missive) -> str:
@@ -260,27 +263,31 @@ def _replace_retrieve_recipients(missive: Missive, response: dict) -> None:
 
     Caller must have checked that the payload actually lists recipients.
     """
-    missive.to_missiverecipient.exclude(
-        recipient_type=MissiveRecipientType.NOTIFICATION
-    ).delete()
+    missive.to_missiverecipient.exclude(recipient_type=MissiveRecipientType.NOTIFICATION).delete()
     for rec in _recipients_from_response(response):
-        if not isinstance(rec, dict):
-            continue
-        email = rec.get("email") or None
-        phone = rec.get("phone") or None
-        address = rec.get("address") or None
-        name = rec.get("name") or ""
-        if not email and not phone and not address and not name:
+        values = _recipient_values(rec, missive)
+        if values is None:
             continue
         MissiveRecipient.objects.create(
             missive=missive,
             recipient_type=MissiveRecipientType.RECIPIENT,
-            recipient_support=_recipient_support_from_payload(rec, missive),
-            name=name,
-            email=email,
-            phone=phone,
-            address=address,
-            external_id=rec.get("external_id") or None,
-            substitute_id=_nullable_substitute_id(_substitute_id_from_payload(rec)),
-            tracking_number=rec.get("tracking_number") or None,
+            **values,
         )
+
+
+def _recipient_values(rec, missive):
+    if not isinstance(rec, dict):
+        return None
+    values = {
+        "recipient_support": _recipient_support_from_payload(rec, missive),
+        "name": rec.get("name") or "",
+        "email": rec.get("email") or None,
+        "phone": rec.get("phone") or None,
+        "address": rec.get("address") or None,
+        "external_id": rec.get("external_id") or None,
+        "substitute_id": _nullable_substitute_id(_substitute_id_from_payload(rec)),
+        "tracking_number": rec.get("tracking_number") or None,
+    }
+    if not any(values[field] for field in ("name", "email", "phone", "address")):
+        return None
+    return values

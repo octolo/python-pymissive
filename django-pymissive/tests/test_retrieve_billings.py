@@ -24,9 +24,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_form_requires_dates():
-    form = RetrieveBillingsForm(
-        data={"provider": "maileva", "missive_type": MissiveType.REGISTERED_LETTER}
-    )
+    form = RetrieveBillingsForm(data={"provider": "maileva", "missive_type": MissiveType.REGISTERED_LETTER})
     assert form.is_valid() is False
 
 
@@ -121,9 +119,7 @@ def test_retrieve_billings_calls_provider_and_upserts():
             }
         ]
     }
-    with patch(
-        "django_pymissive.models.provider.MissiveProviderModel"
-    ) as ProviderModel:
+    with patch("django_pymissive.models.provider.MissiveProviderModel") as ProviderModel:
         ProviderModel.objects.get.return_value = provider
         retrieve_billings(
             provider="maileva",
@@ -158,9 +154,7 @@ def test_retrieve_billings_matches_substitute_id_when_no_external_id():
             "invoice": "AR",
         }
     ]
-    with patch(
-        "django_pymissive.models.provider.MissiveProviderModel"
-    ) as ProviderModel:
+    with patch("django_pymissive.models.provider.MissiveProviderModel") as ProviderModel:
         ProviderModel.objects.get.return_value = provider
         retrieve_billings(
             provider="maileva",
@@ -205,9 +199,7 @@ def test_delay_retrieve_billings_uses_thread_backend(settings):
 
 
 def test_admin_retrieve_billings_get_renders_form():
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missivebilling_retrieve_billings")
@@ -217,9 +209,7 @@ def test_admin_retrieve_billings_get_renders_form():
 
 
 def test_admin_retrieve_billings_post_sync():
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missivebilling_retrieve_billings")
@@ -239,9 +229,7 @@ def test_admin_retrieve_billings_post_sync():
 
 
 def test_admin_retrieve_billings_post_as_task():
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missivebilling_retrieve_billings")

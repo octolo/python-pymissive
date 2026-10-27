@@ -53,9 +53,10 @@ def test_anonymous_preview_does_not_regenerate_the_first_document():
     url = reverse("django_pymissive:preview", args=["missive", missive.pk])
 
     # A postal missive redirects to the per-recipient preview route.
-    with patch.object(Missive, "ensure_first_document") as ensure, patch.object(
-        Missive, "generate_first_document"
-    ) as generate:
+    with (
+        patch.object(Missive, "ensure_first_document") as ensure,
+        patch.object(Missive, "generate_first_document") as generate,
+    ):
         response = Client().get(url, follow=True)
 
     assert response.status_code == 200

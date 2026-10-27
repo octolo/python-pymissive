@@ -1,10 +1,13 @@
 """Forms for missive admin views."""
 
+from typing import Any
+
 from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
 from ..models.missive import Missive
+from ._fields import model_formfield
 
 
 class RetrieveMissiveForm(forms.Form):
@@ -18,18 +21,20 @@ class RetrieveMissiveForm(forms.Form):
     uid = forms.CharField(
         required=False,
         label=_("Internal ID"),
-        help_text=_(
-            "Internal missive UUID, or substitute/custom ID from another system"
-        ),
+        help_text=_("Internal missive UUID, or substitute/custom ID from another system"),
     )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["provider"] = Missive._meta.get_field("provider").formfield(
+        self.fields["provider"] = model_formfield(
+            Missive,
+            "provider",
             required=True,
             label=_("Provider"),
         )
-        self.fields["missive_type"] = Missive._meta.get_field("missive_type").formfield(
+        self.fields["missive_type"] = model_formfield(
+            Missive,
+            "missive_type",
             required=True,
             label=_("Missive type"),
         )
@@ -42,8 +47,8 @@ class RetrieveMissiveForm(forms.Form):
             ]
         )
 
-    def clean(self):
-        cleaned = super().clean()
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean() or {}
         partner_id = (cleaned.get("partner_id") or "").strip() or None
         uid = (cleaned.get("uid") or "").strip() or None
         cleaned["uid"] = uid

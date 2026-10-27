@@ -1,0 +1,18 @@
+.brand-slack {
+    background: #fff;
+    border: 1px solid #e8e8e8;
+    color: #1d1c1d;
+}
+
+.brand-slack .brand-avatar {
+    border-radius: 4px;
+    background: #611f69;
+}
+
+.brand-slack .brand-time {
+    color: #616061;
+}
+
+.brand-slack .brand-text a {
+    color: #1264a3;
+}

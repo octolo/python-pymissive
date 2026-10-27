@@ -56,9 +56,13 @@ def test_email_preview_puts_compiled_html_in_a_sandboxed_iframe():
 
 def test_quotes_in_the_body_cannot_break_out_of_srcdoc():
     missive = _email_missive(body_rich='<p class="break">ok</p>')
-    html = Client().get(
-        reverse("django_pymissive:preview", args=["missive", missive.pk]),
-    ).content.decode()
+    html = (
+        Client()
+        .get(
+            reverse("django_pymissive:preview", args=["missive", missive.pk]),
+        )
+        .content.decode()
+    )
 
     assert 'class="break"' not in html
     assert "class=&quot;break&quot;" in html
@@ -92,6 +96,6 @@ def test_postal_browser_letter_sandboxes_the_compiled_body():
         ctx,
     )
     assert "<iframe" in page
-    assert 'sandbox' in page
+    assert "sandbox" in page
     assert "<script>" not in page
     assert "&lt;script&gt;" in page

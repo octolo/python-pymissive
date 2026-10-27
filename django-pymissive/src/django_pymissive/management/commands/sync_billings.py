@@ -34,9 +34,7 @@ class Command(BaseCommand):
         try:
             since = datetime.strptime(date_str, "%Y-%m-%d").date()
         except ValueError:
-            self.stderr.write(
-                self.style.ERROR(f"Invalid date format: {date_str}. Use YYYY-MM-DD.")
-            )
+            self.stderr.write(self.style.ERROR(f"Invalid date format: {date_str}. Use YYYY-MM-DD."))
             return
 
         missives = (
@@ -54,9 +52,7 @@ class Command(BaseCommand):
             if not missive.can_billings():
                 skipped += 1
                 if options.get("verbosity", 1) >= 2:
-                    self.stdout.write(
-                        f"Skipped {missive.id} (no get_billings or no external_id)"
-                    )
+                    self.stdout.write(f"Skipped {missive.id} (no get_billings or no external_id)")
                 continue
 
             try:
@@ -64,17 +60,11 @@ class Command(BaseCommand):
                 missive.get_billings()
                 synced += 1
                 if options.get("verbosity", 1) >= 2:
-                    self.stdout.write(
-                        self.style.SUCCESS(f"Synced billings for missive {missive.id}")
-                    )
+                    self.stdout.write(self.style.SUCCESS(f"Synced billings for missive {missive.id}"))
             except Exception as e:
                 errors += 1
-                self.stderr.write(
-                    self.style.ERROR(f"Error syncing missive {missive.id}: {e}")
-                )
+                self.stderr.write(self.style.ERROR(f"Error syncing missive {missive.id}: {e}"))
 
         self.stdout.write(
-            self.style.SUCCESS(
-                f"Done: {synced} synced, {skipped} skipped, {errors} errors (total: {total})"
-            )
+            self.style.SUCCESS(f"Done: {synced} synced, {skipped} skipped, {errors} errors (total: {total})")
         )

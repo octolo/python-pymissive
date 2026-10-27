@@ -63,6 +63,7 @@ class CampaignVirtualAttachmentManager(MissiveBaseAttachmentManager):
         )
         return qs
 
+
 class MissiveProofManager(MissiveBaseAttachmentManager):
     """Manager for the MissiveProof model."""
 

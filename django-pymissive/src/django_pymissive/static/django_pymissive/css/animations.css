@@ -1,0 +1,340 @@
+/* Communication animations: standalone stylesheet for animation.js. */
+
+/* Structure namespaced for each mounted animation; no global page styles. */
+.pym-am-root{display:block;box-sizing:border-box;color:var(--pym-am-900);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;line-height:normal}
+.pym-am-root,.pym-am-root *{box-sizing:border-box}
+.pym-am-root .single-card-grid{grid-template-columns:minmax(0,1fr)!important}
+.pym-am-root .widget-single-card{width:100%;grid-column:auto}
+.pym-am-root .widget-card-caption{left:4%;bottom:0;width:92%;margin:0}
+.pym-am-root .widget-card-counter{top:8px}
+.pym-am-root .lab-stage .lab-counter{top:8px}
+.pym-am-root .lab-stage .lab-caption{bottom:0}
+.pym-am-root .lab-stage .lab-scene-content{height:270px}
+
+.pym-am-root{display:block;--email-cycle:4.5s;--postal-cycle:4.8s;--sms-cycle:4s;--sms-gap:1.3s;--pym-am-brand:#5484ed;--pym-am-950:color-mix(in oklab,var(--pym-am-brand) 42%,black);--pym-am-900:color-mix(in oklab,var(--pym-am-brand) 55%,black);--pym-am-800:color-mix(in oklab,var(--pym-am-brand) 68%,black);--pym-am-700:color-mix(in oklab,var(--pym-am-brand) 80%,black);--pym-am-600:color-mix(in oklab,var(--pym-am-brand) 90%,black);--pym-am-400:color-mix(in oklab,var(--pym-am-brand) 80%,white);--pym-am-300:color-mix(in oklab,var(--pym-am-brand) 50%,white);--pym-am-200:color-mix(in oklab,var(--pym-am-brand) 35%,white);--pym-am-150:color-mix(in oklab,var(--pym-am-brand) 18%,white);--pym-am-100:color-mix(in oklab,var(--pym-am-brand) 12%,white);--pym-am-50:color-mix(in oklab,var(--pym-am-brand) 4%,white);--pym-am-ink:color-mix(in oklab,var(--pym-am-800) 55%,#808080);--pym-am-muted:color-mix(in oklab,var(--pym-am-brand) 30%,#a0a0a0)}
+.pym-am-root,
+.pym-am-root *{box-sizing:border-box}
+.pym-am-root body{margin:0;padding:32px 16px;background:var(--pym-am-100);color:var(--pym-am-900);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.pym-am-root main{width:min(1120px,100%);margin:auto}
+.pym-am-root header{text-align:center;margin:0 0 28px}
+.pym-am-root h1{font-size:clamp(25px,4vw,38px);letter-spacing:-1px;margin:0 0 8px}
+.pym-am-root header p{margin:0;color:var(--pym-am-ink)}
+.pym-am-root .controls{display:flex;justify-content:center;align-items:end;gap:22px;flex-wrap:wrap;margin:22px auto 28px;padding:16px 20px;max-width:720px;border:1px solid var(--pym-am-150);border-radius:18px;background:#fff;box-shadow:0 8px 24px color-mix(in srgb,var(--pym-am-800) 4%,transparent)}
+.pym-am-root .control{display:grid;gap:8px;min-width:210px;text-align:left}
+.pym-am-root .control label{font-size:13px;font-weight:700;color:var(--pym-am-ink)}
+.pym-am-root .control input{width:100%;accent-color:var(--pym-am-brand)}
+.pym-am-root .control output{font-size:13px;font-weight:700;color:var(--pym-am-800)}
+@media (max-width:500px){
+.pym-am-root .controls{align-items:stretch;gap:14px}
+.pym-am-root .control{min-width:100%}
+}
+.pym-am-root .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.pym-am-root .card{min-width:0;overflow:hidden;border-radius:22px;background:white;box-shadow:0 14px 38px color-mix(in srgb,var(--pym-am-800) 6%,transparent)}
+.pym-am-root .card.wide{grid-column:span 1}
+.pym-am-root .card-head{padding:19px 21px 0;display:flex;align-items:center;gap:12px}
+.pym-am-root .icon{width:42px;height:42px;flex:0 0 42px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:var(--pym-am-100);color:var(--pym-am-brand);font-size:20px;line-height:1;text-align:center}
+.pym-am-root .card h2{margin:0;font-size:18px}
+.pym-am-root .card-head p{margin:4px 0 0;color:var(--pym-am-ink);font-size:13px}
+.pym-am-root .ground{position:absolute;bottom:35px;left:7%;width:86%;height:2px;border-radius:3px;background:var(--pym-am-150)}
+.pym-am-root .cloud{position:absolute;bottom:-75px;width:230px;height:125px;border-radius:50%;background:var(--pym-am-200);opacity:.34}
+.pym-am-root .cloud.l{left:-95px}
+.pym-am-root .cloud.r{right:-95px}
+/* Mailbox illustration */
+.pym-am-root .mailbox{
+  position:absolute; z-index:5; right:10%; bottom:42px; width:132px; height:180px;
+}
+.pym-am-root .mail-post{
+  position:absolute; z-index:0; bottom:0; left:56px; width:24px; height:67px;
+  border-radius:4px; background:linear-gradient(90deg,var(--pym-am-700),var(--pym-am-400) 50%,var(--pym-am-600));
+}
+.pym-am-root .mail-post:after{
+  content:""; position:absolute; bottom:0; left:-13px; width:50px; height:7px;
+  border-radius:4px; background:var(--pym-am-700);
+}
+.pym-am-root .mail-body{
+  position:absolute; z-index:2; top:38px; width:132px; height:104px;
+  border-radius:17px 17px 7px 7px;
+  background:linear-gradient(105deg,var(--pym-am-600),var(--pym-am-400) 45%,var(--pym-am-600) 83%,var(--pym-am-700));
+  box-shadow:inset 0 4px var(--pym-am-300),inset -7px 0 9px color-mix(in srgb,var(--pym-am-800) 13%,transparent),0 12px 20px color-mix(in srgb,var(--pym-am-700) 13%,transparent);
+}
+.pym-am-root .mail-roof{
+  position:absolute; z-index:4; top:29px; width:132px; height:43px;
+  border:4px solid var(--pym-am-brand); border-radius:70px 70px 12px 12px;
+  background:linear-gradient(var(--pym-am-300),var(--pym-am-brand)); box-shadow:inset 0 3px var(--pym-am-200);
+}
+.pym-am-root .mail-slot{
+  position:absolute; z-index:6; top:75px; left:15px; width:102px; height:15px;
+  border-radius:9px; background:var(--pym-am-900); box-shadow:inset 0 3px 4px var(--pym-am-950),0 2px var(--pym-am-300);
+}
+.pym-am-root .mail-slot:after{ content:""; position:absolute; inset:2px 4px; border-radius:8px; background:var(--pym-am-950); }
+.pym-am-root .mail-emblem{
+  position:absolute; z-index:5; left:43px; top:102px; width:47px; height:29px;
+  display:grid; place-items:center; border:2px solid var(--pym-am-150); border-radius:5px;
+  color:white; font-size:21px;
+}
+.pym-am-root .mail-flagpole{ position:absolute; z-index:7; top:0; right:21px; width:6px; height:43px; background:var(--pym-am-700); border-radius:3px; }
+.pym-am-root .mail-flag{ position:absolute; top:0; left:2px; width:32px; height:17px; border-radius:2px 5px 5px 2px; background:var(--pym-am-700); }
+.pym-am-root .mail-shadow{ position:absolute; bottom:-7px; left:-18px; width:170px; height:13px; border-radius:50%; background:var(--pym-am-400); opacity:.25; }
+/* Envelope */
+.pym-am-root .envelope{position:absolute;width:59px;height:41px;border-radius:4px;background:linear-gradient(145deg,#fff,var(--pym-am-100));box-shadow:0 6px 14px color-mix(in srgb,var(--pym-am-brand) 11%,transparent)}
+.pym-am-root .envelope:before{content:"";position:absolute;inset:0;z-index:1;background:var(--pym-am-150);clip-path:polygon(0 100%,50% 43%,100% 100%)}
+.pym-am-root .envelope:after{content:"";position:absolute;inset:0;z-index:2;background:linear-gradient(135deg,#fff,var(--pym-am-100));clip-path:polygon(0 0,50% 58%,100% 0)}
+/* Email: light envelope with a blue outline, distinct from postal mail. */
+.pym-am-root .email-envelope{border:2px solid var(--pym-am-brand);background:linear-gradient(145deg,#fff,var(--pym-am-100));z-index:6}
+.pym-am-root .email-envelope:before{background:var(--pym-am-150);clip-path:polygon(0 100%,50% 43%,100% 100%)}
+.pym-am-root .email-envelope:after{background:linear-gradient(135deg,#fff,var(--pym-am-100));clip-path:polygon(0 0,50% 58%,100% 0)}
+.pym-am-root .email-ar-mark{position:absolute;z-index:5;top:-8px;right:-9px;display:grid;place-items:center;min-width:19px;height:13px;padding:0 3px;border:1px solid #fff;border-radius:5px;background:#36ad7e;color:#fff;font-size:8px;line-height:1;font-weight:850;box-shadow:0 2px 5px #245b4725}
+/* Postal mail: yellow envelope with a golden flap. */
+.pym-am-root .postal-envelope{border:1px solid #e9a32c;background:linear-gradient(145deg,#ffd878,#ffb82f);box-shadow:0 6px 14px #b77a1d2b}
+.pym-am-root .postal-envelope:before{background:#f6ad2c;clip-path:polygon(0 100%,50% 43%,100% 100%)}
+.pym-am-root .postal-envelope:after{background:linear-gradient(135deg,#ffdc84,#ffc04a);clip-path:polygon(0 0,50% 58%,100% 0)}
+/* Desktop with email inbox */
+.pym-am-root .desktop{position:absolute;z-index:5;right:7%;bottom:38px;width:190px;height:155px}
+/* The stand and neck stay behind the screen */
+.pym-am-root .monitor{position:absolute;z-index:2;top:0;width:190px;height:119px;padding:8px;border-radius:13px;background:linear-gradient(130deg,var(--pym-am-600),var(--pym-am-800));box-shadow:0 13px 20px color-mix(in srgb,var(--pym-am-800) 13%,transparent)}
+.pym-am-root .screen{height:100%;position:relative;overflow:hidden;border-radius:7px;background:linear-gradient(145deg,#fff,var(--pym-am-100))}
+.pym-am-root .mail-app-top{position:absolute;top:0;left:0;right:0;height:18px;background:var(--pym-am-150);border-bottom:1px solid var(--pym-am-150)}
+.pym-am-root .mail-app-top:before{content:"";position:absolute;left:7px;top:6px;width:5px;height:5px;border-radius:50%;background:var(--pym-am-400);box-shadow:9px 0 var(--pym-am-300),18px 0 var(--pym-am-200)}
+.pym-am-root .inbox-side{position:absolute;left:0;top:18px;bottom:0;width:42px;background:var(--pym-am-100);border-right:1px solid var(--pym-am-150)}
+.pym-am-root .inbox-side:before{content:"";position:absolute;top:10px;left:8px;width:25px;height:4px;border-radius:3px;background:var(--pym-am-300);box-shadow:0 11px var(--pym-am-200),0 22px var(--pym-am-200),0 33px var(--pym-am-200)}
+.pym-am-root .email-list{position:absolute;left:50px;right:6px;top:27px;height:14px;border-radius:3px;background:#fff;border:1px solid var(--pym-am-150)}
+.pym-am-root .email-list:before{content:"";position:absolute;left:5px;top:4px;width:35px;height:3px;background:var(--pym-am-300);border-radius:3px;box-shadow:0 5px var(--pym-am-150)}
+.pym-am-root .email-list:after{content:"";position:absolute;right:5px;top:4px;width:18px;height:3px;background:var(--pym-am-150);border-radius:3px}
+.pym-am-root .email-list.two{top:45px}
+.pym-am-root .email-list.three{top:63px}
+.pym-am-root .incoming-email{position:absolute;z-index:3;left:calc(50% - 18px);top:40px;width:36px;height:26px;border:2px solid var(--pym-am-brand);border-radius:4px;background:white;box-shadow:0 4px 8px color-mix(in srgb,var(--pym-am-700) 14%,transparent);animation:screenPop var(--email-cycle,4.5s) ease-in-out infinite}
+.pym-am-root .incoming-email:after{content:"";position:absolute;inset:0;background:var(--pym-am-150);clip-path:polygon(0 0,50% 58%,100% 0)}
+@keyframes screenPop{0%,70%,100%{opacity:0;transform:scale(.55) translateY(7px)}78%,91%{opacity:1;transform:scale(1) translateY(0)}}
+.pym-am-root .monitor-neck{position:absolute;z-index:1;bottom:21px;left:79px;width:32px;height:18px;background:var(--pym-am-400)}
+.pym-am-root .monitor-base{position:absolute;z-index:1;bottom:11px;left:51px;width:88px;height:13px;border-radius:5px 5px 9px 9px;background:linear-gradient(var(--pym-am-400),var(--pym-am-700))}
+/* Phone */
+.pym-am-root .phone{position:absolute;z-index:5;right:12%;bottom:22px;width:112px;height:210px;padding:7px;border-radius:25px;border:3px solid var(--pym-am-600);background:linear-gradient(120deg,var(--pym-am-brand),var(--pym-am-700));box-shadow:0 14px 24px color-mix(in srgb,var(--pym-am-700) 16%,transparent),inset 2px 0 var(--pym-am-300)}
+.pym-am-root .phone-screen{position:relative;width:100%;height:100%;overflow:hidden;border-radius:17px;background:linear-gradient(160deg,var(--pym-am-50),var(--pym-am-100))}
+.pym-am-root .notch{position:absolute;z-index:2;top:0;left:30px;width:36px;height:9px;border-radius:0 0 8px 8px;background:var(--pym-am-600)}
+.pym-am-root .chat-head{position:absolute;top:18px;left:9px;right:9px;height:23px;border-bottom:1px solid var(--pym-am-150);color:var(--pym-am-ink);font-size:8px;text-align:center;font-weight:700}
+.pym-am-root .bubble{position:absolute;max-width:72px;padding:7px 9px;border-radius:10px;font-size:8px;line-height:1.3;box-shadow:0 3px 7px color-mix(in srgb,var(--pym-am-600) 7%,transparent)}
+.pym-am-root .bubble.received{left:6px;top:55px;color:var(--pym-am-ink);background:white;border:1px solid var(--pym-am-150)}
+.pym-am-root .bubble.sent{right:6px;top:89px;color:white;background:var(--pym-am-brand)}
+.pym-am-root .bubble.sent:after{content:"";position:absolute;right:-3px;bottom:2px;border-width:4px 0 0 5px;border-style:solid;border-color:transparent transparent transparent var(--pym-am-brand)}
+.pym-am-root .home{position:absolute;bottom:4px;left:41px;width:20px;height:3px;border-radius:3px;background:var(--pym-am-300)}
+.pym-am-root .sms-message{position:absolute;width:66px;min-height:33px;padding:7px 8px;border-radius:11px;color:#fff;background:linear-gradient(135deg,var(--pym-am-400),var(--pym-am-600));box-shadow:0 7px 14px color-mix(in srgb,var(--pym-am-600) 17%,transparent);font-size:9px;font-weight:600}
+.pym-am-root .sms-message:after{content:"";position:absolute;bottom:2px;right:-4px;border-width:5px 0 0 6px;border-style:solid;border-color:transparent transparent transparent var(--pym-am-600)}
+.pym-am-root .notice{position:absolute;width:78px;min-height:28px;padding:6px 8px;border-radius:8px;color:var(--pym-am-ink);background:#fff;border:1px solid var(--pym-am-150);box-shadow:0 7px 14px color-mix(in srgb,var(--pym-am-600) 14%,transparent);font-size:9px;font-weight:700}
+/* Notification receiver: phone home screen with a status bar, app icons and a dropping banner */
+.pym-am-root .home-screen{background:linear-gradient(165deg,var(--pym-am-200),var(--pym-am-50) 55%,var(--pym-am-150))}
+.pym-am-root .status-bar{position:absolute;z-index:3;top:1px;left:8px;right:7px;height:9px;display:flex;align-items:center;justify-content:space-between;color:var(--pym-am-800);font-size:6px;font-weight:800;line-height:1}
+.pym-am-root .status-icons{display:flex;align-items:flex-end;gap:1px;height:6px}
+.pym-am-root .status-icons i{display:block;width:1.5px;border-radius:1px;background:var(--pym-am-800)}
+.pym-am-root .status-icons i:nth-child(1){height:2px}
+.pym-am-root .status-icons i:nth-child(2){height:4px}
+.pym-am-root .status-icons i:nth-child(3){height:6px}
+.pym-am-root .status-icons b{position:relative;display:block;width:9px;height:5px;margin-left:2px;border:1px solid var(--pym-am-800);border-radius:1.5px;background:linear-gradient(90deg,var(--pym-am-800) 70%,transparent 70%) 1px 1px/calc(100% - 2px) calc(100% - 2px) no-repeat}
+.pym-am-root .app-grid{position:absolute;top:24px;left:10px;right:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px 7px}
+.pym-am-root .app{position:relative;display:block;aspect-ratio:1;border-radius:4px;background:var(--pym-am-brand);box-shadow:0 1px 2px color-mix(in srgb,var(--pym-am-800) 18%,transparent)}
+.pym-am-root .app:nth-child(4n+2){background:var(--pym-am-400)}
+.pym-am-root .app:nth-child(4n+3){background:var(--pym-am-700)}
+.pym-am-root .app:nth-child(4n){background:var(--pym-am-300)}
+.pym-am-root .app-grid .app:nth-child(5){background:#36ad7e}
+.pym-am-root .app-grid .app:nth-child(10){background:#f2b84b}
+.pym-am-root .app-grid .app:nth-child(15){background:#ed6680}
+.pym-am-root .app-dock{position:absolute;left:5px;right:5px;bottom:11px;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;padding:5px 6px;border-radius:9px;background:rgba(255,255,255,.45)}
+.pym-am-root .app-badge{position:absolute;top:-4px;right:-4px;min-width:9px;height:9px;padding:0 2px;border-radius:5px;border:1px solid #fff;background:#e5484d;color:#fff;font-size:5px;font-weight:800;line-height:7px;text-align:center;opacity:0;animation:badgePop var(--sms-cycle,4s) ease-out infinite}
+.pym-am-root .notice-banner{position:absolute;z-index:4;left:4px;right:4px;top:12px;display:flex;gap:5px;align-items:center;padding:5px 6px;border-radius:8px;background:rgba(255,255,255,.96);border:1px solid var(--pym-am-150);box-shadow:0 4px 10px color-mix(in srgb,var(--pym-am-700) 16%,transparent);opacity:0;animation:noticeDrop var(--sms-cycle,4s) ease-in-out infinite}
+.pym-am-root .notice-bell{display:grid;place-items:center;flex:none;width:15px;height:15px;border-radius:4px;background:var(--pym-am-brand);font-size:8px;line-height:1}
+.pym-am-root .notice-banner b{display:block;font-size:7px;color:var(--pym-am-800)}
+.pym-am-root .notice-banner small{display:block;font-size:6px;color:var(--pym-am-muted)}
+@keyframes noticeDrop{0%,70%,100%{opacity:0;transform:translateY(-24px)}78%,91%{opacity:1;transform:translateY(0)}}
+@keyframes badgePop{0%,76%{opacity:0;transform:scale(.3)}82%{opacity:1;transform:scale(1.25)}86%,100%{opacity:1;transform:scale(1)}}
+/* Animated voice message travelling to the phone in the voice call scene */
+.pym-am-root .call-signal{
+  position:absolute; z-index:6; left:-115px; top:112px;
+  display:flex; align-items:center; gap:3px;
+  height:34px; padding:0 10px; border-radius:12px;
+  color:#fff; background:linear-gradient(135deg,var(--pym-am-400),var(--pym-am-600));
+  box-shadow:0 7px 14px color-mix(in srgb,var(--pym-am-600) 17%,transparent);
+}
+.pym-am-root .call-signal:before{
+  content:attr(data-label); font-size:9px; font-weight:700; margin-right:5px;
+}
+.pym-am-root .call-signal span{
+  display:block; width:3px; border-radius:3px; background:#fff;
+  height:7px; animation:voiceBars .65s ease-in-out infinite alternate;
+}
+.pym-am-root .call-signal span:nth-child(2){height:14px;animation-delay:.1s}
+.pym-am-root .call-signal span:nth-child(3){height:20px;animation-delay:.2s}
+.pym-am-root .call-signal span:nth-child(4){height:11px;animation-delay:.3s}
+.pym-am-root .call-signal span:nth-child(5){height:17px;animation-delay:.15s}
+.pym-am-root .call-signal span:nth-child(6){height:8px;animation-delay:.25s}
+@keyframes voiceBars{from{transform:scaleY(.65)}to{transform:scaleY(1.15)}}
+/* Voice call: same phone and style as the SMS animation */
+.pym-am-root .call-screen{
+  position:absolute; inset:7px; overflow:hidden; border-radius:17px;
+  background:linear-gradient(160deg,var(--pym-am-50),var(--pym-am-100));
+}
+.pym-am-root .call-top{ position:absolute; top:0; left:0; right:0; height:43px; background:linear-gradient(120deg,var(--pym-am-brand),var(--pym-am-600)); }
+.pym-am-root .call-top:before{ content:""; position:absolute; top:0; left:30px; width:36px; height:9px; border-radius:0 0 8px 8px; background:var(--pym-am-700); }
+.pym-am-root .avatar{
+  position:absolute; z-index:2; top:37px; left:calc(50% - 23px); width:46px; height:46px;
+  display:grid; place-items:center; border-radius:50%; background:linear-gradient(145deg,#fff,var(--pym-am-150));
+  border:3px solid #fff; color:var(--pym-am-brand); font-size:23px; box-shadow:0 5px 12px color-mix(in srgb,var(--pym-am-900) 13%,transparent);
+}
+.pym-am-root .caller-name{ position:absolute; top:91px; left:0; right:0; text-align:center; color:var(--pym-am-800); font-size:10px; font-weight:750; }
+.pym-am-root .call-status{ position:absolute; top:107px; left:0; right:0; text-align:center; color:var(--pym-am-muted); font-size:8px; }
+.pym-am-root .call-actions{ position:absolute; bottom:24px; left:0; right:0; display:flex; justify-content:center; gap:13px; }
+.pym-am-root .call-action{ width:27px; height:27px; border-radius:50%; display:flex; align-items:center; justify-content:center; line-height:1; background:var(--pym-am-150); color:var(--pym-am-700); font-size:11px; }
+.pym-am-root .call-action.decline{ background:#ed6680; color:white; }
+.pym-am-root .call-action.accept{ background:#36ad7e; color:white; }
+.pym-am-root .call-wave{ position:absolute; z-index:1; top:28px; left:calc(50% - 31px); width:62px; height:62px; border:2px solid var(--pym-am-brand); border-radius:50%; opacity:0; animation:ringWave 2.4s ease-out infinite; }
+.pym-am-root .call-wave.w2{ animation-delay:calc(var(--sms-gap,1.3s) * .92); }
+@keyframes ringWave { 0%{transform:scale(.6);opacity:0} 20%{opacity:.45} 100%{transform:scale(1.45);opacity:0} }
+/* AR: email receipt confirmation */
+.pym-am-root .ar-desktop .monitor{background:linear-gradient(130deg,var(--pym-am-600),var(--pym-am-800))}
+.pym-am-root .receipt-card{position:absolute;z-index:4;left:52px;top:31px;width:100px;padding:8px 6px 7px;border:1px solid var(--pym-am-150);border-radius:7px;background:#fff;text-align:center;box-shadow:0 5px 12px color-mix(in srgb,var(--pym-am-700) 11%,transparent);opacity:0;animation:receiptShow var(--email-cycle,4.5s) ease-in-out infinite}
+.pym-am-root .receipt-check{display:grid;place-items:center;margin:0 auto 4px;width:24px;height:24px;border-radius:50%;background:#dff7ec;color:#249b6a;font-size:16px;font-weight:800}
+.pym-am-root .receipt-card b{display:block;font-size:8px;color:var(--pym-am-800)}
+.pym-am-root .receipt-card small{font-size:7px;color:var(--pym-am-muted)}
+@keyframes receiptShow{0%,50%,100%{opacity:0;transform:translateY(7px) scale(.9)}60%,88%{opacity:1;transform:translateY(0) scale(1)}}
+/* AR postal: registered letter + signature/receipt */
+.pym-am-root .registered{position:absolute;z-index:6;left:0;top:0;width:67px;height:47px}
+.pym-am-root .registered .envelope{position:absolute;left:0;top:0;width:67px;height:47px}
+/* Hand delivery: house front whose door opens on the recipient, then the signature card */
+.pym-am-root .handed{position:absolute;z-index:6;left:0;top:0;width:67px;height:47px}
+.pym-am-root .folder-back{position:absolute;left:0;top:6px;width:67px;height:41px;border-radius:4px;background:var(--pym-am-700)}
+.pym-am-root .folder-back:before{content:"";position:absolute;left:0;top:-6px;width:26px;height:10px;border-radius:4px 4px 0 0;background:var(--pym-am-700)}
+.pym-am-root .folder-paper{position:absolute;left:7px;top:3px;width:53px;height:32px;border-radius:2px;background:linear-gradient(var(--pym-am-150),var(--pym-am-150)) 7px 7px/30px 2px no-repeat,linear-gradient(var(--pym-am-150),var(--pym-am-150)) 7px 12px/22px 2px no-repeat,#fff}
+.pym-am-root .folder-front{position:absolute;left:0;bottom:0;width:67px;height:33px;border-radius:3px 3px 4px 4px;background:linear-gradient(var(--pym-am-400),var(--pym-am-brand));box-shadow:0 6px 14px color-mix(in srgb,var(--pym-am-700) 20%,transparent)}
+.pym-am-root .hand-mark{position:absolute;z-index:4;right:-6px;top:-8px;width:24px;height:24px;display:grid;place-items:center;border-radius:50%;border:2px solid #fff;background:var(--pym-am-brand);font-size:12px;line-height:1;box-shadow:0 3px 8px color-mix(in srgb,var(--pym-am-800) 20%,transparent)}
+.pym-am-root .doorstep{position:absolute;z-index:5;right:10%;bottom:42px;width:132px;height:180px}
+.pym-am-root .house-roof{position:absolute;z-index:2;top:16px;left:0;width:132px;height:56px;border-radius:6px;background:linear-gradient(var(--pym-am-brand),var(--pym-am-700));clip-path:polygon(50% 0,100% 100%,0 100%)}
+.pym-am-root .house-wall{position:absolute;z-index:1;top:70px;left:16px;width:100px;height:110px;border-radius:0 0 6px 6px;background:linear-gradient(105deg,#fff,var(--pym-am-50) 55%,var(--pym-am-100));box-shadow:0 12px 20px color-mix(in srgb,var(--pym-am-700) 13%,transparent)}
+.pym-am-root .house-window{position:absolute;top:18px;left:12px;width:20px;height:20px;border-radius:5px;background:var(--pym-am-150)}
+.pym-am-root .house-window.right{left:auto;right:12px}
+.pym-am-root .doorway{position:absolute;left:31px;bottom:0;width:38px;height:62px;overflow:hidden;border-radius:19px 19px 0 0;background:var(--pym-am-150);perspective:220px}
+.pym-am-root .door-person{position:absolute;bottom:0;left:calc(50% - 12px);width:24px;height:46px}
+.pym-am-root .door-person:before{content:"";position:absolute;top:0;left:5px;width:14px;height:14px;border-radius:50%;background:var(--pym-am-400)}
+.pym-am-root .door-person:after{content:"";position:absolute;bottom:0;left:0;width:24px;height:30px;border-radius:12px 12px 0 0;background:var(--pym-am-400)}
+.pym-am-root .door-panel{position:absolute;inset:0;z-index:2;border-radius:19px 19px 0 0;background:linear-gradient(105deg,var(--pym-am-brand),var(--pym-am-700));transform-origin:left center;animation:doorOpen var(--postal-cycle,4.8s) ease-in-out infinite}
+.pym-am-root .door-panel:after{content:"";position:absolute;right:6px;top:55%;width:5px;height:5px;border-radius:50%;background:#fff}
+.pym-am-root .door-step{position:absolute;z-index:2;bottom:-4px;left:40px;width:52px;height:5px;border-radius:3px;background:var(--pym-am-200)}
+@keyframes doorOpen{0%,68%,98%,100%{transform:rotateY(0)}76%,90%{transform:rotateY(-72deg)}}
+.pym-am-root .registered-mark{position:absolute;z-index:4;right:-5px;top:-7px;width:23px;height:23px;display:grid;place-items:center;border-radius:50%;border:2px solid #fff;background:#35aa7a;color:white;font-size:13px;font-weight:900;box-shadow:0 3px 8px #245b4725}
+
+@media (max-width:700px){
+.pym-am-root .email-envelope{ /* keep email envelopes visually distinct on narrow stages */ border-width:1.5px; }
+}
+.pym-am-root .signature-card{position:absolute;z-index:8;right:calc(8% + 132px);bottom:54px;width:108px;height:62px;padding:8px;border:1px solid var(--pym-am-150);border-radius:8px;background:#fff;box-shadow:0 8px 20px color-mix(in srgb,var(--pym-am-700) 9%,transparent);opacity:0;animation:signatureShow var(--postal-cycle,4.8s) ease-in-out infinite}
+.pym-am-root .signature-card:before{content:attr(data-label);display:block;font-size:7px;letter-spacing:.5px;font-weight:800;color:var(--pym-am-ink)}
+.pym-am-root .signature-line{position:absolute;left:9px;bottom:13px;width:58px;height:10px;border-bottom:2px solid var(--pym-am-400);transform:skew(-22deg)}
+.pym-am-root .signature-tick{position:absolute;right:8px;bottom:10px;width:23px;height:23px;display:grid;place-items:center;border-radius:50%;background:#dff7ec;color:#249b6a;font-size:15px;font-weight:900}
+@keyframes signatureShow{0%,66%,100%{opacity:0;transform:translateY(8px) scale(.9)}73%,91%{opacity:1;transform:translateY(0) scale(1)}}
+@media (max-width:700px){
+.pym-am-root body{padding:18px 12px}
+.pym-am-root .grid{grid-template-columns:1fr}
+.pym-am-root .card.wide{grid-column:auto}
+.pym-am-root .desktop{right:3%;transform:scale(.83);transform-origin:bottom right}
+.pym-am-root .phone{right:6%;transform:scale(.84);transform-origin:bottom right}
+.pym-am-root .mailbox,
+.pym-am-root .doorstep{right:4%;transform:scale(.83);transform-origin:bottom right}
+.pym-am-root .signature-card{right:calc(4% + 110px);transform-origin:bottom right}
+}
+@media (prefers-reduced-motion:reduce){
+.pym-am-root .receipt-card,
+.pym-am-root .signature-card,
+.pym-am-root .incoming-email,
+.pym-am-root .notice-banner,
+.pym-am-root .app-badge,
+.pym-am-root .door-panel,
+.pym-am-root .call-wave,
+.pym-am-root .call-signal span{animation:none!important}
+.pym-am-root .lab-sender{display:none!important}
+}
+/* Sender/receiver combinations: reuse the visual parts of the six scenes above */
+.pym-am-root .lab-card{grid-column:1/-1}
+.pym-am-root .lab-card .card-head{padding-bottom:16px}
+.pym-am-root .lab-controls{display:flex;align-items:end;gap:16px;flex-wrap:wrap;padding:0 21px 16px}
+.pym-am-root .lab-field{display:grid;gap:7px;min-width:210px;flex:1}
+.pym-am-root .lab-field label{font-size:13px;font-weight:700;color:var(--pym-am-ink)}
+.pym-am-root .lab-field select{width:100%;padding:11px 12px;border:1px solid var(--pym-am-150);border-radius:10px;background:#fff;color:var(--pym-am-800);font:inherit;font-size:14px;outline-color:var(--pym-am-brand)}
+.pym-am-root .lab-stage{height:calc(270px + var(--lab-caption-extra,0px));position:relative;overflow:hidden;isolation:isolate;margin-top:14px;background:radial-gradient(ellipse at 78% 12%,#fff 0%,transparent 42%),linear-gradient(145deg,var(--pym-am-50),var(--pym-am-150))}
+.pym-am-root .lab-scene-content{position:absolute;top:0;left:0;right:0;height:270px;overflow:hidden;isolation:isolate}
+.pym-am-root .lab-stage .ground{bottom:35px}
+.pym-am-root .lab-sender{position:absolute!important;z-index:6;left:-80px;top:112px;opacity:0;animation-name:labTravel!important;animation-timing-function:linear!important;animation-iteration-count:infinite!important;animation-fill-mode:none!important}
+@keyframes labTravel{
+  0%{left:-80px;top:112px;opacity:0;z-index:6;transform:rotate(-7deg) scale(.9)}
+  8%{opacity:1}
+  30%{top:78px;opacity:1;transform:rotate(4deg) scale(1)}
+  50%{opacity:1;transform:rotate(-1deg) scale(.72)}
+  64%{top:124px;opacity:1;transform:rotate(-3deg) scale(.48)}
+  78%{left:calc(var(--lab-end-x) - var(--lab-item-half,30px));top:calc(var(--lab-end-y) - var(--lab-item-half-y,20px));opacity:1;z-index:6;transform:scale(var(--lab-end-scale,.3))}
+  96%{left:calc(var(--lab-end-x) - var(--lab-item-half,30px));top:calc(var(--lab-end-y) - var(--lab-item-half-y,20px));opacity:1;z-index:6;transform:scale(0)}
+  100%{left:calc(var(--lab-end-x) - var(--lab-item-half,30px));top:calc(var(--lab-end-y) - var(--lab-item-half-y,20px));opacity:0;z-index:4;transform:scale(0)}
+}
+/* Globe: channel-neutral receiver. Its centre must match RECEIVERS.globe endX/endY in animation.js. */
+.pym-am-root .globe{position:absolute;z-index:5;right:calc(10% + 6px);top:55px;width:120px;height:120px;overflow:hidden;border-radius:50%;background:radial-gradient(circle at 38% 34%,var(--pym-am-400),var(--pym-am-brand) 45%,var(--pym-am-800));box-shadow:0 0 0 4px color-mix(in srgb,var(--pym-am-300) 30%,transparent),0 12px 24px color-mix(in srgb,var(--pym-am-800) 18%,transparent)}
+/* The canvas reads its land colour from `color`. */
+.pym-am-root .globe canvas{display:block;width:100%;height:100%;color:color-mix(in oklab,#8bd3a0 78%,var(--pym-am-brand))}
+.pym-am-root .globe-shade{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 30% 26%,rgba(255,255,255,.5),rgba(255,255,255,0) 32%),radial-gradient(circle at 38% 34%,transparent 52%,color-mix(in srgb,var(--pym-am-950) 45%,transparent) 100%)}
+@media (max-width:700px){
+.pym-am-root .lab-card{grid-column:auto}
+.pym-am-root .lab-controls{padding:0 16px 14px}
+.pym-am-root .lab-field{min-width:100%}
+.pym-am-root .lab-stage{height:calc(260px + var(--lab-caption-extra,0px))}
+.pym-am-root .lab-scene-content{height:260px}
+}
+.pym-am-root .lab-options{margin:0 21px 16px;padding:15px 16px;border:1px solid var(--pym-am-150);border-radius:14px;background:var(--pym-am-50)}
+.pym-am-root .lab-options-title{margin:0 0 12px;color:var(--pym-am-800);font-size:14px;font-weight:800}
+.pym-am-root .lab-checks{display:flex;gap:12px 22px;flex-wrap:wrap;margin:0 0 14px}
+.pym-am-root .lab-check{display:flex;align-items:center;gap:8px;color:var(--pym-am-ink);font-size:13px;font-weight:650;cursor:pointer}
+.pym-am-root .lab-check input{width:16px;height:16px;accent-color:var(--pym-am-brand)}
+.pym-am-root .lab-textareas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.pym-am-root .lab-textarea-field{display:grid;gap:7px;min-width:0}
+.pym-am-root .lab-textarea-field label{font-size:13px;font-weight:700;color:var(--pym-am-ink)}
+.pym-am-root .lab-textarea-field textarea{width:100%;min-height:78px;resize:vertical;padding:10px 12px;border:1px solid var(--pym-am-150);border-radius:10px;background:#fff;color:var(--pym-am-800);font:inherit;font-size:14px;outline-color:var(--pym-am-brand)}
+.pym-am-root .lab-stage.no-background{background:transparent}
+.pym-am-root .lab-stage.no-background .cloud{display:none}
+.pym-am-root .lab-stage.no-ground .ground{display:none}
+.pym-am-root .lab-stage .lab-sender.sms-message,
+.pym-am-root .lab-stage .lab-sender.notice{width:auto;min-width:66px;max-width:min(230px,48%);min-height:33px;padding:8px 10px;font-size:11px;line-height:1.22;white-space:normal;overflow-wrap:anywhere}
+.pym-am-root .lab-caption{position:absolute;left:4%;bottom:0;width:92%;height:var(--lab-caption-zone,35px);min-height:35px;z-index:24;display:flex;align-items:center;justify-content:center;margin:0;padding:6px 8px;color:var(--pym-am-ink);font-size:13px;line-height:1.3;text-align:center;overflow-wrap:anywhere;white-space:normal;overflow:visible;pointer-events:none}
+.pym-am-root .lab-caption[hidden]{display:none}
+.pym-am-root .lab-message-help{margin:0;color:var(--pym-am-muted);font-size:12px;line-height:1.4}
+@media (max-width:700px){
+.pym-am-root .lab-options{margin:0 12px 14px;padding:13px}
+.pym-am-root .lab-textareas{grid-template-columns:1fr}
+.pym-am-root .lab-caption{left:3%;width:94%;font-size:12px}
+}
+/* Progress counter, standalone and reusable */
+.pym-am-root .lab-counter{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:23;width:56%;min-width:min(210px,calc(100% - 16px));max-width:420px;margin:0;padding:7px 10px;border:1px solid var(--pym-am-150);border-radius:10px;background:rgba(255,255,255,.92);box-shadow:0 4px 12px color-mix(in srgb,var(--pym-am-800) 8%,transparent);color:var(--pym-am-800);backdrop-filter:blur(5px);transition:background .2s,border-color .2s,box-shadow .2s}
+.pym-am-root .lab-counter[hidden]{display:none!important}
+.pym-am-root .lab-counter.no-panel{background:transparent;border-color:transparent;box-shadow:none;backdrop-filter:none}
+.pym-am-root .lab-counter-config{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 14px;padding:12px;border:1px solid var(--pym-am-150);border-radius:10px;background:#fff}
+.pym-am-root .lab-counter-field{display:grid;gap:6px;flex:1;min-width:170px}
+.pym-am-root .lab-counter-field label{font-size:12px;font-weight:750;color:var(--pym-am-ink)}
+.pym-am-root .lab-counter-field input{width:100%;padding:9px 11px;border:1px solid var(--pym-am-150);border-radius:9px;background:white;color:var(--pym-am-800);font:inherit;font-size:14px;outline-color:var(--pym-am-brand)}
+.pym-am-root .lab-counter-summary{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:5px}
+.pym-am-root .lab-counter-summary>div{display:flex;align-items:baseline;gap:5px;flex-wrap:wrap;color:var(--pym-am-ink);font-size:11px}
+.pym-am-root .lab-counter-summary #labRemainingValue,
+.pym-am-root .lab-counter-summary [data-remaining-value]{font-size:clamp(18px,2.5vw,22px);line-height:1;color:var(--pym-am-800);letter-spacing:-.5px}
+.pym-am-root .lab-counter-summary>strong{font-size:11px;color:var(--pym-am-800)}
+.pym-am-root .lab-progress-track{height:7px;overflow:hidden;border-radius:999px;background:var(--pym-am-150);box-shadow:inset 0 1px 2px color-mix(in srgb,var(--pym-am-800) 6%,transparent)}
+.pym-am-root .lab-counter-result{display:none}
+.pym-am-root .lab-counter.is-summary>.lab-counter-summary,
+.pym-am-root .lab-counter.is-summary>.lab-progress-track{display:none}
+.pym-am-root .lab-counter.is-summary .lab-counter-result{display:block}
+.pym-am-root .lab-counter-result .lab-counter-summary{flex-wrap:nowrap}
+.pym-am-root .lab-counter-result .lab-counter-summary>div{flex-wrap:nowrap;white-space:nowrap}
+.pym-am-root .lab-counter-result .lab-counter-summary>div strong{font-size:clamp(18px,2.5vw,22px);line-height:1;letter-spacing:-.5px}
+.pym-am-root .lab-counter-result .lab-result-sent strong{color:#249b6a}
+.pym-am-root .lab-counter-result .lab-result-errors.has-errors strong{color:#d6455d}
+.pym-am-root .lab-result-track{display:flex}
+.pym-am-root .lab-result-sent-fill{height:100%;background:linear-gradient(90deg,#5cc99a,#249b6a);transition:width .35s ease}
+.pym-am-root .lab-result-errors-fill{height:100%;background:linear-gradient(90deg,#ef7b90,#d6455d);transition:width .35s ease}
+.pym-am-root .lab-progress-fill{height:100%;width:0%;border-radius:inherit;background:linear-gradient(90deg,var(--pym-am-400),var(--pym-am-600));transition:width .35s ease}
+@media (max-width:700px){
+.pym-am-root .lab-counter{top:7px;width:64%;min-width:min(190px,calc(100% - 14px));padding:6px 8px;border-radius:9px}
+.pym-am-root .lab-counter-config{gap:10px}
+.pym-am-root .lab-counter-field{min-width:calc(50% - 10px)}
+.pym-am-root .lab-counter-summary{gap:5px;margin-bottom:4px}
+.pym-am-root .lab-counter-summary>div{font-size:10px}
+.pym-am-root .lab-counter-summary>strong{font-size:10px}
+}

@@ -1,9 +1,13 @@
 """Admin for MissiveAttachment model."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from django.contrib import admin
 
 from django.utils.translation import gettext_lazy as _
-from django_boosted import AdminBoostModel
+from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
 
 from ..models.attachment import (
     MissiveBaseAttachment,
@@ -12,6 +16,9 @@ from ..models.attachment import (
     CampaignVirtualAttachment,
     MissiveProof,
 )
+
+if TYPE_CHECKING:
+    from django.contrib.admin.options import _FieldsetSpec
 
 
 @admin.register(MissiveBaseAttachment)
@@ -37,7 +44,10 @@ class MissiveAttachmentAdmin(AdminBoostModel):
         "created_at",
         "updated_at",
     ]
-    raw_id_fields = ["missive", "campaign",]
+    raw_id_fields = [
+        "missive",
+        "campaign",
+    ]
 
     fieldsets = [
         (
@@ -71,16 +81,17 @@ class MissiveAttachmentAdmin(AdminBoostModel):
         self.add_to_fieldset(_("Configs"), ["metadata"])
 
 
-_STANDALONE_ATTACHMENT_INLINE_FIELDSETS = (
-    ("Priority", {
-        "fields": ("priority",),
-    }),
+_STANDALONE_ATTACHMENT_INLINE_FIELDSETS: _FieldsetSpec = (
+    (
+        "Priority",
+        {
+            "fields": ("priority",),
+        },
+    ),
     (
         _("Type"),
         {
-            "fields": (
-                ("attachment_type", "linked"),
-            ),
+            "fields": (("attachment_type", "linked"),),
         },
     ),
     (
@@ -104,7 +115,11 @@ _STANDALONE_ATTACHMENT_INLINE_FIELDSETS = (
         _("Metadata"),
         {
             "classes": ("collapse",),
-            "fields": ("metadata", "page_count", "external_id",),
+            "fields": (
+                "metadata",
+                "page_count",
+                "external_id",
+            ),
         },
     ),
 )
@@ -182,6 +197,7 @@ class CampaignVirtualAttachmentInline(admin.TabularInline):
         "page_count",
         "linked",
     ]
+
 
 class MissiveProofInline(admin.TabularInline):
     """Inline for missive proofs."""

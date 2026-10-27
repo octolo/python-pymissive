@@ -1,8 +1,11 @@
 """Manager for missive webhooks."""
 
+import logging
 from urllib.parse import urlparse
 
 from virtualqueryset.managers import VirtualManager
+
+logger = logging.getLogger(__name__)
 
 
 class MissiveWebhookManager(VirtualManager):
@@ -36,9 +39,7 @@ class MissiveWebhookManager(VirtualManager):
             from ..models.provider import MissiveProviderModel
 
             provider = MissiveProviderModel.objects.get(name=provider)
-        return self.queryset_class(
-            model=self.model, data=self._rows_for_provider(provider)
-        )
+        return self.queryset_class(model=self.model, data=self._rows_for_provider(provider))
 
     def all_providers(self):
         """One virtual queryset with every provider's webhooks."""
@@ -49,5 +50,10 @@ class MissiveWebhookManager(VirtualManager):
             try:
                 data.extend(self._rows_for_provider(provider))
             except Exception:
+                logger.warning(
+                    "Unable to retrieve webhooks for provider %s",
+                    provider,
+                    exc_info=True,
+                )
                 continue
         return self.queryset_class(model=self.model, data=data)

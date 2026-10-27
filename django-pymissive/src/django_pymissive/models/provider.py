@@ -23,7 +23,7 @@ class MissiveProviderModel(VirtualModel):
         primary_key=True,
     )
 
-    objects = BaseProviderManager(package_name='pymissive')
+    objects = BaseProviderManager(package_name="pymissive")
 
     class Meta:
         managed = False

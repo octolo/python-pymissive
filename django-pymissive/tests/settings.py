@@ -3,6 +3,7 @@
 import os
 import sys
 import tempfile
+from importlib.util import find_spec
 from pathlib import Path
 
 # Add src to Python path for development
@@ -118,6 +119,7 @@ CSRF_TRUSTED_ORIGINS = [
 NGROK_PUBLIC_URL = os.getenv("NGROK_PUBLIC_URL")
 if NGROK_PUBLIC_URL:
     from urllib.parse import urlparse
+
     url_data = urlparse(NGROK_PUBLIC_URL.rstrip("/"))
     MISSIVE_DOMAIN = url_data.netloc
     MISSIVE_SCHEME = url_data.scheme
@@ -127,35 +129,27 @@ if NGROK_PUBLIC_URL:
             CSRF_TRUSTED_ORIGINS.append(origin)
 
 
-
-
-try:
-    from django_json_widget.widgets import JSONEditorWidget
+if find_spec("django_json_widget") is not None:
     INSTALLED_APPS += [
         "django_json_widget",
     ]
     PYMISSIVE_JSON_WIDGET = "django_json_widget.widgets.JSONEditorWidget"
-except ImportError:
-    pass
 
-try:
-    import djrichtextfield
+if find_spec("djrichtextfield") is not None:
     INSTALLED_APPS += [
         "djrichtextfield",
     ]
-    #PYMISSIVE_RICHTEXT_WIDGET = "djrichtextfield.widgets.RichTextWidget"
+    # PYMISSIVE_RICHTEXT_WIDGET = "djrichtextfield.widgets.RichTextWidget"
     DJRICHTEXTFIELD_CONFIG = {
-        'js': [f'//cdn.tiny.cloud/1/{os.getenv("TINYMCE_API_KEY")}/tinymce/5/tinymce.min.js'],
-        'init_template': 'djrichtextfield/init/tinymce.js',
-        'settings': {
-            'menubar': False,
-            'plugins': 'link image',
-            'toolbar': 'bold italic | link image | removeformat',
-            'width': 700
-        }
+        "js": [f"//cdn.tiny.cloud/1/{os.getenv('TINYMCE_API_KEY')}/tinymce/5/tinymce.min.js"],
+        "init_template": "djrichtextfield/init/tinymce.js",
+        "settings": {
+            "menubar": False,
+            "plugins": "link image",
+            "toolbar": "bold italic | link image | removeformat",
+            "width": 700,
+        },
     }
-except ImportError:
-    pass
 
 
 MISSIVE_AUTHENTICATED_ACKNOWLEDGEMENT = False
@@ -182,6 +176,51 @@ PYMISSIVE_DEFAULT_SENDER = {
 # Dotted path or callable (instance, source_fields, separator) -> str.
 # PYMISSIVE_CAMPAIGN_NAMED_ID_GENERATOR = "tests.generators.test_campaign_named_id"
 # PYMISSIVE_SAVE_UNTREATED_EVENTS = True  # Save events that could not be processed (default: False)
+# Called with the scheduled campaign about PYMISSIVE_PROGRESS_STEP times per run.
+# Unset hook: the send loop stays quiet; the progress page still polls live counts.
+# Read from the environment (manage.py loads .env, pytest does not), e.g.
+# PYMISSIVE_PROGRESS_HOOK=tests.fakeapp.hook.log_progress
+PYMISSIVE_PROGRESS_HOOK = os.getenv("PYMISSIVE_PROGRESS_HOOK") or None
+# Shows the send progress of a run and the fake hooks' output
+# (log_progress, sleep_processor) in the runserver console.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {
+        "tests.fakeapp": {"handlers": ["console"], "level": "INFO"},
+        "django_pymissive.models.scheduler": {"handlers": ["console"], "level": "INFO"},
+        "pymissive.providers.fake": {"handlers": ["console"], "level": "INFO"},
+    },
+}
+# Chain that builds a target's missive before it is sent. A target, a run
+# or a campaign can replace it with its own ``build_target_processors``.
+# Attributes read on a campaign target when its missive is built.
+# Each key lists the fields to try, in order. ``name`` keeps the first
+# non-empty value. A channel reads its singular key, and the plural key
+# when full_targets is on. A missing key keeps the built-in name.
+PYMISSIVE_BUILD_TARGET_FIELDS = {
+    "name": ["full_name", "name"],
+    "email": ["email"],
+    "emails": ["emails"],
+    "phone": ["phone"],
+    "phones": ["phones"],
+    "address": ["address"],
+    "addresses": ["addresses"],
+}
+# PYMISSIVE_BUILD_TARGET_FULL = False
+PYMISSIVE_DEFAULT_BUILD_TARGET_PROCESSORS = [
+    "django_pymissive.processors.build_target.build_target_processor",
+]
+# Used when the missive and MissiveConfig leave the provider empty.
+# A string covers every type. A list may add per-type overrides:
+# ["fake", {"email": "brevo"}, {"sms": "partner"}].
+# Unset under pytest so tests keep an empty provider; set
+# PYMISSIVE_DEFAULT_PROVIDER=fake in .env for a local run.
+PYMISSIVE_DEFAULT_PROVIDER = os.getenv("PYMISSIVE_DEFAULT_PROVIDER") or None
+# The fake provider refuses every send unless this is true.
+PYMISSIVE_ALLOW_FAKE_PROVIDER = True
+# PYMISSIVE_PROGRESS_STEP = 20
 PYMISSIVE_ATTACHMENT_PATH_MAX_LENGTH = 4000
 # Dry-run: full local pipeline, no provider calls (prepare + send).
 # PYMISSIVE_DRY_RUN = True
@@ -196,7 +235,7 @@ PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
     "django_pymissive.processors.body.add_attachments_linked.add_attachments_linked",
     # 4. Append the test signature (HTML for body_rich, text for body_text)
     "tests.processors.add_signature",
-    #["tests.fakeapp.hook.sleep_processor", {"seconds": 8}],
+    # ["tests.fakeapp.hook.sleep_processor", {"seconds": 8}],
 ]
 
 # Default chain for the postal first_document PDF. The first entry renders
@@ -265,13 +304,16 @@ PROVIDERKIT_PROVIDERS_CONFIG = {
         "WEBHOOK_SECRET": os.getenv("MAILEVA_WEBHOOK_SECRET"),
         # os.getenv default True is a test safety net. Env strings like "0"/"False"
         # must be parsed: a non-empty string is otherwise always truthy.
-        "SANDBOX": (
-            os.getenv("MAILEVA_SANDBOX", "true").strip().lower()
-            in ("1", "true", "yes", "on")
-        ),
+        "SANDBOX": (os.getenv("MAILEVA_SANDBOX", "true").strip().lower() in ("1", "true", "yes", "on")),
     },
     "partner": {
         "SMS_API_KEY": os.getenv("PARTNER_SMS_API_KEY"),
         "WEBHOOK_SECRET": os.getenv("PARTNER_WEBHOOK_SECRET"),
-    }
+    },
+    # Local provider. SLEEP_SECONDS is how long each send blocks, so a run
+    # can be cancelled by hand and watched while it moves. 0 unless set,
+    # to keep pytest fast (the provider itself defaults to 10).
+    "fake": {
+        "SLEEP_SECONDS": float(os.getenv("FAKE_SLEEP_SECONDS", 10)),
+    },
 }

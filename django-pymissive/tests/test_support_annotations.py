@@ -18,7 +18,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
@@ -67,6 +69,7 @@ pytestmark = pytest.mark.django_db
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _campaign(**kw) -> MissiveCampaign:
     return MissiveCampaign.objects.create(subject="Test campaign", **kw)
 
@@ -79,6 +82,10 @@ def _missive(campaign=None, *, missive_type="email", status=MissiveStatus.DRAFT,
         status=status,
         **kw,
     )
+
+
+def test_object_id_value_preserves_text_primary_key_dashes():
+    assert object_id_value("order-123") == "order-123"
 
 
 def _contact(**kw) -> Contact:
@@ -105,6 +112,7 @@ def _with_counts(campaign) -> MissiveCampaign:
 # ---------------------------------------------------------------------------
 # Support vocabulary (pymissive.config)
 # ---------------------------------------------------------------------------
+
 
 def test_postal_is_neither_a_type_nor_a_support():
     """``postal`` is preview chrome; the simple-mail type is ``letter``."""
@@ -161,12 +169,8 @@ def test_status_predicates_treat_empty_status_as_pending():
     legacy = _missive(status="")
     sent = _missive(status=MissiveStatus.SUCCESS)
 
-    pending_pks = set(
-        Missive.objects.filter(pending_missive_q()).values_list("pk", flat=True)
-    )
-    sent_pks = set(
-        Missive.objects.filter(sent_missive_q()).values_list("pk", flat=True)
-    )
+    pending_pks = set(Missive.objects.filter(pending_missive_q()).values_list("pk", flat=True))
+    sent_pks = set(Missive.objects.filter(sent_missive_q()).values_list("pk", flat=True))
     assert legacy.pk in pending_pks and legacy.pk not in sent_pks
     assert sent.pk in sent_pks and sent.pk not in pending_pks
 
@@ -174,6 +178,7 @@ def test_status_predicates_treat_empty_status_as_pending():
 # ---------------------------------------------------------------------------
 # Campaign counters
 # ---------------------------------------------------------------------------
+
 
 def test_count_support_groups_every_type_of_the_channel():
     campaign = _campaign()
@@ -247,11 +252,7 @@ def test_the_run_and_the_campaign_expose_the_same_counter_names():
     ``count_support_<support>_error`` only on the run.
     """
     shared = {"count_sent", "count_pending", "count_error"}
-    shared |= {
-        support_count_name(support, suffix)
-        for support in GENERIC_SUPPORT
-        for suffix in ("", "sent", "error")
-    }
+    shared |= {support_count_name(support, suffix) for support in GENERIC_SUPPORT for suffix in ("", "sent", "error")}
     assert shared <= set(campaign_count_annotations())
     assert shared <= set(run_count_annotations())
 
@@ -299,22 +300,10 @@ def test_run_counters_share_the_campaign_thread_scope():
 
     assert annotated_run.count_sent == annotated_campaign.count_sent == 1
     assert annotated_run.count_total == 1
-    assert (
-        annotated_run.count_support_email
-        == annotated_campaign.count_support_email
-        == 1
-    )
+    assert annotated_run.count_support_email == annotated_campaign.count_support_email == 1
     # The historical family agrees too, and there the archived thread counts.
-    assert (
-        annotated_run.count_missive_success
-        == annotated_campaign.count_missive_success
-        == 2
-    )
-    assert (
-        annotated_run.count_thread_history
-        == annotated_campaign.count_thread_history
-        == 1
-    )
+    assert annotated_run.count_missive_success == annotated_campaign.count_missive_success == 2
+    assert annotated_run.count_thread_history == annotated_campaign.count_thread_history == 1
 
 
 def test_pct_recipient_divides_by_the_recipients_or_stays_at_zero():
@@ -325,7 +314,9 @@ def test_pct_recipient_divides_by_the_recipients_or_stays_at_zero():
     campaign = _campaign()
     for status in (MissiveStatus.SUCCESS, MissiveStatus.SUCCESS, MissiveStatus.FAILED):
         _missive(campaign).to_missiverecipient.create(
-            name="Alice", email=f"{uuid.uuid4().hex}@example.com", status=status,
+            name="Alice",
+            email=f"{uuid.uuid4().hex}@example.com",
+            status=status,
         )
 
     annotated = _with_counts(campaign)
@@ -347,13 +338,17 @@ def test_the_default_queryset_aggregates_nothing():
     assert "COUNT(" not in default_sql
     assert "GROUP BY" not in default_sql
     assert default_sql.count("JOIN") == 0
-    # What is left: two ORDER BY … LIMIT 1 subqueries and two EXISTS.
+    # What is left: three ORDER BY … LIMIT 1 subqueries and one EXISTS.
     assert set(default.query.annotations) == {
-        "last_send_date", "last_ended_at", "has_sent_missives", "has_open_run",
+        "last_send_date",
+        "last_ended_at",
+        "has_sent_missives",
+        "open_scheduler_id",
     }
 
     # The joins and aggregates every campaign lookup used to pay for.
     opted_in = str(MissiveCampaign.objects.with_counts().query)
+    # count_target_pending is a subquery: the selection table adds no join.
     assert opted_in.count("JOIN") == 5
     assert opted_in.count("COUNT(DISTINCT") == 67
 
@@ -367,16 +362,20 @@ def test_with_counts_annotates_only_the_names_it_is_given():
     """
     campaign = _campaign()
     _missive(campaign, status=MissiveStatus.SUCCESS).to_missiverecipient.create(
-        name="Alice", email="alice@example.com", status=MissiveStatus.SUCCESS,
+        name="Alice",
+        email="alice@example.com",
+        status=MissiveStatus.SUCCESS,
     )
     wanted = ("count_missive", "count_type_email", "pct_recipient_success")
     selected = MissiveCampaign.objects.with_counts(*wanted)
 
     # A percentage divides a recipient counter by count_recipient, so both come
     # along; nothing else does.
-    assert set(selected.query.annotations) - set(
-        MissiveCampaign.objects.all().query.annotations
-    ) == {*wanted, "count_recipient", "count_recipient_success"}
+    assert set(selected.query.annotations) - set(MissiveCampaign.objects.all().query.annotations) == {
+        *wanted,
+        "count_recipient",
+        "count_recipient_success",
+    }
     assert str(selected.query).count("COUNT(DISTINCT") < 66
 
     full = _with_counts(campaign)
@@ -398,7 +397,10 @@ def test_campaign_changelist_only_annotates_what_its_columns_read():
     annotations = MissiveCampaign.objects.with_counts(*counters).query.annotations
     assert set(counters) <= set(annotations)
     assert set(annotations) < set(campaign_count_annotations()) | {
-        "last_send_date", "last_ended_at", "has_sent_missives", "has_open_run",
+        "last_send_date",
+        "last_ended_at",
+        "has_sent_missives",
+        "open_scheduler_id",
     }
 
 
@@ -406,10 +408,14 @@ def test_campaign_changelist_still_renders_the_opt_in_counters():
     """The admin is the caller that needs them, so it opts in on its queryset."""
     campaign = _campaign()
     _missive(campaign, status=MissiveStatus.SUCCESS).to_missiverecipient.create(
-        name="Alice", email="alice@example.com", status=MissiveStatus.SUCCESS,
+        name="Alice",
+        email="alice@example.com",
+        status=MissiveStatus.SUCCESS,
     )
     user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x",
+        username="admin",
+        email="admin@example.com",
+        password="x",
     )
     client = Client()
     client.force_login(user)
@@ -430,7 +436,9 @@ def test_a_counter_read_without_with_counts_costs_one_query_for_all():
     """
     campaign = _campaign()
     _missive(campaign, status=MissiveStatus.SUCCESS).to_missiverecipient.create(
-        name="Alice", email="alice@example.com", status=MissiveStatus.SUCCESS,
+        name="Alice",
+        email="alice@example.com",
+        status=MissiveStatus.SUCCESS,
     )
     plain = _annotated(campaign)
 
@@ -485,20 +493,34 @@ def test_can_remove_falls_back_without_annotation():
 def test_has_open_run_and_is_processing():
     campaign = _campaign()
     assert _annotated(campaign).is_processing is False
+    assert _annotated(campaign).current_scheduler_id is None
 
     run = MissiveScheduledCampaign.objects.create(campaign=campaign)
     annotated = _annotated(campaign)
     assert annotated.has_open_run is True
     assert annotated.is_processing is True
+    assert annotated.current_scheduler_id == run.pk
 
     run.ended_at = timezone.now()
     run.save(update_fields=["ended_at"])
     assert _annotated(campaign).is_processing is False
 
 
-def test_is_processing_from_metadata_flag():
+def test_campaign_admin_exposes_current_scheduler_as_readonly_link():
+    campaign = _campaign()
+    run = MissiveScheduledCampaign.objects.create(campaign=campaign)
+    model_admin = admin.site._registry[MissiveCampaign]
+
+    assert "current_scheduler_display" in model_admin.readonly_fields
+    rendered = str(model_admin.current_scheduler_display(_annotated(campaign)))
+
+    assert str(run.pk) in rendered
+    assert reverse("admin:django_pymissive_missivescheduledcampaign_change", args=[run.pk]) in rendered
+
+
+def test_legacy_processing_metadata_does_not_define_run_state():
     campaign = _campaign(metadata={"processing": True})
-    assert _annotated(campaign).is_processing is True
+    assert _annotated(campaign).is_processing is False
 
 
 def test_unannotated_campaign_queries_once_per_property():
@@ -526,6 +548,7 @@ def test_unannotated_campaign_queries_once_per_property():
 # Send preview + draft reclaim
 # ---------------------------------------------------------------------------
 
+
 def test_send_preview_payload_groups_by_support():
     campaign = _campaign()
     _missive(campaign, missive_type=MissiveType.EMAIL)
@@ -537,10 +560,16 @@ def test_send_preview_payload_groups_by_support():
     payload = campaign.send_preview_payload()
     assert payload["total"] == 4
     assert payload["by_support"] == {
-        "email": 1, "phone": 1, "address": 2, "application": 0,
+        "email": 1,
+        "phone": 1,
+        "address": 2,
+        "application": 0,
     }
     assert payload["by_type"] == {
-        "email": 1, "hand_delivery": 1, "registered_letter": 1, "sms": 1,
+        "email": 1,
+        "hand_delivery": 1,
+        "registered_letter": 1,
+        "sms": 1,
     }
 
 
@@ -556,7 +585,9 @@ def test_conversation_drafts_stay_out_of_the_send():
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
-            MissiveScheduledCampaign, "start_scheduled_campaign", lambda self: None,
+            MissiveScheduledCampaign,
+            "start_scheduled_campaign",
+            lambda self: None,
         )
         campaign.start_campaign()
 
@@ -573,13 +604,16 @@ def test_start_campaign_reclaims_drafts_of_an_ended_run():
     """A resend duplicate keeps the FK of the run that produced it."""
     campaign = _campaign()
     ended = MissiveScheduledCampaign.objects.create(
-        campaign=campaign, ended_at=timezone.now(),
+        campaign=campaign,
+        ended_at=timezone.now(),
     )
     orphan = _missive(campaign, scheduler=ended)
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
-            MissiveScheduledCampaign, "start_scheduled_campaign", lambda self: None,
+            MissiveScheduledCampaign,
+            "start_scheduled_campaign",
+            lambda self: None,
         )
         campaign.start_campaign()
 
@@ -587,15 +621,12 @@ def test_start_campaign_reclaims_drafts_of_an_ended_run():
     assert orphan.scheduler_id not in (None, ended.pk)
 
 
-def test_start_campaign_leaves_drafts_of_a_running_run_alone():
+def test_start_campaign_rejects_a_running_run_and_leaves_its_drafts_alone():
     campaign = _campaign()
     running = MissiveScheduledCampaign.objects.create(campaign=campaign)
     claimed = _missive(campaign, scheduler=running)
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            MissiveScheduledCampaign, "start_scheduled_campaign", lambda self: None,
-        )
+    with pytest.raises(ValidationError, match="already being processed"):
         campaign.start_campaign()
 
     claimed.refresh_from_db()
@@ -605,6 +636,7 @@ def test_start_campaign_leaves_drafts_of_a_running_run_alone():
 # ---------------------------------------------------------------------------
 # Missive.sent_at / with_counts
 # ---------------------------------------------------------------------------
+
 
 def test_sent_at_comes_from_the_oldest_send_event():
     missive = _missive(status=MissiveStatus.SUCCESS)
@@ -685,7 +717,9 @@ def test_missive_changelist_still_renders_the_opt_in_counters():
     missive.to_missiverecipient.create(name="Alice", email="alice@example.com")
     missive.to_missiveevent.create(event="sent", occurred_at=timezone.now())
     user = get_user_model().objects.create_superuser(
-        username="missive-admin", email="missive-admin@example.com", password="x",
+        username="missive-admin",
+        email="missive-admin@example.com",
+        password="x",
     )
     client = Client()
     client.force_login(user)
@@ -699,12 +733,14 @@ def test_missive_changelist_still_renders_the_opt_in_counters():
 # Recipient targets
 # ---------------------------------------------------------------------------
 
+
 def test_targets_by_missive_returns_the_value_of_each_support():
     email_missive = _missive(missive_type=MissiveType.EMAIL)
     email_missive.to_missiverecipient.create(name="Alice", email="alice@example.com")
     postal_missive = _missive(missive_type=MissiveType.REGISTERED_LETTER)
     postal_missive.to_missiverecipient.create(
-        name="Bob", address={"address_line1": "1 rue Test", "city": "Lyon"},
+        name="Bob",
+        address={"address_line1": "1 rue Test", "city": "Lyon"},
     )
 
     targets = MissiveRecipient.objects.targets_by_missive(
@@ -726,7 +762,8 @@ def test_targets_by_missive_reads_the_recipients_alone():
     missive = _missive(missive_type=MissiveType.EMAIL)
     for index in range(3):
         recipient = missive.to_missiverecipient.create(
-            name=f"Alice {index}", email=f"alice{index}@example.com",
+            name=f"Alice {index}",
+            email=f"alice{index}@example.com",
         )
         for _ in range(4):
             missive.to_missiveevent.create(event="request", recipient=recipient)
@@ -745,11 +782,13 @@ def test_targets_by_missive_scoped_to_one_support():
     missive = _missive(missive_type=MissiveType.EMAIL)
     missive.to_missiverecipient.create(name="Alice", email="alice@example.com")
     missive.to_missiverecipient.create(
-        name="Bob", address={"address_line1": "1 rue Test"},
+        name="Bob",
+        address={"address_line1": "1 rue Test"},
     )
 
     assert MissiveRecipient.objects.targets_by_missive(
-        [missive.pk], support="email",
+        [missive.pk],
+        support="email",
     ) == {str(missive.pk): ["alice@example.com"]}
 
 
@@ -772,6 +811,7 @@ def test_targets_by_missive_empty_input_and_unknown_support():
 # ---------------------------------------------------------------------------
 # Generic annotations on an integration model
 # ---------------------------------------------------------------------------
+
 
 def test_with_last_missive_returns_the_newest_one():
     contact = _contact()
@@ -813,8 +853,7 @@ def test_with_last_missive_scoped_per_support():
     _link(courrier, contact)
 
     row = (
-        Contact.objects
-        .with_last_missive(prefix="last_email", support="email")
+        Contact.objects.with_last_missive(prefix="last_email", support="email")
         .with_last_missive(prefix="last_courrier", support="address")
         .get(pk=contact.pk)
     )
@@ -831,11 +870,7 @@ def test_with_last_missive_scoped_per_campaign_and_metadata():
     _link(_missive(other), contact)
     _link(_missive(campaign, metadata={"channel": "address"}), contact)
 
-    row = (
-        Contact.objects
-        .with_last_missive(campaign=campaign, metadata={"channel": "hand_delivery"})
-        .get(pk=contact.pk)
-    )
+    row = Contact.objects.with_last_missive(campaign=campaign, metadata={"channel": "hand_delivery"}).get(pk=contact.pk)
     assert uuid.UUID(str(row.last_missive["uid"])) == mine.pk
 
 
@@ -848,8 +883,7 @@ def test_with_missive_count_per_support_and_sent_flag():
     _link(_missive(missive_type=MissiveType.EMAIL), other_contact)
 
     row = (
-        Contact.objects
-        .with_missive_count(name="email_count", support="email")
+        Contact.objects.with_missive_count(name="email_count", support="email")
         .with_missive_count(name="courrier_count", support="address")
         .with_missive_count(name="sent_count", sent=True)
         .get(pk=contact.pk)
@@ -891,8 +925,7 @@ def test_with_campaign_missive_count_walks_the_campaign_link():
     _missive(_campaign(), status=MissiveStatus.DRAFT)
 
     row = (
-        Contact.objects
-        .with_campaign_missive_count(name="pending", sent=False)
+        Contact.objects.with_campaign_missive_count(name="pending", sent=False)
         .with_campaign_missive_count(name="total")
         .get(pk=contact.pk)
     )
@@ -1015,6 +1048,7 @@ def test_prefix_is_refused_as_a_filter(call):
 # Batch pass: missive_summaries_by_object
 # ---------------------------------------------------------------------------
 
+
 def test_summaries_by_object_costs_two_queries_per_batch_not_per_row():
     """The point of the helper: a flat cost, where the mixin pays per row.
 
@@ -1046,12 +1080,8 @@ def test_summaries_by_object_agrees_with_the_annotations():
     _link(older, contact)
     _link(newer, contact)
 
-    row = (
-        Contact.objects.with_missive_counts().with_last_missive().get(pk=contact.pk)
-    )
-    summary = missive_summaries_by_object(Contact, [contact.pk])[
-        object_id_value(contact.pk)
-    ]
+    row = Contact.objects.with_missive_counts().with_last_missive().get(pk=contact.pk)
+    summary = missive_summaries_by_object(Contact, [contact.pk])[object_id_value(contact.pk)]
 
     assert summary["missives"] == row.missive_counts["missives"] == 2
     assert summary["events"] == row.missive_counts["events"] == 2
@@ -1068,9 +1098,7 @@ def test_summaries_by_object_dates_the_send_of_the_last_missive():
     missive.to_missiveevent.create(event="sent", occurred_at=sent)
     _link(missive, contact)
 
-    summary = missive_summaries_by_object(Contact, [contact.pk])[
-        object_id_value(contact.pk)
-    ]
+    summary = missive_summaries_by_object(Contact, [contact.pk])[object_id_value(contact.pk)]
     assert summary["last"]["sent_at"] == sent
 
 
@@ -1081,7 +1109,9 @@ def test_summaries_by_object_zeroes_an_object_without_missive():
 
     summaries = missive_summaries_by_object(Contact, [linked.pk, bare.pk])
     assert summaries[object_id_value(bare.pk)] == {
-        "missives": 0, "events": 0, "last": {},
+        "missives": 0,
+        "events": 0,
+        "last": {},
     }
     assert summaries[object_id_value(linked.pk)]["missives"] == 1
 

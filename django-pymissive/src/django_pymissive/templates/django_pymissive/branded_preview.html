@@ -1,0 +1,17 @@
+{% extends "django_pymissive/base_preview.html" %}
+{% load static %}
+
+{% block preview_stylesheet %}
+<link rel="stylesheet" href="{% static 'django_pymissive/css/branded_preview.css' %}">
+{% if brand == "discord" %}
+<link rel="stylesheet" href="{% static 'django_pymissive/css/branded/discord_preview.css' %}">
+{% elif brand == "slack" %}
+<link rel="stylesheet" href="{% static 'django_pymissive/css/branded/slack_preview.css' %}">
+{% elif brand == "teams" %}
+<link rel="stylesheet" href="{% static 'django_pymissive/css/branded/teams_preview.css' %}">
+{% endif %}
+{% endblock %}
+
+{% block preview_content %}
+{% include "django_pymissive/branded/_message.html" %}
+{% endblock %}

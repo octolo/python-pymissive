@@ -7,7 +7,7 @@ from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
-from django_boosted import AdminBoostModel, admin_boost_view
+from django_boosted import AdminBoostModel, admin_boost_view  # type: ignore[import-untyped]
 
 from ..billings import (
     billings_export_queryset,
@@ -63,11 +63,7 @@ class MissiveBillingAdmin(AdminBoostModel):
         "is_billed",
         "created_at",
     ]
-    list_filter = [
-        "missive__provider",
-        "missive__missive_type",
-        "is_billed"
-    ]
+    list_filter = ["missive__provider", "missive__missive_type", "is_billed"]
     search_fields = [
         "missive__external_id",
         "missive__subject",
@@ -95,6 +91,7 @@ class MissiveBillingAdmin(AdminBoostModel):
             },
         ),
     ]
+
     def change_fieldsets(self):
         """Configure fieldsets for change view."""
         self.add_to_fieldset(_("Comment/Timestamps"), ["comment", "created_at", "updated_at"])
@@ -157,16 +154,10 @@ class MissiveBillingAdmin(AdminBoostModel):
 
         def stream():
             yield "\ufeff"
-            yield from iter_billings_csv(
-                queryset, extra_fields=extra_fields, one_row=one_row
-            )
+            yield from iter_billings_csv(queryset, extra_fields=extra_fields, one_row=one_row)
 
-        response = StreamingHttpResponse(
-            stream(), content_type="text/csv; charset=utf-8"
-        )
-        response["Content-Disposition"] = (
-            f'attachment; filename="billings_{start}_{end}.csv"'
-        )
+        response = StreamingHttpResponse(stream(), content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="billings_{start}_{end}.csv"'
         return response
 
     @admin_boost_view("adminform", _("Mark as billed"), requires_object=False)

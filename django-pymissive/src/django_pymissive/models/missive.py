@@ -2,13 +2,14 @@
 
 import traceback
 import uuid
+from typing import ClassVar
 from django.db import transaction
 from django.utils import timezone
 from django.core.exceptions import ValidationError, ObjectDoesNotExist
 from django.db import models
+from django.utils.html import format_html, format_html_join
 from django.utils.translation import gettext_lazy as _
 from django_providerkit import ProviderField
-from django.utils.safestring import mark_safe
 from django.urls import reverse
 from django_geoaddress.fields import GeoaddressField
 from phonenumber_field.modelfields import PhoneNumberField
@@ -52,6 +53,7 @@ from ..utils import (
     is_empty_sender_value,
     serialize_model_for_context,
     SENDER_CONTACT_FIELDS,
+    validate_import_paths,
 )
 from django.core import signing
 from django.core.files.base import ContentFile
@@ -62,19 +64,8 @@ class MissiveAlreadySending(ValidationError):
 
 
 SEPARATOR = "\n--------------------------------\n"
-ATTACHMENT_ICON = "&#128196;"
 ATTACHMENT_STYLE = "text-decoration: none; font-size: 14px;"
-ATTACHMENT_TPL_HTML = """<div>
-    <a href='{url}' target='_blank' rel='noopener' style='{style}'>
-        {icon}&nbsp;{name}
-    </a>
-</div>"""
-
-PREVIEW_ICON = "&#127760;"
 PREVIEW_STYLE = "text-decoration: none; font-size: 14px;"
-PREVIEW_TPL_HTML = """<a href='{url}' target='_blank' rel='noopener' style='{style}'>
-    {icon}&nbsp;{text}
-</a>"""
 
 OFFSET_CSS = {
     "top": "margin-top: {top};",
@@ -99,6 +90,7 @@ def _address_offset_dict_to_css(offset: dict) -> str:
 
 class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     """Multi-channel missive (email, SMS, postal letter / registered letter, …). Overrides :meth:`_parent_processors` for campaign cascade."""
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -291,10 +283,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         null=True,
         db_index=True,
         verbose_name=_("Substitute ID"),
-        help_text=_(
-            "Provider custom_id from another internal reference. "
-            "When empty, the missive UUID pk is used."
-        ),
+        help_text=_("Provider custom_id from another internal reference. When empty, the missive UUID pk is used."),
     )
     webhook_url = models.URLField(
         max_length=255,
@@ -337,13 +326,18 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         return f"{self.missive_type} - {recipient} ({self.status})"
 
     def _ensure_default_provider(self):
-        """Set provider from MissiveConfig if empty."""
+        """Set provider from MissiveConfig, then ``PYMISSIVE_DEFAULT_PROVIDER``."""
         if self.provider or not self.missive_type:
             return
-        from .config import MissiveConfig
+        from .config import MissiveConfig, default_provider_for_type
+
         config = MissiveConfig.objects.filter(missive_type=self.missive_type).first()
         if config and config.default_provider:
             self.provider = config.default_provider
+            return
+        provider = default_provider_for_type(self.missive_type)
+        if provider:
+            self.provider = provider
 
     def _ensure_missive_defaults(self):
         """Apply default values for support and delivery settings."""
@@ -462,9 +456,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         if cache is None:
             if not self.pk:
                 return self._annotation_default(name)
-            annotated = (
-                type(self)._default_manager.with_counts().filter(pk=self.pk).first()
-            )
+            annotated = type(self)._default_manager.with_counts().filter(pk=self.pk).first()
             fields = self._count_fields()
             cache = {
                 field: (
@@ -488,40 +480,39 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         # Prefix first: this runs on every missing attribute, and Django probes a
         # few (``get_absolute_url``, dunders), which have no business building the
         # annotation set.
-        if name != "sent_at" and not name.startswith(
-            ("count_", "last_", "total_", "is_bill")
-        ):
-            raise AttributeError(
-                f"{type(self).__name__!r} object has no attribute {name!r}"
-            )
+        if name != "sent_at" and not name.startswith(("count_", "last_", "total_", "is_bill")):
+            raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
         if name not in self._count_fields():
-            raise AttributeError(
-                f"{type(self).__name__!r} object has no attribute {name!r}"
-            )
+            raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
         return self._annotation(name)
 
     # Missive field → campaign field when names differ (per support).
     _CAMPAIGN_FIELD_MAP: dict[str, dict[str, str]] = {
         "email": {
-            "sender_name":    "sender_email_name",
-            "reply_to_name":  "reply_to_email_name",
+            "sender_name": "sender_email_name",
+            "reply_to_name": "reply_to_email_name",
             "acknowledgement": "acknowledgement_email",
-            "body_rich":      "email_body_rich",
-            "body_text":      "email_body_text",
+            "body_rich": "email_body_rich",
+            "body_text": "email_body_text",
         },
         "phone": {
-            "sender_name":    "sender_phone_name",
-            "body_text":      "phone_body_text",
+            "sender_name": "sender_phone_name",
+            "body_text": "phone_body_text",
+        },
+        "application": {
+            "sender_name": "sender_phone_name",
+            "body_text": "phone_body_text",
+            "body_rich": "phone_body_rich",
         },
         "address": {
-            "sender_name":    "sender_address_name",
-            "reply_to_name":  "reply_to_address_name",
+            "sender_name": "sender_address_name",
+            "reply_to_name": "reply_to_address_name",
             "acknowledgement": "acknowledgement_letter",
-            "delivery_mode":  "delivery_mode_letter",
-            "priority":       "priority_letter",
+            "delivery_mode": "delivery_mode_letter",
+            "priority": "priority_letter",
             "duplex_printing": "duplex_printing_letter",
             "color_printing": "color_printing_letter",
-            "body_rich":      "first_document",
+            "body_rich": "first_document",
         },
         "letter": {
             "duplex_printing": "duplex_printing_letter",
@@ -535,21 +526,40 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     _CAMPAIGN_SOURCED_FIELDS: dict[str, list[str]] = {
         "email": [
-            "subject", "body_rich", "body_text",
+            "subject",
+            "body_rich",
+            "body_text",
             "acknowledgement",
-            "sender_name", "sender_email",
-            "reply_to_name", "reply_to_email",
+            "sender_name",
+            "sender_email",
+            "reply_to_name",
+            "reply_to_email",
         ],
         "phone": [
-            "subject", "body_text",
-            "sender_name", "sender_phone",
+            "subject",
+            "body_text",
+            "sender_name",
+            "sender_phone",
+        ],
+        "application": [
+            "subject",
+            "body_rich",
+            "body_text",
+            "sender_name",
         ],
         "address": [
-            "subject", "body_rich", "body_text",
-            "acknowledgement", "delivery_mode", "priority",
-            "duplex_printing", "color_printing",
-            "sender_name", "sender_address",
-            "reply_to_name", "reply_to_address",
+            "subject",
+            "body_rich",
+            "body_text",
+            "acknowledgement",
+            "delivery_mode",
+            "priority",
+            "duplex_printing",
+            "color_printing",
+            "sender_name",
+            "sender_address",
+            "reply_to_name",
+            "reply_to_address",
         ],
     }
 
@@ -605,29 +615,33 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     def set_locally_ifnull(self):
         """Copy null missive fields from campaign (snapshot before send)."""
-        if not self.campaign_id:
+        campaign = self.campaign
+        if campaign is None:
             return
         support = (self.missive_support or "").lower()
         fields = self.get_campaign_sourced_fields(support)
-
         updates = []
         for field in fields:
-            if not hasattr(self, field):
-                continue
-            local = getattr(self, field, None)
-            if self._value_is_set(local):
-                continue
-            val = self.get_campaign_value(field)
-            if self._value_is_set(val):
-                setattr(self, field, val)
+            if self._copy_campaign_field(field):
                 updates.append(field)
-
-        if self.campaign.additional_context and not (self.additional_context or {}):
-            self.additional_context = dict(self.campaign.additional_context)
+        if self._copy_campaign_context():
+            self.additional_context = dict(campaign.additional_context)
             updates.append("additional_context")
-
         if updates:
             self.save(update_fields=updates)
+
+    def _copy_campaign_field(self, field):
+        if not hasattr(self, field) or self._value_is_set(getattr(self, field, None)):
+            return False
+        value = self.get_campaign_value(field)
+        if not self._value_is_set(value):
+            return False
+        setattr(self, field, value)
+        return True
+
+    def _copy_campaign_context(self):
+        campaign = self.campaign
+        return bool(campaign and campaign.additional_context and not (self.additional_context or {}))
 
     def clear_campaign_sourced_fields(self, missive):
         """Clear campaign-sourced fields on missive so they will be re-filled from campaign at send.
@@ -644,6 +658,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         for attr in fields_to_clear:
             if not hasattr(missive, attr):
                 continue
+            empty: object
             if attr == "additional_context":
                 empty = {}
             else:
@@ -717,19 +732,13 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         return None
 
     def get_acknowledgement(self):
-        return self.get_locally_or_campaign_value(
-            "acknowledgement", fallback=AcknowledgementLevel.BASIC_DELIVERY
-        )
+        return self.get_locally_or_campaign_value("acknowledgement", fallback=AcknowledgementLevel.BASIC_DELIVERY)
 
     def get_delivery_mode(self):
-        return self.get_locally_or_campaign_value(
-            "delivery_mode", fallback=MissiveDeliveryMode.NORMAL
-        )
+        return self.get_locally_or_campaign_value("delivery_mode", fallback=MissiveDeliveryMode.NORMAL)
 
     def get_priority(self):
-        return self.get_locally_or_campaign_value(
-            "priority", fallback=MissivePriority.NORMAL
-        )
+        return self.get_locally_or_campaign_value("priority", fallback=MissivePriority.NORMAL)
 
     def get_duplex_printing(self):
         return self.get_locally_or_campaign_value("duplex_printing", fallback=True)
@@ -756,9 +765,25 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         )
 
     def is_serializable_field(self, field):
-        return (not field.is_relation
-                and not field.many_to_many
-                and not field.name.startswith("_"))
+        return not field.is_relation and not field.many_to_many and not field.name.startswith("_")
+
+    def _serialized_field_value(self, field, compiled):
+        getter = f"get_{field.name}"
+        if hasattr(self, getter):
+            return getattr(self, getter)()
+        if compiled and hasattr(self, f"{field.name}_compiled"):
+            return getattr(self, f"{field.name}_compiled")
+        if field.name in self.get_campaign_sourced_fields(self.missive_support):
+            return self.get_locally_or_campaign_value(field.name)
+        return getattr(self, field.name)
+
+    def _serialized_recipients(self):
+        data = {"recipients": [recipient.get_serialized_data() for recipient in self.recipients]}
+        for recipient_type in ("cc", "bcc", "notification"):
+            recipients = getattr(self, recipient_type)
+            if recipients:
+                data[recipient_type] = [recipient.get_serialized_data() for recipient in recipients]
+        return data
 
     def get_serialized_data(self, attachments=True, compiled=None):
         """Serialize missive data to a dictionary for provider calls.
@@ -772,32 +797,12 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         if compiled is None:
             compiled = attachments
 
-        missive_data = {}
-        for field in self._meta.get_fields():
-            if self.is_serializable_field(field):
-                if hasattr(self, f"get_{field.name}"):
-                    missive_data[field.name] = getattr(self, f"get_{field.name}")()
-                elif compiled and hasattr(self, f"{field.name}_compiled"):
-                    missive_data[field.name] = getattr(self, f"{field.name}_compiled")
-                elif field.name in self.get_campaign_sourced_fields(self.missive_support):
-                    missive_data[field.name] = self.get_locally_or_campaign_value(field.name)
-                else:
-                    missive_data[field.name] = getattr(self, field.name)
-        missive_data["recipients"] = [
-            recipient.get_serialized_data() for recipient in self.recipients
-        ]
-        if self.cc:
-            missive_data["cc"] = [
-                recipient.get_serialized_data() for recipient in self.cc
-            ]
-        if self.bcc:
-            missive_data["bcc"] = [
-                recipient.get_serialized_data() for recipient in self.bcc
-            ]
-        if self.notification:
-            missive_data["notification"] = [
-                recipient.get_serialized_data() for recipient in self.notification
-            ]
+        missive_data = {
+            field.name: self._serialized_field_value(field, compiled)
+            for field in self._meta.get_fields()
+            if self.is_serializable_field(field)
+        }
+        missive_data.update(self._serialized_recipients())
         missive_data["sender"] = self.get_sender()
         missive_data["reply_to"] = self.get_reply_to()
         if attachments:
@@ -830,7 +835,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         from pymissive.config import provider_service_name
 
         service_name = provider_service_name(service, self.missive_type)
-        return self.provider.call_service(service_name,  **kwargs)
+        return self.provider.call_service(service_name, **kwargs)
 
     #########################################################
     # Check methods
@@ -936,32 +941,35 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         Sender address: ``self.sender_address`` then campaign ``sender_address``.
         Recipient: only a non-empty ``name`` is required (no email/phone/address).
         """
-        has_named_recipient = (
-            self.recipients
-            .filter(recipient_type=MissiveRecipientType.RECIPIENT)
+        if not self._has_named_recipient():
+            return False
+        return bool(self._hand_delivery_sender_name() and self._hand_delivery_sender_address())
+
+    def _has_named_recipient(self):
+        return (
+            self.recipients.filter(recipient_type=MissiveRecipientType.RECIPIENT)
             .exclude(name="")
             .exclude(name__isnull=True)
             .exists()
         )
-        if not has_named_recipient:
-            return False
 
+    def _hand_delivery_sender_name(self):
         sender_name = self.sender_name
         if not sender_name and self.campaign_id and self.campaign is not None:
             for field in ("sender_address_name", "sender_email_name", "sender_phone_name"):
                 sender_name = getattr(self.campaign, field, None)
                 if sender_name:
                     break
-        if not sender_name:
-            return False
+        return sender_name
 
+    def _hand_delivery_sender_address(self):
         sender_address = self.sender_address
         if not sender_address and self.campaign_id and self.campaign is not None:
             sender_address = self.campaign.sender_address
-        return bool(sender_address)
+        return sender_address
 
     def _campaign_preview_kind(self) -> str:
-        """Map missive_type to the campaign preview ``?type=`` kind (email/sms/postal)."""
+        """Map missive_type to the campaign preview ``?type=`` kind (email/sms/postal/branded)."""
         from ..views.preview import POSTAL_PREVIEW_MISSIVE_TYPES
 
         mt = (self.missive_type or "").lower()
@@ -969,6 +977,8 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             return "postal"
         if mt in ("sms", "rcs"):
             return "sms"
+        if mt == "branded":
+            return "branded"
         return "email"
 
     def get_browser_preview_path(self) -> str:
@@ -977,12 +987,14 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         Embedded in outgoing emails by ``add_preview_browser``, so it is
         recipient-facing, not staff-only.
         """
-        from ..views.preview import POSTAL_PREVIEW_MISSIVE_TYPES
+        from ..views.preview import POSTAL_PREVIEW_MISSIVE_TYPES, _missive_brand
 
         if not self.is_persisted:
             if self.campaign_id and self.campaign is not None:
+                kind = self._campaign_preview_kind()
                 return self.campaign.get_browser_preview_path(
-                    preview_kind=self._campaign_preview_kind(),
+                    preview_kind=kind,
+                    brand=_missive_brand(self) if kind == "branded" else "",
                 )
             return ""
         mt = (self.missive_type or "").lower()
@@ -1007,15 +1019,14 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def show_preview_browser(self):
         path = self.get_browser_preview_path()
         if not path:
-            return mark_safe("")  # nosec B703 B308
+            return ""
         url = self.base_url + path
-        data = {
-            "url": url,
-            "icon": PREVIEW_ICON,
-            "text": _("Preview in browser"),
-            "style": PREVIEW_STYLE,
-        }
-        return mark_safe(PREVIEW_TPL_HTML.format(**data))  # nosec B703 B308
+        return format_html(
+            "<a href='{}' target='_blank' rel='noopener' style='{}'>&#127760;&nbsp;{}</a>",
+            url,
+            PREVIEW_STYLE,
+            _("Preview in browser"),
+        )
 
     @property
     def show_preview_browser_text(self):
@@ -1043,29 +1054,28 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         return dict(cached)
 
     def _build_missive_context(self):
-        context = dict(getattr(self.campaign, "additional_context", {}) or {})
+        campaign = self.campaign
+        context = dict(getattr(campaign, "additional_context", {}) or {})
         context.update(self.additional_context or {})
 
         grouped: dict[str, list] = {}
         seen: set[tuple[str, object]] = set()
-        self._collect_related_objects(
-            self.to_missiverelatedobject, into=grouped, seen=seen
-        )
-        if self.campaign_id:
-            self._collect_related_objects(
-                self.campaign.to_campaignrelatedobject, into=grouped, seen=seen
-            )
+        self._collect_related_objects(self.to_missiverelatedobject, into=grouped, seen=seen)
+        if campaign is not None:
+            self._collect_related_objects(campaign.to_campaignrelatedobject, into=grouped, seen=seen)
 
         for ct_name, objs in grouped.items():
             context[ct_name] = objs[0]
             context[f"{ct_name}_list"] = objs
 
-        context.update({
-            "show_preview_browser": self.show_preview_browser,
-            "show_preview_browser_text": self.show_preview_browser_text,
-            "show_attachments_linked": self.show_attachments_linked,
-            "show_attachments_linked_text": self.show_attachments_linked_text,
-        })
+        context.update(
+            {
+                "show_preview_browser": self.show_preview_browser,
+                "show_preview_browser_text": self.show_preview_browser_text,
+                "show_attachments_linked": self.show_attachments_linked,
+                "show_attachments_linked_text": self.show_attachments_linked_text,
+            }
+        )
         return context
 
     @staticmethod
@@ -1076,9 +1086,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         seen: set,
     ) -> None:
         """Group by content type; skip deleted rows; dedup via ``seen``."""
-        for ro in manager.select_related("content_type").prefetch_related(
-            "content_object"
-        ):
+        for ro in manager.select_related("content_type").prefetch_related("content_object"):
             obj = ro.content_object
             if obj is None:
                 continue
@@ -1087,9 +1095,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             if key in seen:
                 continue
             seen.add(key)
-            into.setdefault(ct_name, []).append(
-                serialize_model_for_context(obj)
-            )
+            into.setdefault(ct_name, []).append(serialize_model_for_context(obj))
 
     def get_provider_address_css(self) -> str:
         """CSS for ``.a4-address-provider`` from the provider address-offset dict."""
@@ -1108,7 +1114,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def get_postal_letter_render_context(self, post_data=None, postal_recipient_pk=None):
         from ..views.preview import build_preview_context
 
-        ctx = {"missive": self}
+        ctx: dict[str, object] = {"missive": self}
         ctx.update(
             build_preview_context(
                 self,
@@ -1145,9 +1151,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         except Exception:
             import logging
 
-            logging.getLogger(__name__).exception(
-                "ensure_first_document failed for missive %s", self.pk
-            )
+            logging.getLogger(__name__).exception("ensure_first_document failed for missive %s", self.pk)
             return None
 
     def generate_first_document(self):
@@ -1253,17 +1257,15 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     @property
     def show_attachments_linked(self):
-        html = "<div>"
-        for attachment in self.get_serialized_attachments(linked=True):
-            data = {
-                "url": attachment["url"],
-                "icon": ATTACHMENT_ICON,
-                "name": attachment["name"],
-                "style": ATTACHMENT_STYLE,
-            }
-            html += ATTACHMENT_TPL_HTML.format(**data)
-        html += "</div>"
-        return mark_safe(html)  # nosec B703 B308
+        links = format_html_join(
+            "",
+            "<div><a href='{}' target='_blank' rel='noopener' style='{}'>&#128196;&nbsp;{}</a></div>",
+            (
+                (attachment["url"], ATTACHMENT_STYLE, attachment["name"])
+                for attachment in self.get_serialized_attachments(linked=True)
+            ),
+        )
+        return format_html("<div>{}</div>", links)
 
     @property
     def show_attachments_linked_text(self):
@@ -1281,6 +1283,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def attachments(self):
         """Campaign + missive attachments. Order: first_document → campaign → missive (``Case/When``)."""
         from .attachment import MissiveBaseAttachment, FIRST_DOCUMENT_PRIORITY
+
         q_filter = models.Q(attachment_type=MissiveAttachmentType.ATTACHMENT) | models.Q(
             attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT
         )
@@ -1356,9 +1359,8 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """Copy attachments except first_document (regenerated on demand)."""
         from ..models.attachment import FIRST_DOCUMENT_PRIORITY
 
-        attachments = (
-            source_missive.attachments.filter(missive=source_missive)
-            .exclude(priority=FIRST_DOCUMENT_PRIORITY)
+        attachments = source_missive.attachments.filter(missive=source_missive).exclude(
+            priority=FIRST_DOCUMENT_PRIORITY
         )
         for index, attachment in enumerate(attachments):
             attachment.pk = None
@@ -1456,9 +1458,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                 continue
             rec = self.to_missiverecipient.filter(id=internal_id).first()
             if rec is None:
-                rec = self.to_missiverecipient.filter(
-                    substitute_id=str(internal_id)
-                ).first()
+                rec = self.to_missiverecipient.filter(substitute_id=str(internal_id)).first()
             if rec is None:
                 continue
             rec.external_id = recipient.get("external_id")
@@ -1520,17 +1520,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     ):
         """Append a client-initiated ERROR event and move the missive to ERROR."""
         occurred_at = occurred_at or timezone.now()
-        trace = dict(response or {})
-        if extra_trace:
-            trace.update(extra_trace)
-        reason = ""
-        if exc is not None:
-            trace.setdefault("error", str(exc))
-            trace.setdefault("error_type", type(exc).__name__)
-            trace.setdefault("traceback", traceback.format_exc())
-            reason = str(exc)
-        elif response:
-            reason = str(response.get("message") or response.get("error") or "")
+        trace, reason = self._send_failure_details(exc, response, extra_trace)
         config = dict(self.additional_config or {})
         if reason:
             config["last_error"] = reason
@@ -1547,6 +1537,19 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             self.additional_config = config
             update_fields.append("additional_config")
         self.save(update_fields=update_fields)
+
+    @staticmethod
+    def _send_failure_details(exc, response, extra_trace):
+        trace = dict(response or {})
+        if extra_trace:
+            trace.update(extra_trace)
+        if exc is not None:
+            trace.setdefault("error", str(exc))
+            trace.setdefault("error_type", type(exc).__name__)
+            trace.setdefault("traceback", traceback.format_exc())
+            return trace, str(exc)
+        reason = str(response.get("message") or response.get("error") or "") if response else ""
+        return trace, reason
 
     def last_send_error(self) -> str:
         """Return the last send failure message, if any."""
@@ -1575,10 +1578,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         network call is skipped provider-side. The provider returns a response
         flagged with ``disabled_send`` which is handled by ``_disabled_send``.
         """
-        if not self.can_send():
-            raise ValidationError(_("Missive cannot be sent"))
-        if not self.claim_for_send():
-            raise MissiveAlreadySending(_("Missive cannot be sent"))
+        self._claim_send()
         missive_pre_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
         self.set_locally_ifnull()
         occurred_at = timezone.now()
@@ -1589,31 +1589,44 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             response = self.call_provider_service("send", **self.get_serialized_data())
         except Exception as exc:
             self._record_send_failure(exc, occurred_at=occurred_at)
-            self.refresh_from_db()
-            missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
+            self._finish_send(old_missive)
             return
         response["client_initiated"] = True
         if response.get("disabled_send"):
             self._disabled_send(response=response, occurred_at=occurred_at, old_missive=old_missive)
             return
+        self._persist_send_response(response, occurred_at)
+        self._finish_send(old_missive)
+
+    def _claim_send(self):
+        if not self.can_send():
+            if not self.provider:
+                raise ValidationError(_("Missive cannot be sent: no provider set"))
+            raise ValidationError(_("Missive cannot be sent"))
+        if not self.claim_for_send():
+            raise MissiveAlreadySending(_("Missive cannot be sent"))
+
+    def _persist_send_response(self, response, occurred_at):
         if response.get("recipients"):
             self._update_recipients(response.get("recipients"))
-        if response.get("attachments"):
-            self._update_attachments(response.get("attachments"))
         self._update_attachments(response.get("attachments", []))
         self.external_id = response.get("external_id")
         if self.external_id:
-            self.external_id = response.get("external_id")
-            self.save(update_fields=["external_id", "status"])
-            from ..signals import suppress_event_billings
-
-            with suppress_event_billings():
-                self._record_submitted_event(occurred_at=occurred_at, trace=response)
-                events = response.get("events")
-                if events:
-                    self.handle_events(events)
+            self._record_send_success(response, occurred_at)
         else:
             self._record_send_failure(response=response, occurred_at=occurred_at)
+
+    def _record_send_success(self, response, occurred_at):
+        self.save(update_fields=["external_id", "status"])
+        from ..signals import suppress_event_billings
+
+        with suppress_event_billings():
+            self._record_submitted_event(occurred_at=occurred_at, trace=response)
+            events = response.get("events")
+            if events:
+                self.handle_events(events)
+
+    def _finish_send(self, old_missive):
         self.refresh_from_db()
         missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
 
@@ -1676,6 +1689,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     def handle_events(self, events: list | dict):
         from ..events import handle_events
+
         handle_events(events, self.provider, self.missive_type)
 
     def cancel_missive(self):
@@ -1745,12 +1759,10 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
         if self.status in TERMINAL_STATUSES:
             return
-        success_count, processing_count, failed_count, cancelled_count = (
-            MissiveEvent.objects.get_event_counts(missive=self)
+        success_count, processing_count, failed_count, cancelled_count = MissiveEvent.objects.get_event_counts(
+            missive=self
         )
-        status = status_from_event_counts(
-            success_count, processing_count, failed_count, cancelled_count
-        )
+        status = status_from_event_counts(success_count, processing_count, failed_count, cancelled_count)
         # Counts of 0 mean "no recipient event yet", not "never sent".
         # A just-sent missive with only a leftover recipient-less SUBMITTED
         # must not return to DRAFT (that re-enables Send and the campaign).
@@ -1765,17 +1777,13 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     #########################################################
 
     def can_tracking_numbers(self):
-        return bool(
-            self.has_service("tracking_number") and self.external_id and not is_dry_run()
-        )
+        return bool(self.has_service("tracking_number") and self.external_id and not is_dry_run())
 
     def retrieve_tracking_numbers(self):
         """Fetch carrier tracking numbers from the provider and persist them on recipients."""
         if not self.can_tracking_numbers():
             return []
-        response = self.call_provider_service(
-            "tracking_number", **self.get_serialized_data(attachments=False)
-        )
+        response = self.call_provider_service("tracking_number", **self.get_serialized_data(attachments=False))
         if isinstance(response, dict):
             recipients = response.get("recipients") or []
         else:
@@ -1789,14 +1797,13 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     #########################################################
 
     def can_billings(self):
-        return bool(
-            self.has_service("get_billings") and self.external_id and not is_dry_run()
-        )
+        return bool(self.has_service("get_billings") and self.external_id and not is_dry_run())
 
     def get_billings(self):
         """Get the billings of the missive."""
         if self.can_billings():
             from ..billings import handle_billings
+
             handle_billings(**self.get_serialized_data(attachments=False))
 
     def set_billed(self):
@@ -1809,9 +1816,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     def can_proofs(self) -> bool:
         """True if the provider can list proofs for this sent missive."""
-        return bool(
-            self.has_service("retrieve_proofs") and self.external_id and not is_dry_run()
-        )
+        return bool(self.has_service("retrieve_proofs") and self.external_id and not is_dry_run())
 
     def get_proofs(self):
         """Get proofs (filename, url) from provider. Returns [] if not supported."""
@@ -1823,9 +1828,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         service_name = provider_service_name("retrieve_proofs", self.missive_type)
         if not hasattr(provider, service_name):
             return []
-        return provider.call_service_formatted(
-            service_name, **self.get_serialized_data(attachments=False)
-        )
+        return provider.call_service_formatted(service_name, **self.get_serialized_data(attachments=False))
 
     def download_proof(self, **kwargs):
         """Download the proof from the provider."""
@@ -1845,9 +1848,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     @property
     def recipients(self):
-        return self.to_missiverecipient.filter(
-            recipient_type=MissiveRecipientType.RECIPIENT
-        )
+        return self.to_missiverecipient.filter(recipient_type=MissiveRecipientType.RECIPIENT)
 
     @property
     def first_recipient(self):
@@ -1878,9 +1879,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     @property
     def notification(self):
         """Progress-watchers (provider alerts), not delivery targets."""
-        return self.to_missiverecipient.filter(
-            recipient_type=MissiveRecipientType.NOTIFICATION
-        )
+        return self.to_missiverecipient.filter(recipient_type=MissiveRecipientType.NOTIFICATION)
 
     #########################################################
     # Clean methods
@@ -1915,6 +1914,12 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         has no value for this type), the required-field checks still run.
         """
         self._ensure_missive_defaults()
+        validate_import_paths(
+            self,
+            "body_processors",
+            "first_document_processors",
+            "attachment_processors",
+        )
         errors = {}
         support = (self.missive_support or "").lower()
         required = self._REQUIRED_FIELDS_BY_SUPPORT.get(support, [])
@@ -1939,30 +1944,36 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     def clean_subject(self):
         if not self.subject and not self.campaign:
-            raise ValidationError({
-                "subject": _("Subject or Campaign is required"),
-            })
+            raise ValidationError(
+                {
+                    "subject": _("Subject or Campaign is required"),
+                }
+            )
 
     def clean_support_email(self):
         """Clean the missive for email support."""
         if self.additional_config.get("use_provider_template", False):
             return True
-        has_body_missive = (self.body_rich or self.body_text)
-        has_body_campaign = (self.campaign and (self.campaign.email_body_rich or self.campaign.email_body_text))
+        has_body_missive = self.body_rich or self.body_text
+        has_body_campaign = self.campaign and (self.campaign.email_body_rich or self.campaign.email_body_text)
         if not has_body_missive and not has_body_campaign:
-            raise ValidationError({
-                "body_rich": _("Rich body or plain text body is required (in missive or campaign)"),
-                "body_text": _("Rich body or plain text body is required (in missive or campaign)"),
-            })
+            raise ValidationError(
+                {
+                    "body_rich": _("Rich body or plain text body is required (in missive or campaign)"),
+                    "body_text": _("Rich body or plain text body is required (in missive or campaign)"),
+                }
+            )
 
     def clean_support_phone(self):
         """Clean the missive for SMS/phone support."""
         has_body_missive = self.body_text
-        has_body_campaign = (self.campaign and self.campaign.phone_body_text)
+        has_body_campaign = self.campaign and self.campaign.phone_body_text
         if not has_body_missive and not has_body_campaign:
-            raise ValidationError({
-                "body_text": _("Plain text body is required (in missive or campaign)"),
-            })
+            raise ValidationError(
+                {
+                    "body_text": _("Plain text body is required (in missive or campaign)"),
+                }
+            )
 
     def clean_support_address(self):
         """Extra validation for address missives: body_rich or attachments."""
@@ -1970,14 +1981,17 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         has_attachments = self.pk and self.to_missiveattachment.all().exists()
         has_campaign_docs = self.campaign and self.campaign.to_campaigndocument.exists()
         if not has_body and not has_attachments and not has_campaign_docs:
-            raise ValidationError({
-                "body_rich": _("Rich body or attachments are required (set locally or via campaign)"),
-            })
+            raise ValidationError(
+                {
+                    "body_rich": _("Rich body or attachments are required (set locally or via campaign)"),
+                }
+            )
 
 
 class MissiveHistory(Missive):
     """Missive history model."""
-    objects = MissiveHistoryManager()
+
+    objects: ClassVar[MissiveHistoryManager] = MissiveHistoryManager()
 
     class Meta:
         proxy = True
@@ -1988,7 +2002,8 @@ class MissiveHistory(Missive):
 
 class MissiveMessage(Missive):
     """Missive message model."""
-    objects = MissiveMessageManager()
+
+    objects: ClassVar[MissiveMessageManager] = MissiveMessageManager()
 
     class Meta:
         proxy = True

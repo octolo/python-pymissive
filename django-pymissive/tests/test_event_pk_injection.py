@@ -23,12 +23,8 @@ pytestmark = pytest.mark.django_db
 
 
 def _missive(subject, external_id):
-    missive = Missive.objects.create(
-        missive_type=MissiveType.EMAIL, subject=subject, external_id=external_id
-    )
-    recipient = MissiveRecipientEmail.objects.create(
-        missive=missive, name=subject, email=f"{external_id}@example.com"
-    )
+    missive = Missive.objects.create(missive_type=MissiveType.EMAIL, subject=subject, external_id=external_id)
+    recipient = MissiveRecipientEmail.objects.create(missive=missive, name=subject, email=f"{external_id}@example.com")
     return missive, recipient
 
 
@@ -93,13 +89,15 @@ def test_replay_updates_its_own_row_instead_of_duplicating():
     # The provider re-normalizes the stored payload into a newer event. The
     # business key therefore differs — only the pk can target the same row.
     provider = MagicMock()
-    provider._provider.call_service_formatted.return_value = [{
-        "event": "delivered",
-        "occurred_at": "2026-09-13T10:00:00Z",
-        "recipient": {"id": str(recipient.id)},
-        "reason": "Handed to the recipient",
-        "raw": {"status": "delivered"},
-    }]
+    provider._provider.call_service_formatted.return_value = [
+        {
+            "event": "delivered",
+            "occurred_at": "2026-09-13T10:00:00Z",
+            "recipient": {"id": str(recipient.id)},
+            "reason": "Handed to the recipient",
+            "raw": {"status": "delivered"},
+        }
+    ]
 
     with patch.object(Missive, "provider", new_callable=PropertyMock) as provider_prop:
         provider_prop.return_value = provider

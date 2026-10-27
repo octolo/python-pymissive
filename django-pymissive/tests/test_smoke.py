@@ -64,9 +64,7 @@ def test_recipient_save_infers_support_from_email_and_missive_type():
         sender_email="hello@example.com",
         status=MissiveStatus.DRAFT,
     )
-    by_email = MissiveRecipient.objects.create(
-        missive=email_missive, name="Alice", email="alice@example.com"
-    )
+    by_email = MissiveRecipient.objects.create(missive=email_missive, name="Alice", email="alice@example.com")
     assert by_email.recipient_support == "email"
 
     erl_missive = Missive.objects.create(

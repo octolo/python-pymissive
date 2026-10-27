@@ -12,7 +12,6 @@ for the apps under test).
 from __future__ import annotations
 
 import pytest
-from django.conf import settings
 from django.core.files.storage import default_storage
 from django.utils.functional import empty
 
@@ -56,9 +55,7 @@ def _disable_debug_toolbar(settings):
     without the toolbar interfering.
     """
     settings.DEBUG = False
-    middleware = [
-        m for m in settings.MIDDLEWARE if "debug_toolbar" not in m.lower()
-    ]
+    middleware = [m for m in settings.MIDDLEWARE if "debug_toolbar" not in m.lower()]
     if middleware != list(settings.MIDDLEWARE):
         settings.MIDDLEWARE = middleware
 

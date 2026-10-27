@@ -1,0 +1,356 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls django_pymissive_animations %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+{% pymissive_animations_css %}
+<style>
+  .demo-page { max-width: 1220px; margin: 0 auto; padding: 8px 4px 28px; color: var(--body-fg); font-family: var(--font-family-primary); }
+  .demo-page, .demo-page * { box-sizing: border-box; }
+  .demo-page .panel { margin: 20px 0; padding: 0 18px 18px; border: 1px solid var(--hairline-color); border-radius: 8px; background: var(--body-bg); overflow: hidden; }
+  .demo-page .panel > h2 { margin: 0 -18px 15px; padding: 8px 18px; background: var(--header-bg); color: var(--header-link-color); font-size: 1rem; font-weight: 400; }
+  .demo-page .panel > p { margin: 0 0 15px; color: var(--body-quiet-color); line-height: 1.5; }
+  .demo-page .examples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  .demo-page .example { min-width: 0; }
+  .demo-page .mount-point { min-width: 0; }
+  .demo-page .sample-code { margin: 8px 0 0; border: 1px solid var(--hairline-color); border-radius: 4px; background: var(--body-bg); overflow: hidden; }
+  .demo-page .sample-code summary { padding: 9px 11px; color: var(--header-link-color); cursor: pointer; font-size: 12px; font-weight: 400; background: var(--header-bg); }
+  .demo-page .sample-code pre, .demo-page .code-block { overflow: auto; margin: 0; padding: 12px; background: var(--darkened-bg); color: var(--body-fg); font-family: var(--font-family-monospace); font-size: 12px; line-height: 1.55; }
+  .demo-page .sample-code pre { font-size: 11px; }
+  .demo-page .code-block { margin: 12px 0 0; border: 1px solid var(--hairline-color); border-radius: 4px; }
+  .demo-page .preview-section { margin: 20px 0; }
+  .demo-page #custom-types { display: none; }
+  .demo-page #custom-preview #custom-types { display: grid; padding: 16px 21px; }
+  .demo-page #custom-preview .pym-am-root main { width: 100%; }
+  .demo-page #custom-preview .pym-am-root .card { border: 1px solid var(--hairline-color); }
+  .demo-page .pym-am-root .lab-stage { margin-top: 0; }
+  .demo-page .preview-section > .sample-code { margin-top: 12px; }
+  .demo-page .toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; margin: 16px 0 20px; padding: 0; background: transparent; border: 0; border-radius: 0; }
+  .demo-page .field { display: grid; gap: 6px; min-width: 0; }
+  .demo-page .field label { color: var(--body-medium-color); font-size: 13px; font-weight: 750; }
+  .demo-page .field input[type=range] { width: 100%; accent-color: var(--primary); }
+  .demo-page .field input[type=number], .demo-page .field input[type=text], .demo-page .field select, .demo-page .field textarea { width: 100%; min-width: 0; padding: 9px 11px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--body-bg); color: var(--body-fg); font: inherit; font-size: 14px; }
+  .demo-page .field textarea { resize: vertical; line-height: 1.4; }
+  .demo-page fieldset.field { margin: 0; padding: 0; border: 0; }
+  .demo-page .field label.check { display: flex; align-items: center; gap: 7px; font-weight: 500; }
+  .demo-page .field label.check input { accent-color: var(--primary); }
+  .demo-page .checks { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 0 0 16px; padding: 14px 0; border-top: 1px solid var(--hairline-color); border-bottom: 1px solid var(--hairline-color); }
+  .demo-page .checks label { display: flex; align-items: center; gap: 7px; color: var(--body-medium-color); font-size: 13px; font-weight: 650; }
+  .demo-page .checks input { accent-color: var(--primary); }
+  .demo-page .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; align-items: start; }
+  .demo-page .field input[type=number], .demo-page .field input[type=text], .demo-page .field select { min-height: 39px; }
+  .demo-page .muted { color: var(--body-quiet-color); font-size: 13px; line-height: 1.5; }
+  .demo-page code { color: var(--body-loud-color); }
+  .demo-page .pym-am-root .card-head { padding: 14px 16px; background: var(--header-bg); color: var(--header-link-color); }
+  .demo-page .pym-am-root .card h2 { color: var(--header-link-color); }
+  .demo-page .pym-am-root .card-head p { color: var(--breadcrumbs-fg); }
+  .demo-page .pym-am-root .icon { background: var(--primary); color: var(--primary-fg); }
+  html[data-theme="dark"] .demo-page .pym-am-root .card { background: var(--body-bg); box-shadow: none; }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) .demo-page .pym-am-root .card { background: var(--body-bg); box-shadow: none; }
+  }
+  @media (max-width: 760px) {
+    .demo-page .examples, .demo-page .form-grid, .demo-page .toolbar { grid-template-columns: 1fr; }
+    .demo-page .field { min-width: 0; }
+    .demo-page .panel { padding: 0 13px 13px; }
+    .demo-page .panel > h2 { margin-left: -13px; margin-right: -13px; padding-left: 13px; padding-right: 13px; }
+  }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+<main class="demo-page">
+  <section class="panel">
+    <h2>{% translate "Shared settings" %}</h2>
+    <p>{% translate "These settings apply to the custom preview and to every preset." %}</p>
+    <div class="toolbar">
+      <div class="field"><label for="custom-speed">{% translate "Speed" %} : <output id="custom-speed-value">1×</output></label><input id="custom-speed" type="range" min="0.25" max="4" step="0.25" value="1"></div>
+      <div class="field"><label for="custom-count">{% translate "Number of items" %} : <output id="custom-count-value">3</output></label><input id="custom-count" type="range" min="1" max="12" step="1" value="3"></div>
+      <div class="field"><label for="custom-total">{% translate "Total sends" %}</label><input id="custom-total" type="number" min="0" step="1" value="100"></div>
+      <div class="field"><label for="custom-remaining">{% translate "Remaining sends" %}</label><input id="custom-remaining" type="number" min="0" step="1" value="100"></div>
+      <div class="field"><label for="custom-errors">{% translate "Errors" %}</label><input id="custom-errors" type="number" min="0" step="1" value="0"></div>
+      <div class="field"><label for="custom-caller">{% translate "Caller name" %}</label><input id="custom-caller" type="text" maxlength="42" value="Pymissive"></div>
+      <div class="field"><label for="custom-color">{% translate "Brand color" %}</label><input id="custom-color" type="color" value="#5484ed"></div>
+    </div>
+    <div class="checks">
+      <label><input id="custom-background" type="checkbox" checked> {% translate "Illustrated background" %}</label>
+      <label><input id="custom-ground" type="checkbox" checked> {% translate "Ground bar" %}</label>
+      <label><input id="custom-show-caption" type="checkbox" checked> {% translate "Text under the ground" %}</label>
+      <label><input id="custom-counter" type="checkbox" checked> {% translate "Counter" %}</label>
+      <label><input id="custom-counter-background" type="checkbox"> {% translate "White counter background" %}</label>
+      <label><input id="custom-summary" type="checkbox"> {% translate "Summary when finished" %}</label>
+    </div>
+    <div class="form-grid">
+      <div class="field"><label for="custom-messages">{% translate "SMS messages (one message per line)" %}</label><textarea id="custom-messages" rows="4">{% translate "Hello! 👋" %}
+{% translate "See you soon!" %}
+{% translate "Thanks 😊" %}</textarea><span class="muted">{% translate "Press Enter to add another message. Each send picks one at random, without changing how many are sent." %}</span></div>
+      <div class="field"><label for="custom-caption">{% translate "Text under the ground bar" %}</label><textarea id="custom-caption" rows="4">{% translate "Sending the message…" %}</textarea><span class="muted">{% translate "Long text is fine: the lower area grows to fit it." %}</span></div>
+    </div>
+  </section>
+
+  <section class="preview-section">
+    <div id="custom-types" class="form-grid">
+      <fieldset class="field" id="custom-senders"><label>{% translate "Send types" %}</label>
+        <label class="check"><input type="checkbox" value="email" checked> {% translate "Email — blue envelope" %}</label>
+        <label class="check"><input type="checkbox" value="emailAR" checked> {% translate "Email with AR — marked envelope" %}</label>
+        <label class="check"><input type="checkbox" value="postal" checked> {% translate "Postal mail — yellow envelope" %}</label>
+        <label class="check"><input type="checkbox" value="registered" checked> {% translate "Registered mail — yellow envelope with AR" %}</label>
+        <label class="check"><input type="checkbox" value="handDelivery" checked> {% translate "Hand delivery" %}</label>
+        <label class="check"><input type="checkbox" value="sms" checked> {% translate "SMS" %}</label>
+        <label class="check"><input type="checkbox" value="voice" checked> {% translate "Voice call" %}</label>
+        <label class="check"><input type="checkbox" value="notification" checked> {% translate "Notification" %}</label>
+      </fieldset>
+      <div class="field"><label for="custom-receiver">{% translate "Receiver type" %}</label><select id="custom-receiver"><option value="email">{% translate "Screen — Email" %}</option><option value="emailAR">{% translate "Screen — Email with AR" %}</option><option value="mailbox">{% translate "Mailbox" %}</option><option value="mailboxAR">{% translate "Mailbox with AR" %}</option><option value="doorstep">{% translate "Door — Hand delivery" %}</option><option value="sms">{% translate "Phone — SMS" %}</option><option value="voice">{% translate "Phone — Voice call" %}</option><option value="notification">{% translate "Phone — Notification" %}</option><option value="globe" selected>{% translate "Globe" %}</option></select></div>
+    </div>
+    <div class="mount-point" id="custom-preview"></div>
+    <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="custom-code"></code></pre></details>
+  </section>
+
+  <section class="panel">
+    <h2>{% translate "Presets and code samples" %}</h2>
+    <p>{% translate "These animations use the shared settings above. The title and subtitle come from each animation. Open “View the code” under an example to copy its setup into your own page." %}</p>
+    <div class="examples">
+      <section class="example">
+        <div class="mount-point" id="frame-email"></div>
+        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-email"></code></pre></details>
+      </section>
+      <section class="example">
+        <div class="mount-point" id="frame-email-ar"></div>
+        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-email-ar"></code></pre></details>
+      </section>
+      <section class="example">
+        <div class="mount-point" id="frame-postal"></div>
+        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-postal"></code></pre></details>
+      </section>
+      <section class="example">
+        <div class="mount-point" id="frame-registered"></div>
+        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-registered"></code></pre></details>
+      </section>
+      <section class="example">
+        <div class="mount-point" id="frame-hand-delivery"></div>
+        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-hand-delivery"></code></pre></details>
+      </section>
+      <section class="example">
+        <div class="mount-point" id="frame-sms"></div>
+        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-sms"></code></pre></details>
+      </section>
+      <section class="example">
+        <div class="mount-point" id="frame-voice"></div>
+        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-voice"></code></pre></details>
+      </section>
+      <section class="example">
+        <div class="mount-point" id="frame-notification"></div>
+        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-notification"></code></pre></details>
+      </section>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>{% translate "Integration code" %}</h2>
+    <p>{% translate "Add this to your application: a container, the CSS file, the animation library, then the mount call in your application code. The counter is driven by the returned API." %}</p>
+    <pre class="code-block"><code>&lt;link rel="stylesheet" href="animations.css"&gt;
+&lt;div id="postal-frame"&gt;&lt;/div&gt;
+&lt;script src="animation.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  const postal = PymissiveAnimation.mountCard("postal-frame", "postal", {
+    title: "Postal mail",
+    subtitle: "Sending in progress",
+    icon: "📬",
+    count: 3,
+    speed: 1,
+    caption: "Processing the letters",
+    total: 100,
+    remaining: 100,
+    counter: true,
+    counterBackground: false
+  });
+
+  postal.counter.reset(100);
+  postal.counter.setRemaining(90);
+&lt;/script&gt;</code></pre>
+    <p class="muted">{% translate "To mix several send types or pick another receiver, pass a list and the receiver option:" %} <code>PymissiveAnimation.mountCard("frame-id", ["sms", "postal"], { receiver: "globe" })</code>. {% translate "IDs and mount calls stay in your own HTML or JavaScript." %}</p>
+  </section>
+</main>
+{% endblock %}
+
+{% block extrabody %}
+{{ block.super }}
+{% pymissive_animations_labels %}
+{% pymissive_animations_js %}
+<script>
+  const customTitle = '{% filter escapejs %}{% translate "Custom preview" %}{% endfilter %}';
+  const customSubtitle = '{% filter escapejs %}{% translate "Custom combination" %}{% endfilter %}';
+  const exampleSpecs = [
+    ['email', 'frame-email', 'email'],
+    ['emailAR', 'frame-email-ar', 'emailAR'],
+    ['postal', 'frame-postal', 'postal'],
+    ['registered', 'frame-registered', 'registered'],
+    ['handDelivery', 'frame-hand-delivery', 'handDelivery'],
+    ['sms', 'frame-sms', 'sms'],
+    ['voice', 'frame-voice', 'voice'],
+    ['notification', 'frame-notification', 'notification']
+  ];
+  const exampleWidgets = {};
+  let customWidget = null;
+
+  function readShared() {
+    const total = Math.max(0, Math.floor(Number(document.getElementById('custom-total').value) || 0));
+    const remaining = Math.min(total, Math.max(0, Math.floor(Number(document.getElementById('custom-remaining').value) || 0)));
+    const showCaption = document.getElementById('custom-show-caption').checked;
+    return {
+      speed: Number(document.getElementById('custom-speed').value),
+      count: Number(document.getElementById('custom-count').value),
+      total,
+      remaining,
+      messages: document.getElementById('custom-messages').value.split(/\r?\n/).map(v => v.trim()).filter(Boolean),
+      callerName: document.getElementById('custom-caller').value.trim(),
+      background: document.getElementById('custom-background').checked,
+      ground: document.getElementById('custom-ground').checked,
+      showCaption,
+      caption: showCaption ? document.getElementById('custom-caption').value : '',
+      counter: document.getElementById('custom-counter').checked,
+      counterBackground: document.getElementById('custom-counter-background').checked,
+      summary: document.getElementById('custom-summary').checked,
+      errors: Math.max(0, Math.floor(Number(document.getElementById('custom-errors').value) || 0)),
+      color: document.getElementById('custom-color').value
+    };
+  }
+
+  function widgetOptions(shared, extra) {
+    const options = {
+      speed: shared.speed,
+      count: shared.count,
+      total: shared.total,
+      remaining: shared.remaining,
+      background: shared.background,
+      ground: shared.ground,
+      counter: shared.counter,
+      counterBackground: shared.counterBackground,
+      color: shared.color
+    };
+    if (shared.summary) Object.assign(options, { summary: true, errors: shared.errors });
+    if (shared.caption) options.caption = shared.caption;
+    return Object.assign(options, extra || {});
+  }
+
+  function presetOptions(shared, preset) {
+    const extra = {};
+    if (preset === 'sms') extra.messages = shared.messages;
+    if (preset === 'voice' && shared.callerName) extra.callerName = shared.callerName;
+    return widgetOptions(shared, extra);
+  }
+
+  function checkedSenders() {
+    return Array.from(document.querySelectorAll('#custom-senders input:checked'));
+  }
+
+  function senderValue() {
+    const values = checkedSenders().map(input => input.value);
+    return values.length === 1 ? values[0] : values;
+  }
+
+  function customOptions(shared) {
+    const receiverSelect = document.getElementById('custom-receiver');
+    const extra = {
+      receiver: receiverSelect.value,
+      title: customTitle,
+      subtitle: customSubtitle,
+      showCaption: shared.showCaption,
+      messages: shared.messages
+    };
+    if (receiverSelect.value === 'voice' && shared.callerName) extra.callerName = shared.callerName;
+    return widgetOptions(shared, extra);
+  }
+
+  function formatValue(value) {
+    if (Array.isArray(value)) return '[' + value.map(item => JSON.stringify(item)).join(', ') + ']';
+    if (typeof value === 'string') return JSON.stringify(value);
+    return String(value);
+  }
+
+  function formatOptions(options) {
+    const keys = ['receiver', 'title', 'subtitle', 'color', 'count', 'speed', 'messages', 'callerName', 'caption', 'showCaption', 'background', 'ground', 'counter', 'counterBackground', 'summary', 'total', 'remaining', 'errors'];
+    const lines = keys.filter(key => Object.prototype.hasOwnProperty.call(options, key)).map(key => '    ' + key + ': ' + formatValue(options[key]));
+    return '{\n' + lines.join(',\n') + '\n  }';
+  }
+
+  function writeCodes(shared) {
+    exampleSpecs.forEach(([, id, preset]) => {
+      const node = document.getElementById('code-' + id);
+      if (!node) return;
+      const options = presetOptions(shared, preset);
+      node.textContent = '<div id="' + id + '"></div>\n<script>\n  PymissiveAnimation.mountCard(' + JSON.stringify(id) + ', ' + JSON.stringify(preset) + ', ' + formatOptions(options) + ');\n<\/script>';
+    });
+    const custom = document.getElementById('custom-code');
+    if (!custom) return;
+    custom.textContent = '<div id="custom-preview"></div>\n<script>\n  PymissiveAnimation.mountCard("custom-preview", ' + formatValue(senderValue()) + ', ' + formatOptions(customOptions(shared)) + ');\n<\/script>';
+  }
+
+  function updateCustomControlLabels() {
+    const speed = Number(document.getElementById('custom-speed').value);
+    const count = Number(document.getElementById('custom-count').value);
+    const locale = document.documentElement.lang || undefined;
+    document.getElementById('custom-speed-value').textContent = speed.toLocaleString(locale) + '×';
+    document.getElementById('custom-count-value').textContent = String(count);
+  }
+
+  function mountExamples() {
+    const shared = readShared();
+    exampleSpecs.forEach(([key, id, preset]) => {
+      exampleWidgets[key] = PymissiveAnimation.mountCard(id, preset, presetOptions(shared, preset));
+    });
+    return shared;
+  }
+
+  function mountCustom() {
+    const types = document.getElementById('custom-types');
+    const shared = readShared();
+    updateCustomControlLabels();
+    customWidget = PymissiveAnimation.mountCard('custom-preview', senderValue(), customOptions(shared));
+    const head = document.querySelector('#custom-preview .card-head');
+    if (head && types) head.after(types);
+    writeCodes(shared);
+  }
+
+  function applyShared() {
+    mountExamples();
+    mountCustom();
+  }
+
+  let applyTimer = null;
+  function scheduleApply() {
+    updateCustomControlLabels();
+    clearTimeout(applyTimer);
+    applyTimer = setTimeout(applyShared, 120);
+  }
+
+  applyShared();
+  ['custom-speed', 'custom-count', 'custom-total', 'custom-remaining', 'custom-errors', 'custom-caller', 'custom-messages', 'custom-caption'].forEach(id => {
+    document.getElementById(id).addEventListener('input', scheduleApply);
+  });
+  ['custom-background', 'custom-ground', 'custom-show-caption', 'custom-counter', 'custom-counter-background', 'custom-summary'].forEach(id => {
+    document.getElementById(id).addEventListener('change', applyShared);
+  });
+  document.getElementById('custom-receiver').addEventListener('change', mountCustom);
+  document.getElementById('custom-senders').addEventListener('change', event => {
+    // The engine needs at least one sender: refuse to uncheck the last box.
+    if (!checkedSenders().length) event.target.checked = true;
+    mountCustom();
+  });
+  document.getElementById('custom-color').addEventListener('input', event => {
+    Object.values(exampleWidgets).concat(customWidget).forEach(widget => widget && widget.setColor(event.target.value));
+    writeCodes(readShared());
+  });
+</script>
+{% endblock %}

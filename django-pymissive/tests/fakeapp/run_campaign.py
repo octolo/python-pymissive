@@ -10,6 +10,7 @@ def run_fakeapp_campaign(scheduled_id, **kwargs):
     to ERROR and the batch continues.
     """
     from django_pymissive.models.scheduler import MissiveScheduledCampaign
+
     scheduled = MissiveScheduledCampaign.objects.get(id=scheduled_id)
     processors = get_default_body_processors() + ["tests.fakeapp.hook.add_fake_text"]
 

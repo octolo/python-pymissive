@@ -7,6 +7,9 @@ needs to annotate **its own** models with their missives:
 :func:`missive_link_q` to express "which missives am I talking about" once.
 """
 
+from typing import TYPE_CHECKING
+from uuid import UUID
+
 from django.db import models
 from django.db.models import Count, Min, Q, Value
 from django.db.models.expressions import OuterRef, Subquery
@@ -36,7 +39,7 @@ def _id_batches(values, size: int):
     """Slice *values* into lists of at most *size* ids."""
     values = list(values)
     for start in range(0, len(values), size):
-        yield values[start:start + size]
+        yield values[start : start + size]
 
 
 def link_filters(filters: dict) -> dict:
@@ -56,29 +59,29 @@ def link_filters(filters: dict) -> dict:
     return filters
 
 
-def object_id_value(pk) -> str:
-    """Canonical ``object_id`` for a generic link: the pk as text, dashless.
+def object_id_value(pk, *, pk_field=None) -> str:
+    """Canonical ``object_id`` for a generic link.
 
     ``object_id`` is a ``CharField`` so an integration can be keyed by anything —
-    an integer as well as a UUID. Dashes are stripped because a UUID has no
-    single text spelling across backends: PostgreSQL renders it dashed, SQLite
-    stores it as 32 hex characters. Normalising on write is what lets one stored
-    value match :func:`object_id_expr` on both.
+    an integer, text, or UUID. UUID objects are stored without dashes because
+    their database representation differs between PostgreSQL and SQLite. Text
+    primary keys are preserved verbatim.
     """
-    return str(pk).replace("-", "")
+    value = str(pk)
+    is_uuid = isinstance(pk, UUID) or isinstance(pk_field, models.UUIDField)
+    return value.replace("-", "") if is_uuid else value
 
 
-def object_id_expr(outer_field: str = "pk"):
+def object_id_expr(outer_field: str = "pk", *, pk_field=None):
     """:func:`object_id_value` of a correlated pk, computed by the database.
 
     Used instead of a bare ``OuterRef("pk")``: comparing the text column to an
     integer pk raises on PostgreSQL and silently matches nothing on SQLite.
     """
-    return Replace(
-        Cast(OuterRef(outer_field), output_field=models.CharField()),
-        Value("-"),
-        Value(""),
-    )
+    value = Cast(OuterRef(outer_field), output_field=models.CharField())
+    if isinstance(pk_field, models.UUIDField):
+        return Replace(value, Value("-"), Value(""))
+    return value
 
 
 class MissiveRelatedObjectManager(models.Manager):
@@ -110,10 +113,12 @@ def content_type_q(model, prefix: str = "") -> Q:
     """
     meta = model._meta.concrete_model._meta
     field = f"{prefix}__content_type" if prefix else "content_type"
-    return Q(**{
-        f"{field}__app_label": meta.app_label,
-        f"{field}__model": meta.model_name,
-    })
+    return Q(
+        **{
+            f"{field}__app_label": meta.app_label,
+            f"{field}__model": meta.model_name,
+        }
+    )
 
 
 def missive_link_q(
@@ -147,6 +152,7 @@ def missive_link_q(
             the ones still waiting. Prefer this over a raw ``status`` filter: it
             also covers the legacy empty status.
     """
+
     def field(name: str) -> str:
         return f"{prefix}__{name}" if prefix else name
 
@@ -181,14 +187,66 @@ def missive_related_queryset(instance, **filters):
     """
     from ..models.related_object import MissiveRelatedObject
 
-    return (
-        MissiveRelatedObject.objects.filter(
-            content_type_q(type(instance)),
-            missive_link_q(**link_filters(filters)),
-            object_id=object_id_value(instance.pk),
+    return MissiveRelatedObject.objects.filter(
+        content_type_q(type(instance)),
+        missive_link_q(**link_filters(filters)),
+        object_id=object_id_value(instance.pk),
+    ).order_by(*_NEWEST_FIRST)
+
+
+def _collect_linked_missives(model, summaries, link_q, related_model):
+    missives_by_object: dict[str, set] = {}
+    last_missive: dict[str, object] = {}
+    type_q = content_type_q(model)
+    for object_ids_batch in _id_batches(summaries, _ID_BATCH_SIZE):
+        rows = (
+            related_model.objects.filter(
+                type_q,
+                link_q,
+                object_id__in=object_ids_batch,
+            )
+            .order_by("object_id", *_NEWEST_FIRST)
+            .values("object_id", "missive_id", "missive__status", "missive__missive_type")
         )
-        .order_by(*_NEWEST_FIRST)
-    )
+        for row in rows:
+            object_id = row["object_id"]
+            missives = missives_by_object.setdefault(object_id, set())
+            if not missives:
+                last_missive[object_id] = row["missive_id"]
+                summaries[object_id]["last"] = {
+                    "uid": str(row["missive_id"]),
+                    "status": row["missive__status"],
+                    "missive_type": row["missive__missive_type"],
+                    "sent_at": None,
+                }
+            missives.add(row["missive_id"])
+    return missives_by_object, last_missive
+
+
+def _event_summaries(event_model, missive_ids):
+    events = {}
+    for missive_ids_batch in _id_batches(missive_ids, _ID_BATCH_SIZE):
+        events.update(
+            {
+                row["missive_id"]: row
+                for row in event_model.objects.filter(missive_id__in=missive_ids_batch)
+                .order_by()
+                .values("missive_id")
+                .annotate(
+                    _events=Count("id"),
+                    _sent_at=Min("occurred_at", filter=Q(event__in=SENT_EVENTS)),
+                )
+            }
+        )
+    return events
+
+
+def _populate_summaries(summaries, missives_by_object, last_missive, events):
+    for object_id, missives in missives_by_object.items():
+        summary = summaries[object_id]
+        summary["missives"] = len(missives)
+        summary["events"] = sum(events.get(mid, {}).get("_events", 0) for mid in missives)
+        summary["last"]["sent_at"] = events.get(last_missive[object_id], {}).get("_sent_at")
 
 
 def missive_summaries_by_object(model, object_ids, **filters) -> dict:
@@ -226,72 +284,20 @@ def missive_summaries_by_object(model, object_ids, **filters) -> dict:
     from ..models.related_object import MissiveRelatedObject
 
     summaries = {
-        object_id_value(getattr(pk, "pk", pk)): {"missives": 0, "events": 0, "last": {}}
-        for pk in object_ids or []
+        object_id_value(getattr(pk, "pk", pk)): {"missives": 0, "events": 0, "last": {}} for pk in object_ids or []
     }
     if not summaries:
         return {}
 
-    type_q = content_type_q(model)
     link_q = missive_link_q(**link_filters(filters))
-
-    # One pass over the ordered rows: the first row of an object_id is its newest
-    # missive, and the set of ids does the deduplication a COUNT(DISTINCT) would.
-    # An object_id belongs to a single batch, so the ordering it relies on holds.
-    missives_by_object: dict[str, set] = {}
-    last_missive: dict[str, object] = {}
-    for object_ids_batch in _id_batches(summaries, _ID_BATCH_SIZE):
-        rows = (
-            MissiveRelatedObject.objects.filter(
-                type_q,
-                link_q,
-                object_id__in=object_ids_batch,
-            )
-            .order_by("object_id", *_NEWEST_FIRST)
-            .values("object_id", "missive_id", "missive__status", "missive__missive_type")
-        )
-        for row in rows:
-            object_id = row["object_id"]
-            missives = missives_by_object.setdefault(object_id, set())
-            if not missives:
-                last_missive[object_id] = row["missive_id"]
-                summaries[object_id]["last"] = {
-                    "uid": str(row["missive_id"]),
-                    "status": row["missive__status"],
-                    "missive_type": row["missive__missive_type"],
-                    "sent_at": None,
-                }
-            missives.add(row["missive_id"])
+    missives_by_object, last_missive = _collect_linked_missives(model, summaries, link_q, MissiveRelatedObject)
 
     every_missive = {mid for mids in missives_by_object.values() for mid in mids}
     if not every_missive:
         return summaries
 
-    # Grouped by missive rather than joined to the links: joining would multiply
-    # the link rows by the events, which is what makes the annotated counters scan
-    # more than they report. Batched on its own: an object may carry any number of
-    # missives, so this pass is not bounded by the one above.
-    events = {}
-    for missive_ids in _id_batches(every_missive, _ID_BATCH_SIZE):
-        events.update({
-            row["missive_id"]: row
-            for row in MissiveEvent.objects.filter(missive_id__in=missive_ids)
-            .order_by()  # the model orders by date, which would land in the GROUP BY
-            .values("missive_id")
-            .annotate(
-                _events=Count("id"),
-                _sent_at=Min("occurred_at", filter=Q(event__in=SENT_EVENTS)),
-            )
-        })
-    for object_id, missives in missives_by_object.items():
-        summary = summaries[object_id]
-        summary["missives"] = len(missives)
-        summary["events"] = sum(
-            events.get(mid, {}).get("_events", 0) for mid in missives
-        )
-        summary["last"]["sent_at"] = events.get(last_missive[object_id], {}).get(
-            "_sent_at"
-        )
+    events = _event_summaries(MissiveEvent, every_missive)
+    _populate_summaries(summaries, missives_by_object, last_missive, events)
     return summaries
 
 
@@ -316,7 +322,17 @@ def _sent_at_subquery():
     )
 
 
-class MissiveRelatedQuerySetMixin:
+if TYPE_CHECKING:
+
+    class _QuerySetMixinBase(models.QuerySet):
+        pass
+else:
+
+    class _QuerySetMixinBase:
+        pass
+
+
+class MissiveRelatedQuerySetMixin(_QuerySetMixinBase):
     """Annotate a model with the missives linked to it through ``MissiveRelatedObject``.
 
     Mix this into the queryset of **your** model — the one missives point at —
@@ -338,14 +354,11 @@ class MissiveRelatedQuerySetMixin:
         """Link rows of the row being annotated, newest missive first."""
         from ..models.related_object import MissiveRelatedObject
 
-        return (
-            MissiveRelatedObject.objects.filter(
-                content_type_q(self.model),
-                missive_link_q(**link_filters(filters)),
-                object_id=object_id_expr(),
-            )
-            .order_by(*_NEWEST_FIRST)
-        )
+        return MissiveRelatedObject.objects.filter(
+            content_type_q(self.model),
+            missive_link_q(**link_filters(filters)),
+            object_id=object_id_expr(pk_field=self.model._meta.pk),
+        ).order_by(*_NEWEST_FIRST)
 
     def with_last_missive(self, *, prefix: str = "last_missive", **filters):
         """Annotate ``prefix`` with the newest matching missive, as a JSON dict.
@@ -371,12 +384,14 @@ class MissiveRelatedQuerySetMixin:
                 sent_at=_sent_at_subquery(),
             ),
         )
-        return self.annotate(**{
-            prefix: Coalesce(
-                Subquery(last.values("_data")[:1], output_field=models.JSONField()),
-                Value({}, output_field=models.JSONField()),
-            ),
-        })
+        return self.annotate(
+            **{
+                prefix: Coalesce(
+                    Subquery(last.values("_data")[:1], output_field=models.JSONField()),
+                    Value({}, output_field=models.JSONField()),
+                ),
+            }
+        )
 
     def with_missive_count(self, *, name: str = "missive_count", **filters):
         """Annotate ``name`` with how many missives match (``0``, never ``NULL``).
@@ -393,12 +408,14 @@ class MissiveRelatedQuerySetMixin:
             .annotate(_n=Count("missive_id", distinct=True))
             .values("_n")
         )
-        return self.annotate(**{
-            name: Coalesce(
-                Subquery(counted, output_field=models.IntegerField()),
-                Value(0),
-            ),
-        })
+        return self.annotate(
+            **{
+                name: Coalesce(
+                    Subquery(counted, output_field=models.IntegerField()),
+                    Value(0),
+                ),
+            }
+        )
 
     def with_missive_counts(self, *, prefix: str = "missive_counts", **filters):
         """Annotate ``prefix`` with ``{"missives": N, "events": E}`` as JSON.
@@ -422,16 +439,16 @@ class MissiveRelatedQuerySetMixin:
             .annotate(_data=JSONObject(missives="_n_missives", events="_n_events"))
             .values("_data")
         )
-        return self.annotate(**{
-            prefix: Coalesce(
-                Subquery(counted, output_field=models.JSONField()),
-                Value({"missives": 0, "events": 0}, output_field=models.JSONField()),
-            ),
-        })
+        return self.annotate(
+            **{
+                prefix: Coalesce(
+                    Subquery(counted, output_field=models.JSONField()),
+                    Value({"missives": 0, "events": 0}, output_field=models.JSONField()),
+                ),
+            }
+        )
 
-    def with_campaign_missive_count(
-        self, *, name: str = "campaign_missive_count", **filters
-    ):
+    def with_campaign_missive_count(self, *, name: str = "campaign_missive_count", **filters):
         """Annotate ``name`` with the missives of the campaigns linked to the row.
 
         The counterpart of :meth:`with_missive_count` for objects attached to a
@@ -450,16 +467,18 @@ class MissiveRelatedQuerySetMixin:
             Missive._base_manager.filter(
                 content_type_q(self.model, prefix=rel),
                 missive_link_q(prefix="", **link_filters(filters)),
-                **{f"{rel}__object_id": object_id_expr()},
+                **{f"{rel}__object_id": object_id_expr(pk_field=self.model._meta.pk)},
             )
             .order_by()
             .values(f"{rel}__object_id")
             .annotate(_n=Count("pk", distinct=True))
             .values("_n")
         )
-        return self.annotate(**{
-            name: Coalesce(
-                Subquery(counted, output_field=models.IntegerField()),
-                Value(0),
-            ),
-        })
+        return self.annotate(
+            **{
+                name: Coalesce(
+                    Subquery(counted, output_field=models.IntegerField()),
+                    Value(0),
+                ),
+            }
+        )

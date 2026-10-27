@@ -19,6 +19,23 @@ from pathlib import Path
 from django.core.management.base import BaseCommand
 
 
+def _config_string(value: object) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"Expected a translatable string, got {type(value).__name__}")
+    return value
+
+
+def _acknowledgement_strings(level: dict[str, object]) -> set[str]:
+    values = [level["display_name"]]
+    values.extend(level[key] for key in ("description", "legal_value") if level.get(key))
+    means = level.get("means")
+    if means:
+        if not isinstance(means, (list, tuple, set, frozenset)):
+            raise TypeError(f"Expected an iterable of means, got {type(means).__name__}")
+        values.extend(means)
+    return {_config_string(value) for value in values}
+
+
 def extract_strings_from_config() -> set[str]:
     """Extract all user-facing strings from pymissive.config."""
     from pymissive.config import (
@@ -35,13 +52,7 @@ def extract_strings_from_config() -> set[str]:
     strings: set[str] = set()
 
     for level in MISSIVE_ACKNOWLEDGEMENT_LEVELS:
-        strings.add(level["display_name"])
-        if level.get("description"):
-            strings.add(level["description"])
-        if level.get("legal_value"):
-            strings.add(level["legal_value"])
-        for m in level.get("means") or []:
-            strings.add(m)
+        strings.update(_acknowledgement_strings(level))
 
     for v in MISSIVE_TYPES.values():
         strings.add(v)
@@ -111,11 +122,5 @@ class Command(BaseCommand):
 
         output_path.write_text(content, encoding="utf-8")
 
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"Generated {output_path} with {len(strings)} translatable strings."
-            )
-        )
-        self.stdout.write(
-            "Run: ./manage.py makemessages -l fr"
-        )
+        self.stdout.write(self.style.SUCCESS(f"Generated {output_path} with {len(strings)} translatable strings."))
+        self.stdout.write("Run: ./manage.py makemessages -l fr")

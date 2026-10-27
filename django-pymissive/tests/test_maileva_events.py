@@ -89,9 +89,7 @@ def test_serialize_recipient_statuses_keeps_processed_code():
         },
     }
     assert provider.get_normalize_event(events[-1]) == "processed"
-    assert provider.get_normalize_external_id(events[-1]) == (
-        "66188949-9f05-4503-ae1f-fe085bce3edb"
-    )
+    assert provider.get_normalize_external_id(events[-1]) == ("66188949-9f05-4503-ae1f-fe085bce3edb")
     assert provider.get_normalize_recipient(events[-1]) == {
         "id": "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686",
         "substitute_id": "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686",
@@ -109,9 +107,7 @@ def test_event_external_id_is_sending_resource_id_not_recipient_uuid():
             "name": "THE UNIQUE PAPER COMPANY LIMIT",
         },
     }
-    assert provider.get_normalize_external_id(payload) == (
-        "66188949-9f05-4503-ae1f-fe085bce3edb"
-    )
+    assert provider.get_normalize_external_id(payload) == ("66188949-9f05-4503-ae1f-fe085bce3edb")
 
 
 def test_recipient_level_webhook_does_not_use_recipient_uuid_as_missive_id():
@@ -123,9 +119,7 @@ def test_recipient_level_webhook_does_not_use_recipient_uuid_as_missive_id():
         "resource_custom_id": "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686",
         "sending_id": "66188949-9f05-4503-ae1f-fe085bce3edb",
     }
-    assert provider.get_normalize_external_id(payload) == (
-        "66188949-9f05-4503-ae1f-fe085bce3edb"
-    )
+    assert provider.get_normalize_external_id(payload) == ("66188949-9f05-4503-ae1f-fe085bce3edb")
 
 
 def _registered_letter_missive_with_address_recipient(**recipient_kw):
@@ -152,9 +146,7 @@ def test_get_recipient_uuid_custom_id_does_not_raise_and_matches_unique():
     missive, recipient = _registered_letter_missive_with_address_recipient(
         substitute_id="753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686"
     )
-    found = get_recipient(
-        missive, {"id": "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686"}
-    )
+    found = get_recipient(missive, {"id": "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686"})
     assert found == recipient
 
 
@@ -169,9 +161,7 @@ def test_get_recipient_matches_substitute_id_among_several():
         recipient_support="address",
         external_id="other-mv-id",
     )
-    found = get_recipient(
-        missive, {"id": "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686"}
-    )
+    found = get_recipient(missive, {"id": "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686"})
     assert found == recipient
 
 
@@ -197,9 +187,7 @@ def test_get_recipient_does_not_guess_among_several():
         recipient_support="address",
         external_id="other-mv-id",
     )
-    assert get_recipient(
-        missive, {"id": "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686"}
-    ) is None
+    assert get_recipient(missive, {"id": "753bdb3f-99d4-4e3e-91a9-ddf9b5dbd686"}) is None
 
 
 @pytest.mark.django_db

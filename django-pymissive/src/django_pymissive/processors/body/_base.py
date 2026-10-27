@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from django.conf import settings
-from django.utils.module_loading import import_string
+from ...utils import import_allowed_string
 
 
 # ---------------------------------------------------------------------------
@@ -29,6 +29,7 @@ EMAIL_BODY_TEXT_FIELDS = frozenset({"body_text"})
 # Defaults
 # ---------------------------------------------------------------------------
 
+
 def get_default_body_processors() -> list:
     """Return the active default body-processor chain.
 
@@ -43,6 +44,7 @@ def get_default_body_processors() -> list:
 # ---------------------------------------------------------------------------
 # Base class
 # ---------------------------------------------------------------------------
+
 
 class MissiveBodyProcessor:
     """Base class for class-based body processors.
@@ -68,6 +70,7 @@ class MissiveBodyProcessor:
 # Internal resolution / invocation
 # ---------------------------------------------------------------------------
 
+
 def _resolve_processor(processor: Any) -> tuple[Any, dict]:
     """Resolve a processor entry to ``(callable, extra_kwargs)``.
 
@@ -85,7 +88,7 @@ def _resolve_processor(processor: Any) -> tuple[Any, dict]:
         processor, extra_kwargs = processor[0], dict(processor[1] or {})
 
     if isinstance(processor, str):
-        processor = import_string(processor)
+        processor = import_allowed_string(processor)
 
     if isinstance(processor, type):
         processor = processor()
@@ -122,9 +125,7 @@ def _call_processor(
             context=context,
             **kwargs,
         )
-    raise TypeError(
-        f"Processor {processor!r} is not callable and has no .process() method"
-    )
+    raise TypeError(f"Processor {processor!r} is not callable and has no .process() method")
 
 
 def apply_body_processors(
@@ -163,6 +164,7 @@ def apply_body_processors(
 # Email-snippet helpers (shared by add_preview_browser / add_attachments_linked)
 # ---------------------------------------------------------------------------
 
+
 def _is_email_body_field(field_name: str | None) -> bool:
     return field_name in EMAIL_BODY_RICH_FIELDS or field_name in EMAIL_BODY_TEXT_FIELDS
 
@@ -178,6 +180,19 @@ def _email_body_owner(*, missive=None, campaign=None):
     return missive if missive is not None else campaign
 
 
+def _email_snippet(owner, field_name, html_attr, text_attr):
+    attr = html_attr if field_name in EMAIL_BODY_RICH_FIELDS else text_attr
+    return str(getattr(owner, attr, None) or "").strip()
+
+
+def _can_append_email_snippet(content, missive, campaign, field_name):
+    if not content or not _is_email_body_field(field_name):
+        return False
+    if missive is not None and not _is_email_missive(missive):
+        return False
+    return _email_body_owner(missive=missive, campaign=campaign) is not None
+
+
 def _append_email_snippet(
     content: str,
     *,
@@ -188,18 +203,10 @@ def _append_email_snippet(
     text_attr: str,
 ) -> str:
     """Append email snippet; no-op if not email body or empty fragment. Text: ``\\n\\n``; HTML: ``<br>``."""
-    if not content or not _is_email_body_field(field_name):
-        return content
-    if missive is not None and not _is_email_missive(missive):
+    if not _can_append_email_snippet(content, missive, campaign, field_name):
         return content
     owner = _email_body_owner(missive=missive, campaign=campaign)
-    if owner is None:
-        return content
-    if field_name in EMAIL_BODY_RICH_FIELDS:
-        fragment = getattr(owner, html_attr, None) or ""
-    else:
-        fragment = getattr(owner, text_attr, None) or ""
-    fragment = str(fragment).strip()
+    fragment = _email_snippet(owner, field_name, html_attr, text_attr)
     if not fragment:
         return content
     if field_name in EMAIL_BODY_TEXT_FIELDS:

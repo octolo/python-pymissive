@@ -1,4 +1,3 @@
-
 from ..models.scheduler import MissiveScheduledCampaign
 
 

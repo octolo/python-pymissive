@@ -1,6 +1,7 @@
 """Manager for MissiveCampaign model."""
 
 from functools import cache
+from typing import cast
 
 from django.db import models
 from django.db.models import Exists, F, Q, Value
@@ -72,10 +73,12 @@ def support_count_annotations() -> dict:
         type_q = Q(**missive_type_filter(support, prefix=_M))
         annotations[support_count_name(support)] = count_missive_expr(type_q)
         annotations[support_count_name(support, "sent")] = count_missive_expr(
-            type_q, sent_missive_q(prefix=_M),
+            type_q,
+            sent_missive_q(prefix=_M),
         )
         annotations[support_count_name(support, "error")] = count_missive_expr(
-            type_q, error_missive_q(prefix=_M),
+            type_q,
+            error_missive_q(prefix=_M),
         )
     return annotations
 
@@ -106,39 +109,80 @@ def missive_count_annotations() -> dict:
         "count_error": count_missive_expr(error_missive_q(prefix=_M)),
         **{
             f"count_thread_{thread.value.lower()}": models.Count(
-                _M, filter=Q(**{f"{_M}__thread_type": thread}), distinct=True,
+                _M,
+                filter=Q(**{f"{_M}__thread_type": thread}),
+                distinct=True,
             )
             for thread in MissiveThreadType
         },
         **support_count_annotations(),
         **{
             f"count_missive_{status.value.lower()}": models.Count(
-                _M, filter=Q(**{f"{_M}__status": status}), distinct=True,
+                _M,
+                filter=Q(**{f"{_M}__status": status}),
+                distinct=True,
             )
             for status in MissiveStatus
         },
         **{
             f"count_type_{type_key}": models.Count(
-                _M, filter=Q(**{f"{_M}__missive_type": type_key}), distinct=True,
+                _M,
+                filter=Q(**{f"{_M}__missive_type": type_key}),
+                distinct=True,
             )
             for type_key in MISSIVE_TYPES
         },
     }
 
 
+def pending_target_count_expr():
+    """Active selection rows of the campaign, as a subquery."""
+    from ..models.campaign_target import CampaignTarget
+
+    return target_count_expr(CampaignTarget.active_q())
+
+
+def target_count_expr(condition):
+    """Selection rows of the campaign matching *condition*, as a subquery.
+
+    A subquery rather than one more join: the selection table can hold
+    thousands of rows per campaign, which would multiply the rows every
+    other ``COUNT(DISTINCT)`` of the same query has to deduplicate.
+    """
+    from ..models.campaign_target import CampaignTarget
+
+    return Coalesce(
+        Subquery(
+            CampaignTarget.objects.filter(condition, campaign_id=OuterRef("pk"))
+            .order_by()
+            .values("campaign_id")
+            .annotate(n=models.Count("pk"))
+            .values("n"),
+            output_field=models.IntegerField(),
+        ),
+        Value(0),
+    )
+
+
 def related_count_annotations() -> dict:
     """The counters that each walk a relation of their own.
 
-    Recipients, events, related objects and documents: four more joins, and they
-    multiply each other. A campaign of 5 000 missives with 2 recipients and 8
-    events each yields 80 000 intermediate rows for every ``COUNT(DISTINCT)`` to
-    deduplicate.
+    Recipients, events, related objects and documents: four more joins, and
+    they multiply each other. A campaign of 5 000 missives with 2 recipients
+    and 8 events each yields 80 000 intermediate rows for every
+    ``COUNT(DISTINCT)`` to deduplicate.
+
+    ``count_target_pending`` is the checkbox: selection rows that still have
+    no missive and are not abandoned. ``count_target_abandoned`` counts the
+    rows given up without a missive.
     """
     return {
         "count_recipient": models.Count(f"{_M}__to_missiverecipient", distinct=True),
         "count_event": models.Count(f"{_M}__to_missiveevent", distinct=True),
         "count_related_object": models.Count("to_campaignrelatedobject", distinct=True),
         "count_attachment": models.Count("to_campaigndocument", distinct=True),
+        "count_target_pending": pending_target_count_expr(),
+        "count_target_abandoned": target_count_expr(Q(abandoned_at__isnull=False)),
         **{
             f"count_recipient_{status.value.lower()}": models.Count(
                 f"{_M}__to_missiverecipient",
@@ -228,8 +272,8 @@ class MissiveCampaignQuerySet(models.QuerySet):
             counters = {key: value for key, value in counters.items() if key in wanted}
         return self.annotate(
             **counters,
-        # Second annotate: a percentage reads the counter declared above, and an
-        # annotation cannot be referenced from the call that declares it.
+            # Second annotate: a percentage reads the counter declared above, and an
+            # annotation cannot be referenced from the call that declares it.
         ).annotate(**percentages)
 
     def delete(self):
@@ -257,18 +301,25 @@ class MissiveCampaignQuerySet(models.QuerySet):
             )
             raise ProtectedError(
                 _("Cannot delete a campaign that has missives which left the draft state."),
-                protected or set(blocked),
+                cast(set[models.Model], protected or set(blocked)),
             )
+        from ..models.scheduler import SENDING_RUN_DELETE_MESSAGE, MissiveScheduledCampaign
+
+        sending = MissiveScheduledCampaign.objects.filter(
+            campaign_id__in=self.values("pk"),
+        ).sending()
+        if sending:
+            raise ProtectedError(str(SENDING_RUN_DELETE_MESSAGE), set(sending))
         return super().delete()
 
 
-class MissiveCampaignManager(models.Manager.from_queryset(MissiveCampaignQuerySet)):
-    """Manager for MissiveCampaign: two dates, two booleans, counters on demand.
+class MissiveCampaignManager(models.Manager.from_queryset(MissiveCampaignQuerySet)):  # type: ignore[misc]
+    """Manager for MissiveCampaign: run state, dates and counters on demand.
 
     ``get_queryset()`` only annotates what a plain lookup can afford — the last
-    run's dates as ``ORDER BY … LIMIT 1`` subqueries, ``has_sent_missives`` and
-    ``has_open_run`` as ``EXISTS``. None of them aggregates, so no ``GROUP BY``:
-    a ``.get(pk=…)`` stays a primary key lookup.
+    run's dates and current run id as ``ORDER BY … LIMIT 1`` subqueries, plus
+    ``has_sent_missives`` as ``EXISTS``. None of them aggregates, so no
+    ``GROUP BY``: a ``.get(pk=…)`` stays a primary key lookup.
 
     The counters live in :meth:`MissiveCampaignQuerySet.with_counts`, like the
     run's in ``MissiveScheduledCampaignQuerySet.with_counts()``. They remain
@@ -304,21 +355,28 @@ class MissiveCampaignManager(models.Manager.from_queryset(MissiveCampaignQuerySe
             ),
         )
 
-    def open_run_exists(self) -> Exists:
-        """``Exists`` on a scheduled run that has not ended yet."""
+    def current_scheduler_subquery(self) -> Subquery:
+        """Primary key of the newest scheduled run that has not ended."""
         from ..models.scheduler import MissiveScheduledCampaign
 
-        return Exists(
+        return Subquery(
             MissiveScheduledCampaign.objects.filter(
                 campaign_id=OuterRef("pk"),
                 ended_at__isnull=True,
-            ),
+            )
+            .order_by("-created_at", "-pk")
+            .values("pk")[:1],
+            output_field=models.UUIDField(),
         )
 
     def get_queryset(self):
-        return super().get_queryset().annotate(
-            last_send_date=self.last_scheduled_subquery("send_date"),
-            last_ended_at=self.last_scheduled_subquery("ended_at"),
-            has_sent_missives=self.has_sent_missives_expr(),
-            has_open_run=self.open_run_exists(),
+        return (
+            super()
+            .get_queryset()
+            .annotate(
+                last_send_date=self.last_scheduled_subquery("send_date"),
+                last_ended_at=self.last_scheduled_subquery("ended_at"),
+                has_sent_missives=self.has_sent_missives_expr(),
+                open_scheduler_id=self.current_scheduler_subquery(),
+            )
         )

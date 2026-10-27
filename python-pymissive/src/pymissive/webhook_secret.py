@@ -38,9 +38,7 @@ def collect_mouse_entropy(seconds: float = 5) -> str:
     try:
         import tkinter as tk
     except ImportError as exc:
-        raise RuntimeError(
-            "tkinter is required to collect mouse entropy"
-        ) from exc
+        raise RuntimeError("tkinter is required to collect mouse entropy") from exc
 
     samples: list[str] = []
     root = tk.Tk()
@@ -65,9 +63,7 @@ def collect_mouse_entropy(seconds: float = 5) -> str:
         if left <= 0:
             root.destroy()
             return
-        label.config(
-            text=f"Move the mouse for {left:.1f}s… ({len(samples)} samples)"
-        )
+        label.config(text=f"Move the mouse for {left:.1f}s… ({len(samples)} samples)")
         root.after(100, tick)
 
     root.after(100, tick)

@@ -7,8 +7,6 @@ processor chain, for both regular and virtual attachments — and the
 
 from __future__ import annotations
 
-from io import BytesIO
-
 import pytest
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
@@ -32,10 +30,12 @@ _view_calls: list[dict] = []
 
 def _stamp_with_marker(missive, attachment, content_bytes, **kwargs):
     """Attachment processor that prepends a sentinel for assertion."""
-    _view_calls.append({
-        "attachment_pk": attachment.pk,
-        "is_first_document": attachment.is_first_document,
-    })
+    _view_calls.append(
+        {
+            "attachment_pk": attachment.pk,
+            "is_first_document": attachment.is_first_document,
+        }
+    )
     return b"STAMPED|" + (content_bytes or b"")
 
 

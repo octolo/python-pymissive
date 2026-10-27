@@ -25,78 +25,101 @@ _ARG_CONFIG = {
 }
 
 
-def _billing_command(args: list[str]) -> bool:
-    """Retrieve billing data from provider."""
-    parsed = parse_args_from_config(args, _ARG_CONFIG, prog="billing")
-    if parsed.get("help"):
-        from .help import print_command_help
-        return print_command_help("billing")
-    cmd_args = parsed.get("args") or []
-    subcommand = cmd_args[0] if cmd_args else "retrieve"
+def _get_provider(parsed):
     provider_name = parsed.get("provider") or parsed.get("filter") or parsed.get("backend", "")
-    missive_type = parsed.get("type") or parsed.get("missive_type", "registered_letter")
-    external_id = parsed.get("external_id", "")
-    start_date = parsed.get("start_date") or ""
-    end_date = parsed.get("end_date") or ""
-
     if not provider_name:
         print("Error: --provider required", file=sys.stderr)
-        return False
-
+        return None
     kwargs = {"lib_name": "pymissive", "attribute_search": {"name": provider_name}}
     if parsed.get("dir"):
         kwargs["dir_path"] = parsed["dir"]
     if parsed.get("json"):
         kwargs["json"] = parsed["json"]
-
     providers = get_providers(**kwargs)
     if not providers:
         print(f"Error: Provider '{provider_name}' not found", file=sys.stderr)
-        return False
-    provider = providers[0]
+        return None
+    return provider_name, providers[0]
 
-    if subcommand == "retrieve":
-        if start_date or end_date:
-            if not start_date or not end_date:
-                print("Error: --start-date and --end-date required for bulk billing retrieve", file=sys.stderr)
-                return False
-            if not missive_type:
-                print("Error: --type required for retrieve billings (e.g. registered_letter)", file=sys.stderr)
-                return False
-            try:
-                service = provider_service_name("retrieve_billings", missive_type)
-            except ValueError as exc:
-                print(f"Error: {exc}", file=sys.stderr)
-                return False
-            if not hasattr(provider, service):
-                print(f"Error: Provider does not support {service}", file=sys.stderr)
-                return False
-            provider.call_service(service, start_date=start_date, end_date=end_date)
-            data = provider.get_service_normalize(service)
-        else:
-            try:
-                service = provider_service_name("get_billings", missive_type)
-            except ValueError as exc:
-                print(f"Error: {exc}", file=sys.stderr)
-                return False
-            if hasattr(provider, service):
-                payload = {"external_id": external_id} if external_id else {}
-                provider.call_service(service, **payload)
-                data = provider.get_service_normalize(service)
-            elif hasattr(provider, "retrieve_billing"):
-                provider.call_service("retrieve_billing")
-                data = provider.get_service_normalize("retrieve_billing")
-            else:
-                print("Error: Provider does not support billing retrieval", file=sys.stderr)
-                return False
-        print_separator()
-        print_header(f"{provider_name} - billing")
-        print_separator()
-        print(json.dumps(data, indent=2, default=str))
-    else:
+
+def _service_name(action, missive_type):
+    try:
+        return provider_service_name(action, missive_type)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return ""
+
+
+def _retrieve_bulk_billing(parsed, provider, missive_type):
+    start_date = parsed.get("start_date") or ""
+    end_date = parsed.get("end_date") or ""
+    if not start_date or not end_date:
+        print("Error: --start-date and --end-date required for bulk billing retrieve", file=sys.stderr)
+        return False, None
+    if not missive_type:
+        print("Error: --type required for retrieve billings (e.g. registered_letter)", file=sys.stderr)
+        return False, None
+    service = _service_name("retrieve_billings", missive_type)
+    if not service:
+        return False, None
+    if not hasattr(provider, service):
+        print(f"Error: Provider does not support {service}", file=sys.stderr)
+        return False, None
+    provider.call_service(service, start_date=start_date, end_date=end_date)
+    return True, provider.get_service_normalize(service)
+
+
+def _retrieve_single_billing(parsed, provider, missive_type):
+    service = _service_name("get_billings", missive_type)
+    if not service:
+        return False, None
+    if hasattr(provider, service):
+        external_id = parsed.get("external_id", "")
+        payload = {"external_id": external_id} if external_id else {}
+        provider.call_service(service, **payload)
+        return True, provider.get_service_normalize(service)
+    if hasattr(provider, "retrieve_billing"):
+        provider.call_service("retrieve_billing")
+        return True, provider.get_service_normalize("retrieve_billing")
+    print("Error: Provider does not support billing retrieval", file=sys.stderr)
+    return False, None
+
+
+def _billing_options(parsed):
+    command_args = parsed.get("args") or []
+    subcommand = command_args[0] if command_args else "retrieve"
+    missive_type = parsed.get("type") or parsed.get("missive_type") or "registered_letter"
+    has_period = bool(parsed.get("start_date") or parsed.get("end_date"))
+    return subcommand, missive_type, has_period
+
+
+def _billing_command(args: list[str]) -> bool:
+    """Retrieve billing data from provider."""
+    args = [f"--{arg[2:].replace('-', '_')}" if arg.startswith("--") else arg for arg in args]
+    parsed = parse_args_from_config(args, _ARG_CONFIG, prog="billing")
+    if parsed.get("help"):
+        from .help import print_command_help
+
+        return print_command_help("billing")
+    subcommand, missive_type, has_period = _billing_options(parsed)
+    provider_result = _get_provider(parsed)
+    if not provider_result:
+        return False
+    provider_name, provider = provider_result
+
+    if subcommand != "retrieve":
         print(f"Error: Unknown subcommand '{subcommand}'. Use: retrieve", file=sys.stderr)
         return False
-
+    if has_period:
+        success, data = _retrieve_bulk_billing(parsed, provider, missive_type)
+    else:
+        success, data = _retrieve_single_billing(parsed, provider, missive_type)
+    if not success:
+        return False
+    print_separator()
+    print_header(f"{provider_name} - billing")
+    print_separator()
+    print(json.dumps(data, indent=2, default=str))
     return True
 
 

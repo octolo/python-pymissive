@@ -26,13 +26,15 @@ _renderer_calls: list[dict] = []
 
 def _captured_renderer(missive, pdf_bytes, *, campaign=None, context=None, **kwargs):
     """Test renderer that records its call args and returns sentinel bytes."""
-    _renderer_calls.append({
-        "missive": missive,
-        "pdf_bytes_in": pdf_bytes,
-        "campaign": campaign,
-        "context": dict(context or {}),
-        "kwargs": kwargs,
-    })
+    _renderer_calls.append(
+        {
+            "missive": missive,
+            "pdf_bytes_in": pdf_bytes,
+            "campaign": campaign,
+            "context": dict(context or {}),
+            "kwargs": kwargs,
+        }
+    )
     return b"%PDF-FAKE"
 
 
@@ -272,7 +274,7 @@ def test_subject_compiled_runs_chain(settings):
 
 
 def test_body_rich_compiled_returns_empty_on_processor_error(settings):
-    """A buggy processor must not crash preview — falls back to ''. """
+    """A buggy processor must not crash preview — falls back to ''."""
     settings.PYMISSIVE_DEFAULT_BODY_PROCESSORS = [
         "tests.test_processor_integration._exploding_body_processor",
     ]

@@ -9,45 +9,20 @@ python-missive/
 ├── src/
 │   └── pymissive/            # Main package directory
 │       ├── __init__.py       # Package exports
-│       ├── providers/        # Message provider implementations
-│       │   ├── __init__.py   # Base provider classes
+│       ├── providers/
 │       │   ├── base/         # Shared mixins + MissiveProviderBase
-│       │   │   ├── acknowledgement.py
-│       │   │   ├── attachments.py
-│       │   │   └── branded.py
-│       │   ├── django_email.py        # Django email backend
-│       │   ├── smtp.py                # SMTP provider
-│       │   ├── sendgrid.py            # SendGrid
-│       │   ├── mailgun.py             # Mailgun
-│       │   ├── ses.py                 # Amazon SES
-│       │   ├── brevo.py               # Brevo
-│       │   ├── scaleway.py            # Scaleway
-│       │   ├── twilio.py              # Twilio SMS/Voice
-│       │   ├── vonage.py              # Vonage
-│       │   ├── smspartner.py          # SMSPartner
-│       │   ├── telegram.py            # Telegram
-│       │   ├── signal.py              # Signal
-│       │   ├── messenger.py           # Facebook Messenger
-│       │   ├── slack.py               # Slack
-│       │   ├── teams.py               # Microsoft Teams
-│       │   ├── fcm.py                 # Firebase Cloud Messaging
-│       │   ├── apn.py                 # Apple Push Notification
-│       │   ├── notification.py        # In-app notifications
-│       │   ├── laposte.py             # La Poste
-│       │   ├── maileva.py             # Maileva
-│       │   ├── ar24.py                # AR24
-│       │   └── certeurope.py          # Certeurope
-│       ├── utils.py          # Framework-agnostic helpers
-│       ├── config.py         # Configuration utilities
-│       ├── cli.py            # CLI interface
-│       └── __main__.py       # Entry point for package execution
+│       │   ├── brevo/        # Provider entry point + static configuration
+│       │   ├── maileva/      # API, send, retrieve, webhook and helpers
+│       │   ├── scaleway.py, partner.py
+│       │   ├── slack.py, teams.py, discord.py
+│       │   └── hand_delivery.py, fake.py
+│       ├── commands/         # CLI commands and packaged help
+│       ├── config/           # Types and field definitions
+│       ├── cli.py, __main__.py
+│       └── utils.py
 ├── tests/                    # Test suite
-│   └── ...
 ├── docs/                     # Documentation
-│   └── ...
-├── service.py                # Main service entry point script
-├── pyproject.toml            # Project configuration
-└── ...
+└── pyproject.toml            # Build, dependencies and tool configuration
 ```
 
 ### Module Organization Principles
@@ -62,46 +37,39 @@ python-missive/
 
 The `providers/` directory contains message provider implementations:
 
-- **`__init__.py`**: Imports and exports all provider classes
 - **`base/`**: `MissiveProviderBase` plus the mixins that hold real behaviour
   (`acknowledgement`, `attachments`, `branded`). Channel types (`email`, `sms`,
   `registered_letter`, …) are services in the config; ProviderKit raises if the method is missing.
-- Each shipped provider file implements a specific messaging service
+- **`brevo/` and `maileva/`**: larger providers grouped into packages while
+  retaining the public imports `pymissive.providers.brevo` and
+  `pymissive.providers.maileva`.
+- Each shipped provider module or package implements a specific messaging service
 - All providers inherit from `MissiveProviderBase` (which extends ProviderKit's `ProviderBase`)
 
 ### Available Providers by Category
 
 **Email providers**:
-- DjangoEmailProvider (Django email backend)
-- SMTPProvider (generic SMTP)
-- SendGridProvider
-- MailgunProvider
-- SESProvider (Amazon SES)
-- BrevoProvider
+- BrevoAPIProvider
 - ScalewayProvider
 
-**SMS & Voice providers**:
-- TwilioProvider
-- VonageProvider
-- SMSPartnerProvider
+**SMS providers**:
+- BrevoAPIProvider
+- PartnerProvider
 
 **Instant messaging providers**:
-- TelegramProvider
-- SignalProvider
-- MessengerProvider
 - SlackProvider
 - TeamsProvider
+- DiscordProvider
 
 **Postal & registered letter providers**:
-- LaPosteProvider
 - MailevaProvider
-- AR24Provider
-- CerteuropeProvider
 
-**Push notification providers**:
-- FCMProvider (Firebase)
-- APNProvider (Apple)
-- InAppNotificationProvider
+**Other providers**:
+- HandDeliveryProvider
+- FakeProvider
+
+Providers that are only planned are listed in the README. They do not have
+placeholder modules in the package.
 
 ### Helper Functions
 
@@ -111,9 +79,10 @@ Provider discovery lives in ProviderKit (`providerkit.helpers.get_providers`).
 
 ### Package Exports
 
-The public API is defined in `src/pymissive/__init__.py`:
-- Provider classes
-- Configuration utilities
+`src/pymissive/__init__.py` exposes the package version. Provider classes are
+imported from their provider module or package, for example
+`pymissive.providers.brevo.BrevoAPIProvider`, and are also available through
+ProviderKit discovery.
 
 ### ProviderKit Integration
 

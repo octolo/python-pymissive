@@ -6,7 +6,7 @@
 
 ### Main features
 
-- 📧 **Multi-channel**: 11 declared missive types; `email`, `sms`, `registered_letter`, `hand_delivery` and `branded` have a working provider today
+- 📧 **Multi-channel**: 12 declared missive types; shipped providers currently cover email, SMS, simple and registered letters, hand delivery, WhatsApp and team messaging
 - 🔌 **8 providers** through `pymissive`: Brevo, Scaleway, Maileva, SMSPartner, Slack, Microsoft Teams, Discord, hand delivery
 - 📎 **Flexible attachments**: local files OR external URLs (S3, Google Drive)
 - 🔔 **Unified webhooks**: one endpoint, `/missive/webhook/<provider>/<missive_type>/`
@@ -19,9 +19,9 @@
 
 ### Technical architecture
 
-- ✅ Django 5.0+ and Python 3.10+ (CI covers Django 5.0, 5.1 and 5.2)
+- ✅ Django 5.0+ and Python 3.11+ (CI covers Python 3.11–3.13 and Django 5.0–5.2)
 - ✅ Modular structure with mixins (`acknowledgement`, `attachments`, `branded` in `pymissive`)
-- ✅ ~500 tests under `tests/`
+- ✅ Nearly 800 tests under `tests/`
 - ✅ CI/CD with GitHub Actions
 - ✅ Linted with ruff
 
@@ -38,6 +38,7 @@ disables that provider:
 ```bash
 pip install django-pymissive[brevo]     # Brevo: email, SMS, WhatsApp
 pip install django-pymissive[scaleway]  # Scaleway: email
+pip install django-pymissive[discord]   # Discord
 pip install django-pymissive[pdf]       # PDF rendering: weasyprint, pypdf, reportlab
 ```
 
@@ -127,6 +128,13 @@ DEFAULT_FROM_EMAIL = 'noreply@example.com'
 # Seconds without a scheduler heartbeat before a PROCESSING missive or an
 # open run is treated as dead (worker crash / SIGKILL). Default 1800.
 # PYMISSIVE_STALE_PROCESSING_SECONDS = 1800
+# Missives a campaign send loads into memory at a time. Default 500.
+# PYMISSIVE_SEND_CHUNK_SIZE = 500
+# Dotted-path prefixes allowed for every path imported from the database:
+# external_task_backend, progress_hook and the body, PDF, attachment and
+# build target processors. Paths read from settings must be listed too.
+# The package's own modules are always allowed. Default None: no restriction.
+# PYMISSIVE_ALLOWED_TASK_BACKENDS = ["myapp"]
 
 PYMISSIVE_DEFAULT_SENDER = {
     "name": "Octolo",

@@ -1,0 +1,76 @@
+.brand-app {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 16px;
+    border-radius: 8px;
+    font-size: 15px;
+    line-height: 1.45;
+}
+
+.brand-message {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.brand-avatar {
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: #fff;
+    background: #417690;
+}
+
+.brand-main {
+    min-width: 0;
+    flex: 1;
+}
+
+.brand-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 2px;
+}
+
+.brand-author {
+    font-weight: 700;
+}
+
+.brand-time {
+    font-size: 12px;
+    color: #808080;
+}
+
+.brand-title {
+    font-weight: 700;
+    margin: 4px 0;
+}
+
+.brand-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.brand-text a {
+    color: inherit;
+}
+
+.brand-empty {
+    font-style: italic;
+    opacity: 0.7;
+}
+
+.brand-generic {
+    background: #f7f7f7;
+    color: #333;
+}
+
+.brand-generic .brand-text a {
+    color: #417690;
+}

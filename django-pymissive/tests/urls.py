@@ -1,5 +1,7 @@
 """URL configuration for tests."""
 
+from importlib.util import find_spec
+
 import django
 import pymissive
 import django_pymissive
@@ -14,7 +16,6 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("geoaddress/", include("django_geoaddress.urls")),
     path("missive/", include("django_pymissive.urls")),
-
 ]
 
 if settings.DEBUG:
@@ -27,13 +28,8 @@ if settings.DEBUG:
     except ImportError:
         pass
 
-try:
-    import djrichtextfield
-    urlpatterns += [
-        path('djrichtextfield/', include('djrichtextfield.urls'))
-    ]
-except ImportError:
-    pass
+if find_spec("djrichtextfield") is not None:
+    urlpatterns += [path("djrichtextfield/", include("djrichtextfield.urls"))]
 
 _version = f"(Django {django.get_version()}, pymissive (py/dj) {pymissive.__version__}/{django_pymissive.__version__})"
 admin.site.site_header = f"Django Pymissive - Administration {_version}"

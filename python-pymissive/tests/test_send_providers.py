@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
@@ -14,6 +15,7 @@ from pymissive.providers.scaleway import ScalewayProvider
 from pymissive.providers.slack import SlackProvider
 from pymissive.providers.teams import TeamsProvider
 from pymissive.providers.discord import DiscordProvider
+from pymissive.providers.base.branded import BrandedMixin
 from pymissive.utils import HTTP_DOCUMENT_TIMEOUT, HTTP_TIMEOUT
 
 
@@ -45,6 +47,14 @@ class _UrlOpen:
         return False
 
 
+def test_branded_mixin_accepts_positional_brand_name():
+    class Provider(BrandedMixin):
+        def send_teams(self, **kwargs):
+            return kwargs
+
+    assert Provider().send_branded("teams", body_text="hello") == {"body_text": "hello"}
+
+
 def test_slack_send_branded_posts_chat_message():
     provider = _provider(SlackProvider, SLACK_BOT_TOKEN="xoxb-1", SLACK_CHANNEL_ID="C1")
     with patch(
@@ -72,23 +82,54 @@ def test_slack_send_branded_raises_on_api_error():
 def test_teams_send_branded_posts_webhook():
     provider = _provider(TeamsProvider, TEAMS_WEBHOOK_URL="https://outlook.office.com/webhook/x")
     with patch(
-        "pymissive.providers.teams.urlopen",
+        "pymissive.providers.teams._WEBHOOK_OPENER.open",
         return_value=_UrlOpen(b"1"),
     ) as urlopen:
-        result = provider.send_branded(body_text="hello")
+        result = provider.send_branded("teams", body_text="hello")
     assert urlopen.call_args[0][0].full_url.endswith("/webhook/x")
     assert urlopen.call_args.kwargs["timeout"] == HTTP_TIMEOUT
     assert result["status"] == "sent"
 
 
+def test_teams_send_branded_builds_message_card_for_distinct_subject():
+    provider = _provider(TeamsProvider, TEAMS_WEBHOOK_URL="https://outlook.office.com/webhook/x")
+    with patch("pymissive.providers.teams._WEBHOOK_OPENER.open", return_value=_UrlOpen(b"")) as urlopen:
+        result = provider.send_branded(subject="Title", body_text="Message")
+
+    payload = json.loads(urlopen.call_args[0][0].data)
+    assert payload["title"] == "Title"
+    assert payload["text"] == "Message"
+    assert result["id"] == "sent"
+
+
 def test_teams_send_branded_raises_on_http_error():
     provider = _provider(TeamsProvider, TEAMS_WEBHOOK_URL="https://outlook.office.com/webhook/x")
-    error = HTTPError(
-        "https://outlook.office.com/webhook/x", 400, "Bad", hdrs=None, fp=BytesIO(b"no")
-    )
-    with patch("pymissive.providers.teams.urlopen", side_effect=error):
+    error = HTTPError("https://outlook.office.com/webhook/x", 400, "Bad", hdrs=None, fp=BytesIO(b"no"))
+    with patch("pymissive.providers.teams._WEBHOOK_OPENER.open", side_effect=error):
         with pytest.raises(RuntimeError, match="400"):
             provider.send_branded(body_text="hello")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://outlook.office.com/webhook/x",
+        "file:///etc/passwd",
+        "https://user:password@outlook.office.com/webhook/x",
+        "https://localhost/webhook/x",
+        "https://127.0.0.1/webhook/x",
+        "https://169.254.169.254/latest/meta-data/",
+        "https://outlook.office.com.example.com/webhook/x",
+    ],
+)
+def test_teams_send_branded_rejects_unsafe_webhook_url(url):
+    provider = _provider(TeamsProvider, TEAMS_WEBHOOK_URL=url)
+
+    with patch("pymissive.providers.teams._WEBHOOK_OPENER.open") as urlopen:
+        with pytest.raises(ValueError, match="HTTPS|Microsoft Teams"):
+            provider.send_branded(body_text="hello")
+
+    urlopen.assert_not_called()
 
 
 def test_discord_validates_before_importing_the_sdk():
@@ -111,9 +152,7 @@ def test_partner_request_sets_a_timeout():
 
 def test_partner_send_sms_posts_to_smspartner():
     provider = _provider(PartnerProvider, SMS_API_KEY="k")
-    with patch.object(
-        provider, "_request", return_value={"success": True, "messageId": "m1"}
-    ) as request:
+    with patch.object(provider, "_request", return_value={"success": True, "messageId": "m1"}) as request:
         result = provider.send_sms(
             body_text="hi",
             recipients=[{"phone": "+33600000000"}],
@@ -156,6 +195,64 @@ def test_scaleway_send_email_posts_transactional_payload():
     assert post.call_args.kwargs["timeout"] == HTTP_DOCUMENT_TIMEOUT
     assert result["event"] == "sent"
     assert result["external_id"] == "scw-1"
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        ({"MessageId": "top", "message_id": "fallback"}, "top"),
+        (
+            {
+                "Message": {
+                    "email_headers": [{"key": "X-Scw-Tem-Message-Id", "value": "header"}],
+                    "emails": [{"message_id": "message-email"}],
+                }
+            },
+            "header",
+        ),
+        (
+            {
+                "Message": {"emails": [{"message_id": "message-email"}]},
+                "emails": [{"message_id": "response-email"}],
+            },
+            "message-email",
+        ),
+        ({"emails": [{"message_id": "response-email"}], "message_id": "fallback"}, "response-email"),
+        ({"message_id": "fallback"}, "fallback"),
+    ],
+)
+def test_scaleway_normalize_external_id_preserves_priority(response, expected):
+    assert _provider(ScalewayProvider).get_normalize_external_id(response) == expected
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        (
+            {
+                "Message": {
+                    "email_headers": [{"key": "X-Scw-Tem-Message-Id", "value": "header"}],
+                    "emails": [{"mail_rcpt": "message@example.com", "id": "message"}],
+                }
+            },
+            [{"email": "header", "external_id": "header"}],
+        ),
+        (
+            {"Message": {"emails": [{"mail_rcpt": "message@example.com", "id": "message"}]}},
+            [{"email": "message@example.com", "external_id": "message"}],
+        ),
+        (
+            {"id": "single", "mail_rcpt": "single@example.com"},
+            [{"email": "single@example.com", "external_id": "single"}],
+        ),
+        (
+            {"emails": [{"mail_rcpt": "response@example.com", "id": "response"}]},
+            [{"email": "response@example.com", "external_id": "response"}],
+        ),
+    ],
+)
+def test_scaleway_normalize_recipients_preserves_priority(response, expected):
+    assert _provider(ScalewayProvider).get_normalize_recipients(response) == expected
 
 
 def test_hand_delivery_send_needs_no_network():

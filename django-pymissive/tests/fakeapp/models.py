@@ -30,6 +30,7 @@ attachments without uploading a real file.
 from pathlib import Path
 
 from django.db import models
+from django_geoaddress.fields import GeoaddressField
 from django_pymissive.managers.related_object import MissiveRelatedQuerySetMixin
 
 # tests/ folder (parent of fakeapp/), where ``pdf_sample_1mb.pdf`` lives.
@@ -56,10 +57,7 @@ class PdfDocument(models.Model):
         max_length=500,
         blank=True,
         default="",
-        help_text=(
-            "Optional absolute path to a PDF on disk. Defaults to "
-            "tests/pdf_sample_1mb.pdf when blank."
-        ),
+        help_text=("Optional absolute path to a PDF on disk. Defaults to tests/pdf_sample_1mb.pdf when blank."),
     )
 
     class Meta:
@@ -147,4 +145,93 @@ class Contact(models.Model):
     def run_campaign_contact(self, scheduled_id, **kwargs) -> None:
         """Delegate to fakeapp runner — usable as task_object on MissiveScheduledCampaign."""
         from .run_campaign import run_fakeapp_campaign
+
         run_fakeapp_campaign(scheduled_id, **kwargs)
+
+
+class CampaignContact(models.Model):
+    """Person checked as a :class:`~django_pymissive.models.campaign_target.CampaignTarget`.
+
+    Contact points live in :class:`ContactEmail`, :class:`ContactPhone` and
+    :class:`ContactAddress`. The singular properties (``email``, ``phone``,
+    ``address``) return the first one and fill one recipient; the plurals
+    return all of them and are read when the build target processor runs
+    with ``full_targets``.
+    """
+
+    first_name = models.CharField(max_length=120)
+    last_name = models.CharField(max_length=120)
+
+    class Meta:
+        app_label = "fakeapp"
+        verbose_name = "Campaign contact (test fixture)"
+        verbose_name_plural = "Campaign contacts (test fixture)"
+        ordering = ["last_name", "first_name"]
+
+    def __str__(self) -> str:
+        return f"{self.full_name} <{self.email or self.phone or self.pk}>"
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.first_name} {self.last_name}".strip()
+
+    @property
+    def emails(self) -> list[str]:
+        return [row.email for row in self.contact_emails.all()]
+
+    @property
+    def email(self) -> str:
+        return next(iter(self.emails), "")
+
+    @property
+    def phones(self) -> list[str]:
+        return [row.phone for row in self.contact_phones.all()]
+
+    @property
+    def phone(self) -> str:
+        return next(iter(self.phones), "")
+
+    @property
+    def addresses(self) -> list[dict]:
+        return [row.address for row in self.contact_addresses.all() if row.address]
+
+    @property
+    def address(self) -> dict:
+        return next(iter(self.addresses), {})
+
+
+class ContactEmail(models.Model):
+    contact = models.ForeignKey(CampaignContact, on_delete=models.CASCADE, related_name="contact_emails")
+    email = models.EmailField()
+
+    class Meta:
+        app_label = "fakeapp"
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return self.email
+
+
+class ContactPhone(models.Model):
+    contact = models.ForeignKey(CampaignContact, on_delete=models.CASCADE, related_name="contact_phones")
+    phone = models.CharField(max_length=32, help_text="E.164 number, for example +33612345678.")
+
+    class Meta:
+        app_label = "fakeapp"
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return self.phone
+
+
+class ContactAddress(models.Model):
+    contact = models.ForeignKey(CampaignContact, on_delete=models.CASCADE, related_name="contact_addresses")
+    address = GeoaddressField(blank=True, null=True)
+
+    class Meta:
+        app_label = "fakeapp"
+        verbose_name_plural = "contact addresses"
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return str(self.address or "")

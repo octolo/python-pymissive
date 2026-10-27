@@ -44,9 +44,7 @@ def _email_missive(**kwargs) -> Missive:
 
 
 def test_form_requires_partner_id_or_uid():
-    form = RetrieveMissiveForm(
-        data={"provider": "brevo", "missive_type": MissiveType.EMAIL}
-    )
+    form = RetrieveMissiveForm(data={"provider": "brevo", "missive_type": MissiveType.EMAIL})
     assert form.is_valid() is False
 
 
@@ -98,9 +96,11 @@ def test_retrieve_from_provider_form_creates_even_if_partner_id_exists():
         "subject": "New copy",
         "events": [],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events"),
+    ):
         created_missive, created = retrieve_from_provider(
             provider="brevo",
             missive_type=MissiveType.EMAIL,
@@ -121,9 +121,11 @@ def test_get_or_retrieve_creates_from_provider():
         "recipients": [{"email": "alice@example.com", "name": "Alice"}],
         "events": [],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events"),
+    ):
         missive, created = retrieve_from_provider(
             provider="brevo",
             missive_type=MissiveType.EMAIL,
@@ -135,9 +137,7 @@ def test_get_or_retrieve_creates_from_provider():
     assert missive.subject == "Retrieved subject"
     assert missive.body_text == "Retrieved body"
     assert missive.sender_email == "from@example.com"
-    assert MissiveRecipient.objects.filter(
-        missive=missive, email="alice@example.com"
-    ).exists()
+    assert MissiveRecipient.objects.filter(missive=missive, email="alice@example.com").exists()
     rec = MissiveRecipient.objects.get(missive=missive, email="alice@example.com")
     assert rec.recipient_support == "email"
     assert missive.missive_support == "email"
@@ -152,32 +152,36 @@ def test_get_or_retrieve_creates_recipients_from_events():
             {"recipient": {"email": "two@example.com"}, "event": "sent"},
         ],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events"),
+    ):
         missive, created = retrieve_from_provider(
             provider="brevo",
             missive_type=MissiveType.EMAIL,
             partner_id="ext-evt",
         )
     assert created is True
-    emails = set(
-        MissiveRecipient.objects.filter(missive=missive).values_list("email", flat=True)
-    )
+    emails = set(MissiveRecipient.objects.filter(missive=missive).values_list("email", flat=True))
     assert emails == {"one@example.com", "two@example.com"}
 
 
 def test_retrieve_from_provider_form_sends_uid_without_reusing_it_as_pk():
     uid = uuid4()
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={
-            "external_id": "from-uid",
-            "subject": "From uid",
-            "events": [],
-        },
-    ) as retrieve, patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={
+                "external_id": "from-uid",
+                "subject": "From uid",
+                "events": [],
+            },
+        ) as retrieve,
+        patch.object(Missive, "handle_events"),
+    ):
         missive, created = retrieve_from_provider(
             provider="brevo",
             missive_type=MissiveType.EMAIL,
@@ -191,10 +195,13 @@ def test_retrieve_from_provider_form_sends_uid_without_reusing_it_as_pk():
 
 
 def test_get_or_retrieve_does_not_create_when_not_found():
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={"message_id": "missing", "events": []},
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={"message_id": "missing", "events": []},
+        ),
     ):
         with pytest.raises(ValidationError, match="not found"):
             retrieve_from_provider(
@@ -222,9 +229,11 @@ def test_retrieve_does_not_forward_levels_to_provider():
         "subject": "AR letter",
         "events": [],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ) as retrieve, patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response) as retrieve,
+        patch.object(Missive, "handle_events"),
+    ):
         missive, created = retrieve_from_provider(
             provider="maileva",
             missive_type=MissiveType.REGISTERED_LETTER,
@@ -239,9 +248,7 @@ def test_retrieve_does_not_forward_levels_to_provider():
 
 
 def test_admin_retrieve_get_renders_form():
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missive_retrieve_from_provider")
@@ -252,21 +259,23 @@ def test_admin_retrieve_get_renders_form():
 
 def test_admin_retrieve_post_creates_new_missive():
     existing = _email_missive(external_id="ext-admin")
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missive_retrieve_from_provider")
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={
-            "external_id": "ext-admin",
-            "subject": "From form",
-            "events": [],
-        },
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={
+                "external_id": "ext-admin",
+                "subject": "From form",
+                "events": [],
+            },
+        ),
+        patch.object(Missive, "handle_events"),
+    ):
         response = client.post(
             url,
             {
@@ -295,9 +304,11 @@ def test_refresh_from_provider_updates_fields_and_creates_recipients():
         ],
         "events": [],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events"),
+    ):
         retrieve_from_provider(missive=missive)
     missive.refresh_from_db()
     assert missive.subject == "Updated subject"
@@ -324,20 +335,17 @@ def test_refresh_from_provider_keeps_notification_recipients():
     )
     response = {
         "external_id": "ext-keep-notif",
-        "recipients": [
-            {"name": "Alice", "email": "alice@example.com", "external_id": "mv-1"}
-        ],
+        "recipients": [{"name": "Alice", "email": "alice@example.com", "external_id": "mv-1"}],
         "events": [],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events"),
+    ):
         retrieve_from_provider(missive=missive)
 
-    emails = {
-        (r.recipient_type, r.email)
-        for r in MissiveRecipient.objects.filter(missive=missive)
-    }
+    emails = {(r.recipient_type, r.email) for r in MissiveRecipient.objects.filter(missive=missive)}
     assert emails == {
         (MissiveRecipientType.RECIPIENT, "alice@example.com"),
         (MissiveRecipientType.NOTIFICATION, "ops@example.com"),
@@ -362,9 +370,11 @@ def test_refresh_from_provider_updates_only_fields_the_payload_provides():
         "subject": "New subject",
         "events": [],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events"),
+    ):
         retrieve_from_provider(missive=missive)
     missive.refresh_from_db()
     assert missive.pk == missive_pk
@@ -389,9 +399,7 @@ def test_refresh_from_provider_keeps_metadata_context_and_processors():
 
     campaign = MissiveCampaign.objects.create(subject="Camp")
     scheduler = MissiveScheduledCampaign.objects.create(campaign=campaign)
-    processors = [
-        "django_pymissive.processors.body.django_template.django_template_processor"
-    ]
+    processors = ["django_pymissive.processors.body.django_template.django_template_processor"]
     missive = _email_missive(
         external_id="ext-config",
         campaign=campaign,
@@ -409,11 +417,15 @@ def test_refresh_from_provider_keeps_metadata_context_and_processors():
         content_type=ContentType.objects.get_for_model(PdfDocument),
         object_id=doc.pk,
     )
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={"external_id": "ext-other", "subject": "From provider", "events": []},
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={"external_id": "ext-other", "subject": "From provider", "events": []},
+        ),
+        patch.object(Missive, "handle_events"),
+    ):
         retrieve_from_provider(missive=missive)
     missive.refresh_from_db()
     assert missive.subject == "From provider"
@@ -441,24 +453,29 @@ def test_refresh_from_provider_restores_billed_flag_on_recreated_billings():
         currency="EUR",
     )
 
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={
-            "external_id": "ext-billed",
-            "subject": "From provider",
-            "recipients": [{"name": "Alice", "email": "alice@example.com"}],
-            "events": [],
-        },
-    ), patch.object(Missive, "handle_events"), patch(
-        "django_pymissive.billings.load_provider_billings",
-        return_value=[
-            {
-                "billing_amount": Decimal("2.0000"),
-                "currency": "EUR",
-                "invoice": "INV-2",
-            }
-        ],
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={
+                "external_id": "ext-billed",
+                "subject": "From provider",
+                "recipients": [{"name": "Alice", "email": "alice@example.com"}],
+                "events": [],
+            },
+        ),
+        patch.object(Missive, "handle_events"),
+        patch(
+            "django_pymissive.billings.load_provider_billings",
+            return_value=[
+                {
+                    "billing_amount": Decimal("2.0000"),
+                    "currency": "EUR",
+                    "invoice": "INV-2",
+                }
+            ],
+        ),
     ):
         retrieve_from_provider(missive=missive)
     assert not MissiveBilling.objects.filter(pk=old.pk).exists()
@@ -479,22 +496,27 @@ def test_refresh_from_provider_does_not_mark_unbilled_missive():
         is_billed=False,
     )
 
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={
-            "external_id": "ext-unbilled",
-            "subject": "From provider",
-            "events": [],
-        },
-    ), patch.object(Missive, "handle_events"), patch(
-        "django_pymissive.billings.load_provider_billings",
-        return_value=[
-            {
-                "billing_amount": Decimal("3.0000"),
-                "invoice": "INV-3",
-            }
-        ],
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={
+                "external_id": "ext-unbilled",
+                "subject": "From provider",
+                "events": [],
+            },
+        ),
+        patch.object(Missive, "handle_events"),
+        patch(
+            "django_pymissive.billings.load_provider_billings",
+            return_value=[
+                {
+                    "billing_amount": Decimal("3.0000"),
+                    "invoice": "INV-3",
+                }
+            ],
+        ),
     ):
         retrieve_from_provider(missive=missive)
     billing = MissiveBilling.objects.get(missive=missive)
@@ -535,13 +557,13 @@ def test_refresh_from_provider_replaces_recipients_and_events():
         ],
         "events": [{"event": "delivered"}],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events") as handle_events:
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events") as handle_events,
+    ):
         retrieve_from_provider(missive=missive)
-    emails = set(
-        MissiveRecipient.objects.filter(missive=missive).values_list("email", flat=True)
-    )
+    emails = set(MissiveRecipient.objects.filter(missive=missive).values_list("email", flat=True))
     assert emails == {"alice@example.com"}
     rec = MissiveRecipient.objects.get(missive=missive)
     assert rec.pk != old_rec.pk
@@ -581,21 +603,26 @@ def test_events_only_retrieve_keeps_body_recipients_and_billings():
         event="request",
         occurred_at=timezone.now(),
     )
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={
-            "events": [
-                {
-                    "event": "accepted",
-                    "occurred_at": "2026-06-12T09:30:16Z",
-                    "external_id": "ext-events-only",
-                }
-            ]
-        },
-    ), patch.object(Missive, "handle_events") as handle_events, patch(
-        "django_pymissive.billings.load_provider_billings",
-        side_effect=RuntimeError("billing down"),
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={
+                "events": [
+                    {
+                        "event": "accepted",
+                        "occurred_at": "2026-06-12T09:30:16Z",
+                        "external_id": "ext-events-only",
+                    }
+                ]
+            },
+        ),
+        patch.object(Missive, "handle_events") as handle_events,
+        patch(
+            "django_pymissive.billings.load_provider_billings",
+            side_effect=RuntimeError("billing down"),
+        ),
     ):
         retrieve_from_provider(missive=missive)
 
@@ -639,9 +666,11 @@ def test_refresh_from_provider_fills_missing_address_without_duplicating():
         ],
         "events": [],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events"),
+    ):
         retrieve_from_provider(missive=missive)
     assert MissiveRecipient.objects.filter(missive=missive).count() == 1
     rec = MissiveRecipient.objects.get(missive=missive)
@@ -671,9 +700,11 @@ def test_retrieve_registered_letter_sets_address_support_on_missive_and_recipien
         ],
         "events": [],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events"),
+    ):
         missive, created = retrieve_from_provider(
             provider="maileva",
             missive_type=MissiveType.REGISTERED_LETTER,
@@ -721,9 +752,11 @@ def test_retrieve_from_provider_maps_maileva_lines_to_geoaddress():
         "recipients": provider.get_normalize_recipients(raw),
         "events": [],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events"),
+    ):
         missive, created = retrieve_from_provider(
             provider="maileva",
             missive_type=MissiveType.REGISTERED_LETTER,
@@ -758,11 +791,15 @@ def test_refresh_from_provider_does_not_forward_levels():
         priority=MissivePriority.URGENT,
         status=MissiveStatus.PROCESSING,
     )
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={"external_id": "ext-levels", "subject": "X", "events": []},
-    ) as retrieve, patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={"external_id": "ext-levels", "subject": "X", "events": []},
+        ) as retrieve,
+        patch.object(Missive, "handle_events"),
+    ):
         retrieve_from_provider(missive=missive)
     kwargs = retrieve.call_args.kwargs
     assert "acknowledgement" not in kwargs
@@ -774,14 +811,10 @@ def test_refresh_from_provider_does_not_forward_levels():
 
 def test_admin_refresh_from_provider_get_renders_confirm():
     missive = _email_missive(external_id="ext-confirm")
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
-    url = reverse(
-        "admin:django_pymissive_missive_refresh_from_provider", args=[missive.pk]
-    )
+    url = reverse("admin:django_pymissive_missive_refresh_from_provider", args=[missive.pk])
     response = client.get(url)
     assert response.status_code == 200
     assert b"replace local data" in response.content
@@ -790,17 +823,11 @@ def test_admin_refresh_from_provider_get_renders_confirm():
 
 def test_admin_refresh_from_provider_post_updates_missive():
     missive = _email_missive(external_id="ext-confirm-post", subject="Old")
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
-    url = reverse(
-        "admin:django_pymissive_missive_refresh_from_provider", args=[missive.pk]
-    )
-    with patch(
-        "django_pymissive.admin.missive.do_retrieve_from_provider"
-    ) as retrieve:
+    url = reverse("admin:django_pymissive_missive_refresh_from_provider", args=[missive.pk])
+    with patch("django_pymissive.admin.missive.do_retrieve_from_provider") as retrieve:
         retrieve.return_value = (missive, False)
         response = client.post(url, {"action": "confirm"})
     retrieve.assert_called_once()

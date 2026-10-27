@@ -13,9 +13,7 @@ from pymissive.providers.maileva import (
 def test_maileva_address_line_6_joins_postal_code_and_city():
     assert _maileva_address_line_6({"postal_code": "75000", "city": "Paris"}) == "75000 Paris"
     assert (
-        _maileva_address_line_6(
-            {"postal_code": "75000", "city": "Paris", "sorting_code": "CEDEX 01"}
-        )
+        _maileva_address_line_6({"postal_code": "75000", "city": "Paris", "sorting_code": "CEDEX 01"})
         == "75000 Paris CEDEX 01"
     )
 
@@ -25,13 +23,9 @@ def test_recipient_registered_letter_requires_organization_or_name():
     address = {"address_line1": "1 rue", "postal_code": "75001", "city": "Paris"}
     with pytest.raises(ValueError, match="address_line_1 or address_line_2"):
         provider.get_recipient_registered_letter_data({"address": address})
-    data = provider.get_recipient_registered_letter_data(
-        {"name": "Alice", "address": address}
-    )
+    data = provider.get_recipient_registered_letter_data({"name": "Alice", "address": address})
     assert data["address_line_2"] == "Alice"
-    data = provider.get_recipient_registered_letter_data(
-        {"address": {**address, "organization": "Octolo"}}
-    )
+    data = provider.get_recipient_registered_letter_data({"address": {**address, "organization": "Octolo"}})
     assert data["address_line_1"] == "Octolo"
 
 
@@ -293,4 +287,3 @@ def test_recipient_registered_letter_custom_id_falls_back_to_id():
         }
     )
     assert data["custom_id"] == "uuid-or-pk"
-

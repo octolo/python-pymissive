@@ -1,5 +1,7 @@
 """Forms for missive billing admin views."""
 
+from typing import Any
+
 from django import forms
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -7,16 +9,14 @@ from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
 from ..models.missive import Missive
+from ._fields import model_formfield
 
 
 def _is_related_export_path(path: str) -> bool:
     parts = str(path).split(".")
     if len(parts) < 2:
         return False
-    return all(
-        part.isidentifier() and not part.startswith("_") and "__" not in part
-        for part in parts
-    )
+    return all(part.isidentifier() and not part.startswith("_") and "__" not in part for part in parts)
 
 
 class BillingDateRangeForm(forms.Form):
@@ -33,8 +33,8 @@ class BillingDateRangeForm(forms.Form):
         widget=forms.DateInput(attrs={"type": "date"}),
     )
 
-    def clean(self):
-        cleaned = super().clean()
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean() or {}
         start_date = cleaned.get("start_date")
         end_date = cleaned.get("end_date")
         if start_date and end_date and end_date < start_date:
@@ -47,17 +47,19 @@ class BillingFilterForm(BillingDateRangeForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["provider"] = Missive._meta.get_field("provider").formfield(
+        self.fields["provider"] = model_formfield(
+            Missive,
+            "provider",
             required=False,
             label=_("Provider"),
         )
-        self.fields["missive_type"] = Missive._meta.get_field("missive_type").formfield(
+        self.fields["missive_type"] = model_formfield(
+            Missive,
+            "missive_type",
             required=False,
             label=_("Missive type"),
         )
-        self.order_fields(
-            ["provider", "missive_type", "start_date", "end_date"]
-        )
+        self.order_fields(["provider", "missive_type", "start_date", "end_date"])
 
 
 class RetrieveBillingsForm(BillingDateRangeForm):
@@ -71,55 +73,51 @@ class RetrieveBillingsForm(BillingDateRangeForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["provider"] = Missive._meta.get_field("provider").formfield(
+        self.fields["provider"] = model_formfield(
+            Missive,
+            "provider",
             required=True,
             label=_("Provider"),
         )
-        self.fields["missive_type"] = Missive._meta.get_field("missive_type").formfield(
+        self.fields["missive_type"] = model_formfield(
+            Missive,
+            "missive_type",
             required=True,
             label=_("Missive type"),
         )
-        self.order_fields(
-            ["provider", "missive_type", "start_date", "end_date", "as_task"]
-        )
+        self.order_fields(["provider", "missive_type", "start_date", "end_date", "as_task"])
 
 
 class ExportBillingsForm(BillingFilterForm):
     """Export stored billings between two dates as CSV."""
 
-    fields = forms.JSONField(
-        required=False,
-        label=_("Fields"),
-        help_text=_(
-            'Dotted paths on missive related objects, e.g. ["contact.last_name", "contact.category.name"]. Multiple related objects become columns path.1, path.2, ….'
-        ),
-        initial=[],
-    )
     one_row = forms.BooleanField(
         required=False,
         label=_("One row per missive"),
-        help_text=_(
-            "Turn billing labels into columns; the cell value is the billed amount."
-        ),
+        help_text=_("Turn billing labels into columns; the cell value is the billed amount."),
     )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["fields"] = forms.JSONField(
+            required=False,
+            label=_("Fields"),
+            help_text=_(
+                'Dotted paths on missive related objects, e.g. ["contact.last_name", "contact.category.name"]. Multiple related objects become columns path.1, path.2, ….'
+            ),
+            initial=[],
+        )
         widget_path = getattr(settings, "PYMISSIVE_JSON_WIDGET", None)
         if widget_path:
             self.fields["fields"].widget = import_string(widget_path)()
-        self.order_fields(
-            ["provider", "missive_type", "start_date", "end_date", "one_row", "fields"]
-        )
+        self.order_fields(["provider", "missive_type", "start_date", "end_date", "one_row", "fields"])
 
     def clean_fields(self):
         value = self.cleaned_data.get("fields")
         if value in (None, [], {}):
             return []
         if not isinstance(value, list):
-            raise ValidationError(
-                _("Fields must be a JSON list of dotted paths (e.g. contact.last_name).")
-            )
+            raise ValidationError(_("Fields must be a JSON list of dotted paths (e.g. contact.last_name)."))
         paths = []
         for item in value:
             if not isinstance(item, str) or not _is_related_export_path(item.strip()):

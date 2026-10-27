@@ -1,10 +1,13 @@
 """Admin for MissiveRecipient model."""
 
+from collections.abc import Sequence
+from typing import cast
+
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
-from django_boosted import AdminBoostModel
-from django_geoaddress.fields import GeoaddressField
+from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
+from django_geoaddress.fields import GeoaddressField  # type: ignore[import-untyped]
 
 from ..models.choices import MissiveStatus, get_missive_style
 from ..models.recipient import (
@@ -56,7 +59,7 @@ class TrackingNumberLinkMixin:
         return number
 
 
-class LockedGeoaddressInlineMixin:
+class LockedGeoaddressInlineMixin(admin.options.InlineModelAdmin):
     """On a locked missive, freeze fields but leave GeoaddressField as a widget."""
 
     def get_formset(self, request, obj=None, **kwargs):
@@ -67,21 +70,16 @@ class LockedGeoaddressInlineMixin:
         readonly = list(super().get_readonly_fields(request, obj))
         if not missive_admin_locked(obj):
             return readonly
-        geoaddress_names = {
-            field.name
-            for field in self.model._meta.get_fields()
-            if isinstance(field, GeoaddressField)
-        }
-        for name in self.fields:
+        geoaddress_names = {field.name for field in self.model._meta.get_fields() if isinstance(field, GeoaddressField)}
+        fields = cast(Sequence[str], self.fields or ())
+        for name in fields:
             if name not in geoaddress_names and name not in readonly:
                 readonly.append(name)
         return readonly
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
-        if isinstance(db_field, GeoaddressField) and missive_admin_locked(
-            getattr(self, "_lock_obj", None)
-        ):
+        if isinstance(db_field, GeoaddressField) and missive_admin_locked(getattr(self, "_lock_obj", None)):
             lock_geoaddress_formfield(formfield)
         return formfield
 
@@ -258,13 +256,13 @@ class MissiveRecipientAdmin(TrackingNumberLinkMixin, AdminBoostModel):
         )
         self.add_to_fieldset(_("Comment/Timestamps"), ["comment", "created_at", "updated_at"])
 
+    @admin.display(description=_("Recipient"))
     def recipient_display(self, obj):
         """Display the recipient name and email or phone or address."""
         help_text = obj.email or obj.phone or obj.address
         return self.format_with_help_text(obj.name, help_text)
 
-    recipient_display.short_description = _("Recipient")
-
+    @admin.display(description=_("Recipient Type"))
     def recipient_type_display(self, obj):
         """Display the recipient type."""
         recipient_type_style = get_missive_style(obj.recipient_type)
@@ -274,24 +272,15 @@ class MissiveRecipientAdmin(TrackingNumberLinkMixin, AdminBoostModel):
             label_type=recipient_type_style,
         )
         status_style = get_missive_style(obj.status)
-        status = self.format_label(
-            obj.get_status_display(), size="small", label_type=status_style
-        )
+        status = self.format_label(obj.get_status_display(), size="small", label_type=status_style)
         html = format_html("{} {}", recipient_type, status)
         if obj.last_event:
             event_style = get_missive_style(obj.last_event)
-            event = self.format_label(
-                obj.last_event_reason, size="small", label_type=event_style
-            )
+            event = self.format_label(obj.last_event_reason, size="small", label_type=event_style)
             html = format_html("{} {}", html, event)
         return self.format_with_help_text(html, obj.last_event_date)
 
-    recipient_type_display.short_description = _("Recipient Type")
-
+    @admin.display(description=_("Missive"))
     def missive_display(self, obj):
         """Display the missive subject."""
-        return self.format_with_help_text(
-            obj.missive.subject, obj.missive.get_missive_type_display()
-        )
-
-    missive_display.short_description = _("Missive")
+        return self.format_with_help_text(obj.missive.subject, obj.missive.get_missive_type_display())

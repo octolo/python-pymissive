@@ -54,7 +54,7 @@ class PartnerProvider(MissiveProviderBase):
     # Helpers
     #########################################################
 
-    def _request(self, url: str, method: str, data: dict = None) -> dict:
+    def _request(self, url: str, method: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
         """Call SMS Partner.
 
         GET puts ``data`` (including ``apiKey``) in the query string; POST puts
@@ -87,9 +87,11 @@ class PartnerProvider(MissiveProviderBase):
     def get_normalize_event(self, data: dict[str, Any]) -> str:
         """Return the normalized event of webhook/SMS."""
         if "event" in data:
-            return self.events_association.get(data.get("event"), "unknown")
+            event = data.get("event")
+            return self.events_association.get(event, "unknown") if isinstance(event, str) else "unknown"
         if "status" in data:
-            return self.events_association.get(data.get("status"), "unknown")
+            status = data.get("status")
+            return self.events_association.get(status, "unknown") if isinstance(status, str) else "unknown"
         if "success" in data:
             return "sent" if data.get("success") else "failed"
         return "unknown"
@@ -99,7 +101,7 @@ class PartnerProvider(MissiveProviderBase):
         timestamp = data.get("date") or data.get("occurred_at") or datetime.now().timestamp()
         return datetime.fromtimestamp(int(timestamp)).isoformat()
 
-    def get_normalize_invoice(self, data: dict[str, Any]) -> str:
+    def get_normalize_invoice(self, data: dict[str, Any]) -> str | None:
         for key in ["nb_sms", "nb_emails", "nb_voice", "nbSms", "nbEmails", "nbVoice"]:
             if key in data:
                 return f"{key}: {data.get(key)}"
@@ -113,7 +115,7 @@ class PartnerProvider(MissiveProviderBase):
                     "message_id": data.get("message_id"),
                     "recipient": self._recipient(event),
                 }
-                for event in data.get("events")
+                for event in data.get("events") or []
             ]
         return None
 
@@ -128,7 +130,9 @@ class PartnerProvider(MissiveProviderBase):
         """Send SMS."""
         data = {
             "apiKey": self._get_config_or_env("SMS_API_KEY"),
-            "sender": kwargs.get("sender", {}).get("phone") or kwargs.get("sender", {}).get("name") or self._get_config_or_env("SENDER_NAME", "Missive"),
+            "sender": kwargs.get("sender", {}).get("phone")
+            or kwargs.get("sender", {}).get("name")
+            or self._get_config_or_env("SENDER_NAME", "Missive"),
             "message": kwargs["body_text"],
             "phoneNumbers": ",".join([str(rp["phone"]) for rp in kwargs.get("recipients", [])]),
             "isStopSms": kwargs.get("is_stop_sms", self._get_config_or_env("IS_STOP_SMS", 0)),
@@ -178,14 +182,10 @@ class PartnerProvider(MissiveProviderBase):
     # SMS - Billings
     #########################################################
 
-    def get_billings_sms(self, **kwargs: Any) -> dict | list:
-        external_id = kwargs.get("external_id")
+    def get_billings_sms(self, **kwargs: Any) -> list[dict[str, Any]] | None:
         """Fetch billings from bulk-status response."""
         external_id = kwargs.get("external_id")
         response = self._retrieve_sms(external_id=external_id)
         if "StatutResponse_List" in response:
-            return [
-                {**item, "message_id": external_id}
-                for item in response.get("StatutResponse_List")
-            ]
+            return [{**item, "message_id": external_id} for item in response.get("StatutResponse_List") or []]
         return None
