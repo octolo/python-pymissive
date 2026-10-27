@@ -43,9 +43,7 @@ def test_url_token_matches():
 
 def test_maileva_subscription_payload():
     payload = maileva_subscription_authentication("s3cret")
-    assert payload == {
-        "basic": {"login": WEBHOOK_BASIC_LOGIN, "password": "s3cret"}
-    }
+    assert payload == {"basic": {"login": WEBHOOK_BASIC_LOGIN, "password": "s3cret"}}
     custom = maileva_subscription_authentication("s3cret", login="octolo")
     assert custom["basic"]["login"] == "octolo"
 
@@ -80,10 +78,7 @@ class _Provider:
 
 def test_verify_is_opt_in():
     assert verify_inbound_webhook(_Provider(""), authorization="") is True
-    assert (
-        verify_inbound_webhook(_Provider("s3cret"), authorization="Bearer s3cret")
-        is True
-    )
+    assert verify_inbound_webhook(_Provider("s3cret"), authorization="Bearer s3cret") is True
     assert verify_inbound_webhook(_Provider("s3cret"), authorization="") is False
 
 

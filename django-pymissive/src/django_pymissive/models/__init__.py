@@ -11,6 +11,7 @@ from .attachment import (
     MissiveProof,
 )
 from .campaign import MissiveCampaign
+from .campaign_target import CampaignTarget
 from .scheduler import MissiveScheduledCampaign
 from .choices import (
     AcknowledgementLevel,
@@ -39,6 +40,7 @@ __all__ = [
     "CampaignAttachment",
     "CampaignVirtualAttachment",
     "MissiveCampaign",
+    "CampaignTarget",
     "MissiveScheduledCampaign",
     "MissiveProviderModel",
     "Missive",

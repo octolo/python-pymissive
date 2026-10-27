@@ -93,7 +93,8 @@ def test_sync_events_noevent_sees_the_real_event_count():
     out = StringIO()
     call_command(
         "sync_events",
-        "--date", timezone.now().date().isoformat(),
+        "--date",
+        timezone.now().date().isoformat(),
         "--noevent",
         stdout=out,
     )
@@ -109,7 +110,8 @@ def test_sync_events_noevent_still_skips_a_busy_missive():
 
     call_command(
         "sync_events",
-        "--date", timezone.now().date().isoformat(),
+        "--date",
+        timezone.now().date().isoformat(),
         "--noevent",
         stdout=StringIO(),
     )

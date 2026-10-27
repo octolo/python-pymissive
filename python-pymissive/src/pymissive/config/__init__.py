@@ -7,13 +7,15 @@ supposed to produce an ``AlterField``. That is not a schema change — the
 column stays a string holding the key.
 """
 
+from typing import Any
+
 from . import address
-from . import email
-from . import phone
-from . import missive
-from . import recipient
 from . import attachment
 from . import billing
+from . import email
+from . import missive
+from . import phone
+from . import recipient
 from . import webhook
 
 
@@ -119,7 +121,11 @@ ADDRESS_FIELDS = {
 
 GENERIC_SUPPORT = {
     "email": ["email", "email_marketing", "ere"],
-    "phone": ["sms", "rcs", "voice_call",],
+    "phone": [
+        "sms",
+        "rcs",
+        "voice_call",
+    ],
     "address": ["letter", "registered_letter", "hand_delivery"],
     "application": ["notification", "push_notification", "branded"],
 }
@@ -195,6 +201,7 @@ def missive_types_for_support(support: str) -> list[str]:
     """
     return list(GENERIC_SUPPORT.get(normalize_support(support), []))
 
+
 PRIORITIES = ["low", "normal", "high", "urgent"]
 DELIVERY_MODES = ["economic", "normal", "premium", "express"]
 
@@ -252,7 +259,7 @@ MISSIVE_ACKNOWLEDGEMENT_LEVELS = [
 ]
 
 
-MISSIVE_SERVICES = {
+MISSIVE_SERVICES: dict[str, dict[str, Any]] = {
     "missive": {
         "services": missive.SERVICES,
         "config": MISSIVE_FIELDS,
@@ -276,14 +283,14 @@ MISSIVE_SERVICES = {
 }
 
 
-_SUPPORT_FIELDS = {
+_SUPPORT_FIELDS: dict[str, dict[str, Any]] = {
     "email": EMAIL_FIELDS,
     "phone": PHONE_FIELDS,
     "address": ADDRESS_FIELDS,
 }
 
 
-def get_config_by_support(missive_type: str) -> dict:
+def get_config_by_support(missive_type: str) -> dict[str, Any]:
     """Return fields dict for the support category that contains missive_type."""
     support_key = missive_support_for_type(missive_type)
     if support_key:
@@ -291,7 +298,7 @@ def get_config_by_support(missive_type: str) -> dict:
     return MISSIVE_FIELDS
 
 
-def fields_to_arg_config(fields: dict, default_str: str = "") -> dict:
+def fields_to_arg_config(fields: dict[str, Any], default_str: str = "") -> dict[str, dict[str, Any]]:
     """Build clicommands _ARG_CONFIG from config FIELDS. Maps format to argparse type."""
     _FORMAT_TO_TYPE = {
         "str": (str, default_str),
@@ -302,7 +309,7 @@ def fields_to_arg_config(fields: dict, default_str: str = "") -> dict:
         "datetime": (str, default_str),
         "file": (str, default_str),
     }
-    result = {}
+    result: dict[str, dict[str, Any]] = {}
     for name, field in fields.items():
         fmt = field.get("format")
         if isinstance(fmt, list):
@@ -315,12 +322,25 @@ def fields_to_arg_config(fields: dict, default_str: str = "") -> dict:
     return result
 
 
-def get_missive_send_arg_config() -> dict:
+def get_missive_send_arg_config() -> dict[str, dict[str, Any]]:
     """Arg config for missive send from config FIELDS. Includes recipient shortcuts from recipient.RECIPIENT_FIELDS."""
     send_fields = {
         k: v
         for k, v in {**email.FIELDS, **phone.FIELDS, **address.FIELDS, **missive.FIELDS}.items()
-        if k in ("subject", "body_rich", "body_text", "body", "recipients", "sender_name", "sender_email", "sender_phone", "sender_address", "reply_to_name", "reply_to_email")
+        if k
+        in (
+            "subject",
+            "body_rich",
+            "body_text",
+            "body",
+            "recipients",
+            "sender_name",
+            "sender_email",
+            "sender_phone",
+            "sender_address",
+            "reply_to_name",
+            "reply_to_email",
+        )
     }
     for k in ("name", "email", "phone", "address"):
         if k in recipient.RECIPIENT_FIELDS:

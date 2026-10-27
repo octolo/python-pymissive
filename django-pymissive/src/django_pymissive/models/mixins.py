@@ -14,6 +14,7 @@ from ..fields import JSONField
 # Comment + timestamps mixin: ubiquitous audit fields.
 # ---------------------------------------------------------------------------
 
+
 class CommentTimestampedModel(models.Model):
     """``comment``, ``created_at``, ``updated_at``."""
 
@@ -41,6 +42,7 @@ class CommentTimestampedModel(models.Model):
 # ---------------------------------------------------------------------------
 # Config mixin: JSON bags shared across pymissive models.
 # ---------------------------------------------------------------------------
+
 
 class ConfigMixin(models.Model):
     """``additional_context`` (templates), ``additional_config`` (runtime), ``metadata``."""
@@ -77,7 +79,7 @@ _PROCESSOR_HELP = _(
     "Runtime resolution (first non-empty wins): this object's value, then its "
     "campaign's value (when this is a missive linked to a campaign), then the "
     "global setting. Each entry may be a dotted-path string, a "
-    "``[path, kwargs]`` pair, or a ``{\"processor\": path, \"kwargs\": {...}}`` "
+    '``[path, kwargs]`` pair, or a ``{"processor": path, "kwargs": {...}}`` '
     "dict. When overriding the body chain, include "
     "``django_pymissive.processors.body.django_template.django_template_processor`` "
     "if you still want ``{{ var }}`` / ``{% tag %}`` rendering; when overriding "
@@ -133,9 +135,7 @@ class ProcessorsMixin(models.Model):
         """Parent chain for resolution; ``Missive`` overrides to use ``campaign``."""
         return None
 
-    def _resolve_processors(
-        self, field_name: str, default_factory: Callable[[], list]
-    ) -> list:
+    def _resolve_processors(self, field_name: str, default_factory: Callable[[], list]) -> list:
         local = getattr(self, field_name, None)
         if local:
             return list(local)
@@ -145,16 +145,10 @@ class ProcessorsMixin(models.Model):
         return default_factory()
 
     def get_body_processors(self) -> list:
-        return self._resolve_processors(
-            "body_processors", self.get_default_body_processors
-        )
+        return self._resolve_processors("body_processors", self.get_default_body_processors)
 
     def get_first_document_processors(self) -> list:
-        return self._resolve_processors(
-            "first_document_processors", self.get_default_pdf_processors
-        )
+        return self._resolve_processors("first_document_processors", self.get_default_pdf_processors)
 
     def get_attachment_processors(self) -> list:
-        return self._resolve_processors(
-            "attachment_processors", self.get_default_attachment_processors
-        )
+        return self._resolve_processors("attachment_processors", self.get_default_attachment_processors)

@@ -10,9 +10,9 @@ attribute-escape the srcdoc string — Django's ``{{ srcdoc }}`` does.
 from __future__ import annotations
 
 _SRCDOC_PREFIX = (
-    "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
-    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-    "<meta http-equiv=\"Content-Security-Policy\" "
+    '<!DOCTYPE html><html><head><meta charset="utf-8">'
+    '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    '<meta http-equiv="Content-Security-Policy" '
     "content=\"default-src 'none'; img-src data: https: http:; "
     "style-src 'unsafe-inline'; font-src data: https: http:;\">"
     "<style>html,body{margin:0;background:#fff;}</style>"

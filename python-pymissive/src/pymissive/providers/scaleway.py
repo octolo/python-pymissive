@@ -1,5 +1,6 @@
 """Scaleway Transactional Email provider."""
 
+import importlib
 import json
 import logging
 import os
@@ -23,7 +24,7 @@ _SNS_SUBSCRIBE_HOST_RE = re.compile(
 )
 
 
-def is_scaleway_sns_subscribe_url(url: str) -> bool:
+def is_scaleway_sns_subscribe_url(url: object) -> bool:
     """True when ``url`` is an HTTPS ConfirmSubscription on Scaleway SNS.
 
     A forged ``SubscribeURL`` must not make the worker fetch an arbitrary host
@@ -84,18 +85,28 @@ class ScalewayProvider(MissiveProviderBase):
         "sns_credentials": "{base_url}/mnq/v1beta1/regions/{region}/sns-credentials",
     }
     EVENT_TYPES = [
-        "email_sent", "email_delivered", "email_queued", "email_dropped",
-        "email_deferred", "email_spam", "email_mailbox_not_found", "email_blocklisted",
+        "email_sent",
+        "email_delivered",
+        "email_queued",
+        "email_dropped",
+        "email_deferred",
+        "email_spam",
+        "email_mailbox_not_found",
+        "email_blocklisted",
     ]
     fields_associations = {
-        "occurred_at": ["Timestamp",],
+        "occurred_at": [
+            "Timestamp",
+        ],
         "event": "Message.type",
         "reason": ["reason", "trace.reason", "event", "trace.event", "status_details"],
         "external_id": ["message_id", "_message_id", "message-id", "MessageId"],
         "email": ["email", "Message.email_to", "email_to"],
-        "sender_email": ["Message.email_from",],
+        "sender_email": [
+            "Message.email_from",
+        ],
     }
-    events_association = {
+    events_association: dict[str, str] = {
         "unknown_type": "unknown",
         "sent": "delivered",
         "sending": "request",
@@ -155,73 +166,100 @@ class ScalewayProvider(MissiveProviderBase):
     def get_domains(self):
         """Get domains."""
         url = self.ENDPOINTS["domains"].format(base_url=self._base_url, region=self._region)
-        response = requests.get(
-            url,
-            headers=self._get_headers(),
-            params={"project_id": self._project_id}, timeout=30
-        )
+        response = requests.get(url, headers=self._get_headers(), params={"project_id": self._project_id}, timeout=30)
         response.raise_for_status()
         return response.json()
 
     def get_normalize_event(self, data: dict[str, Any]) -> str:
         """Return the normalized event of webhook/email/SMS."""
-        event = None
-        if "Message" in data:
-            message = data.get("Message")
+        event: Any = None
+        message = data.get("Message")
+        if isinstance(message, dict):
             if "type" in message:
                 event = message.get("type")
-        if not event and "emails" in data:
-            events = data.get("emails", [])
-            if len(events):
+        events = data.get("emails")
+        if not event and isinstance(events, list):
+            if events and isinstance(events[0], dict):
                 event = events[0].get("status")
         if not event and "status" in data:
             event = data.get("status")
-        return self.events_association.get(event, "unknown")
+        return self.events_association.get(event, "unknown") if isinstance(event, str) else "unknown"
+
+    @staticmethod
+    def _recipients_from_headers(message: dict[str, Any]) -> list[dict[str, Any]]:
+        if "email_headers" not in message:
+            return []
+        return [
+            {"email": header.get("value"), "external_id": header.get("value")}
+            for header in (message.get("email_headers") or [])
+            if header.get("key") == "X-Scw-Tem-Message-Id"
+        ]
+
+    @staticmethod
+    def _recipients_from_emails(emails: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {"email": email.get("mail_rcpt"), "external_id": email.get("id")}
+            for email in emails
+            if email.get("mail_rcpt")
+        ]
+
+    def _recipients_from_message(self, message: dict[str, Any]) -> list[dict[str, Any]]:
+        recipients = self._recipients_from_headers(message)
+        if recipients or not message.get("emails"):
+            return recipients
+        return self._recipients_from_emails(message.get("emails") or [])
 
     def get_normalize_recipients(self, response: dict[str, Any]) -> list:
         """Get external email ID."""
-        recipients = []
-        if "Message" in response:
-            message = response["Message"]
-            if "email_headers" in message:
-                email_headers = message.get("email_headers")
-                keys = ["X-Scw-Tem-Message-Id",]
-                recipients = [
-                    {'email': header.get("value"), 'external_id': header.get("value")} 
-                        for header in email_headers if header.get("key") in keys]
+        recipients = self._recipients_from_message(response["Message"]) if "Message" in response else []
+        if recipients:
+            return recipients
+        if "id" in response and "mail_rcpt" in response:
+            return [{"email": response.get("mail_rcpt"), "external_id": response.get("id")}]
+        return [
+            {"email": email.get("mail_rcpt"), "external_id": email.get("id")}
+            for email in (response.get("emails") or [])
+        ]
 
-            if not recipients and message.get("emails"):
-                recipients = [
-                    {'email': email.get("mail_rcpt"), 'external_id': email.get("id")} 
-                        for email in message.get("emails") if email.get("mail_rcpt")]
+    @staticmethod
+    def _external_id_from_headers(message: dict[str, Any]) -> str | None:
+        if "email_headers" not in message:
+            return None
+        return next(
+            (
+                header.get("value")
+                for header in (message.get("email_headers") or [])
+                if header.get("key") == "X-Scw-Tem-Message-Id"
+            ),
+            None,
+        )
 
-        if not recipients:
-            if "id" in response and "mail_rcpt" in response:
-                recipients = [{"email": response.get("mail_rcpt"), "external_id": response.get("id")}]
-            else:
-                recipients = [{'email': email.get("mail_rcpt"), 'external_id': email.get('id')}
-                    for email in response.get("emails")]
+    @staticmethod
+    def _external_id_from_emails(emails: list[dict[str, Any]]) -> str | None:
+        return next((email.get("message_id") for email in emails if email.get("message_id")), None)
 
-        return recipients
+    def _external_id_from_message(self, response: dict[str, Any]) -> str | None:
+        if "Message" not in response:
+            return None
+        message = response["Message"]
+        message_id = self._external_id_from_headers(message)
+        if message_id or "emails" not in message:
+            return message_id
+        return self._external_id_from_emails(message.get("emails") or [])
 
-    def get_normalize_external_id(self, response: dict[str, Any]) -> str:
+    def _external_id_from_response_emails(self, response: dict[str, Any]) -> str | None:
+        if "emails" not in response:
+            return None
+        return self._external_id_from_emails(response.get("emails") or [])
+
+    def get_normalize_external_id(self, response: dict[str, Any]) -> str | None:
         """Get external email ID."""
-        message_id = None
-        if "MessageId" in response:
-            message_id = response.get("MessageId")
-        if not message_id and "Message" in response:
-            message = response["Message"]
-            if "email_headers" in message:
-                email_headers = message.get("email_headers")
-                keys = ["X-Scw-Tem-Message-Id",]
-                message_id = next((header.get("value") for header in email_headers if header.get("key") in keys), None)
-            if not message_id and "emails" in message:
-                message_id = next((email.get("message_id") for email in message.get("emails") if email.get("message_id")), None)
-        if not message_id and "emails" in response:
-            message_id = next((email.get("message_id") for email in response.get("emails") if email.get("message_id")), None)
-        if not message_id and "message_id" in response:
-            message_id = response.get("message_id")
-        return message_id
+        return (
+            response.get("MessageId")
+            or self._external_id_from_message(response)
+            or self._external_id_from_response_emails(response)
+            or response.get("message_id")
+        )
 
     #########################################################
     # Email sending
@@ -264,23 +302,23 @@ class ScalewayProvider(MissiveProviderBase):
     def _add_reply_to(self, kwargs):
         reply_to_email = kwargs.get("reply_to_email")
         if reply_to_email:
-            self._email_data["additional_headers"].append({
-                "key": "Reply-To",
-                "value": reply_to_email,
-            })
+            self._email_data["additional_headers"].append(
+                {
+                    "key": "Reply-To",
+                    "value": reply_to_email,
+                }
+            )
 
     def _add_recipients(self, recipients):
         self._email_data["to"] = [
-            {"email": recipient["email"], "name": recipient.get("name", "")}
-            for recipient in recipients
+            {"email": recipient["email"], "name": recipient.get("name", "")} for recipient in recipients
         ]
 
     def _add_bcc_or_cc(self, recipients, key):
         if not recipients or key not in ["cc", "bcc"]:
             return
         self._email_data[key] = [
-            {"email": recipient["email"], "name": recipient.get("name", "")}
-            for recipient in recipients
+            {"email": recipient["email"], "name": recipient.get("name", "")} for recipient in recipients
         ]
 
     def _add_attachments_email(self, attachments):
@@ -322,10 +360,11 @@ class ScalewayProvider(MissiveProviderBase):
         for wbh in webhooks:
             wbh["type"] = wbh["name"].split("-")[-1]
             topic_arn = wbh.get("sns_arn")
-            wbh["url"] = self.get_subscription(sns, topic_arn).get("Endpoint")
+            subscription = next(self.get_subscriptions(sns, topic_arn), None) if topic_arn else None
+            wbh["url"] = subscription.get("Endpoint") if subscription else None
         return webhooks
 
-    def _get_webhook(self, domain_id: str, sns_arn: str):
+    def _get_webhook(self, domain_id: str | None, sns_arn: str | None):
         """Get a webhook."""
         webhooks = self.retrieve_webhooks()
         for wbh in webhooks:
@@ -333,7 +372,7 @@ class ScalewayProvider(MissiveProviderBase):
                 return wbh
         return None
 
-    def get_or_create_webhook(self, domain_id: str, sns_arn: str):
+    def get_or_create_webhook(self, domain_id: str | None, sns_arn: str | None):
         webhook = self._get_webhook(domain_id, sns_arn)
         if webhook:
             return webhook
@@ -346,27 +385,21 @@ class ScalewayProvider(MissiveProviderBase):
                 "domain_id": domain_id,
                 "name": "missive-webhook-email",
                 "sns_arn": sns_arn,
-                "event_types": self.EVENT_TYPES
+                "event_types": self.EVENT_TYPES,
             },
             timeout=30,
         )
         response.raise_for_status()
-        return response.json()        
+        return response.json()
 
     def retrieve_webhooks(self):
         """Get all webhooks."""
         url = self.ENDPOINTS["webhooks"].format(base_url=self._base_url, region=self._region)
-        response = requests.get(
-            url,
-            headers=self._get_headers(),
-            params={"project_id": self._project_id},
-            timeout=30
-        )
+        response = requests.get(url, headers=self._get_headers(), params={"project_id": self._project_id}, timeout=30)
         response.raise_for_status()
-        response = response.json()
-        response = response.get("webhooks", [])
-        response = [wbh for wbh in response if wbh.get("project_id") == self._project_id]
-        return self.merge_subscriptions_url(response)
+        webhooks = response.json().get("webhooks", [])
+        project_webhooks = [webhook for webhook in webhooks if webhook.get("project_id") == self._project_id]
+        return self.merge_subscriptions_url(project_webhooks)
 
     def retrieve_email(self, **kwargs) -> list[dict[str, Any]]:
         """Get the status of an email via Scaleway API."""
@@ -381,15 +414,22 @@ class ScalewayProvider(MissiveProviderBase):
             )
             data = resp.json()
             evt_type = data.get("type") or data.get("status", "unknown")
-            events.append({
-                "external_id": external_id,
-                "event": self.events_association.get(evt_type, evt_type),
-                "occurred_at": data.get("created_at") or data.get("email_sent_at") or data.get("email_queued_at"),
-                "reason": evt_type,
-                "raw": data,
-                "email": data.get("email_to") or recipient.get("email"),
-                "recipients": [{"email": data.get("email_to") or recipient.get("email"), "external_id": recipient.get("external_id")}],
-            })
+            events.append(
+                {
+                    "external_id": external_id,
+                    "event": self.events_association.get(evt_type, evt_type),
+                    "occurred_at": data.get("created_at") or data.get("email_sent_at") or data.get("email_queued_at"),
+                    "reason": evt_type,
+                    "raw": data,
+                    "email": data.get("email_to") or recipient.get("email"),
+                    "recipients": [
+                        {
+                            "email": data.get("email_to") or recipient.get("email"),
+                            "external_id": recipient.get("external_id"),
+                        }
+                    ],
+                }
+            )
         return events
 
     def _retrieve_webhook_email(self, webhook_id: str):
@@ -408,10 +448,7 @@ class ScalewayProvider(MissiveProviderBase):
         domains = self.get_domains()
         domain_id = domains.get("domains", [])[0].get("id")
         webhook = self.get_or_create_webhook(domain_id, topic_arn)
-        return self.get_normalize_webhook_id({
-            "id": webhook.get("id"), 
-            "sub_id": subscription.get("SubscriptionArn")
-        })
+        return self.get_normalize_webhook_id({"id": webhook.get("id"), "sub_id": subscription.get("SubscriptionArn")})
 
     def delete_webhook_email(self, webhook_data: dict[str, Any]):
         """Delete a webhook email."""
@@ -425,22 +462,24 @@ class ScalewayProvider(MissiveProviderBase):
     def _handle_webhook_email_confirm(self, payload: dict[str, Any]) -> None:
         """Confirm the SNS subscription. Required or the topic stays pending."""
         subscription_url = payload.get("SubscribeURL")
-        if not is_scaleway_sns_subscribe_url(subscription_url):
+        if not isinstance(subscription_url, str) or not is_scaleway_sns_subscribe_url(subscription_url):
             raise ValueError("SubscribeURL is not a Scaleway SNS ConfirmSubscription URL")
         requests.get(subscription_url, timeout=HTTP_TIMEOUT, allow_redirects=False)
         return None
 
-    def handle_webhook_email(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+    def handle_webhook_email(self, payload: bytes | bytearray | str) -> dict[str, Any] | None:
         """Handle a webhook email."""
-        payload = payload.decode("utf-8")
-        payload = json.loads(payload)
-        if payload.get("Type") == "SubscriptionConfirmation":
-            return self._handle_webhook_email_confirm(payload)
-        if payload.get("Type") == "Notification":
-            message = payload.get("Message")
+        if isinstance(payload, (bytes, bytearray)):
+            payload = payload.decode("utf-8")
+        data = json.loads(payload)
+        if data.get("Type") == "SubscriptionConfirmation":
+            self._handle_webhook_email_confirm(data)
+            return None
+        if data.get("Type") == "Notification":
+            message = data.get("Message")
             if isinstance(message, str):
-                payload["Message"] = json.loads(message)
-        return payload
+                data["Message"] = json.loads(message)
+        return data
 
     #########################################################
     # Topics / Events
@@ -475,12 +514,7 @@ class ScalewayProvider(MissiveProviderBase):
     def is_sns_active(self):
         """Check if SNS is active."""
         url = self.ENDPOINTS["activate_sns"].format(base_url=self._base_url, region=self._region)
-        response = requests.post(
-            url,
-            headers=self._get_headers(),
-            json={"project_id": self._project_id}, 
-            timeout=30
-        )
+        response = requests.post(url, headers=self._get_headers(), json={"project_id": self._project_id}, timeout=30)
         if response.status_code == 409:
             return self.get_sns_info()
         response.raise_for_status()
@@ -520,11 +554,7 @@ class ScalewayProvider(MissiveProviderBase):
             json={
                 "project_id": self._project_id,
                 "name": name,
-                "permissions": {
-                    "can_publish": True,
-                    "can_receive": True,
-                    "can_manage": True
-                }
+                "permissions": {"can_publish": True, "can_receive": True, "can_manage": True},
             },
             timeout=30,
         )
@@ -534,11 +564,12 @@ class ScalewayProvider(MissiveProviderBase):
         self._tmp_sns_secret_key = response.get("secret_key")
         self.log_sns_credentials(response.get("access_key"), response.get("secret_key"))
         return response
-    
+
     def sns_client(self, name: str = "missive-webhook-email"):
         """Get SNS client."""
-        import boto3
-        from botocore.config import Config
+        boto3 = importlib.import_module("boto3")
+        Config = importlib.import_module("botocore.config").Config
+
         sns_info = self.is_sns_active()
         if not hasattr(self, "_tmp_sns_access_key"):
             self._tmp_sns_access_key = self._get_config_or_env("SNS_ACCESS_KEY")
@@ -564,8 +595,8 @@ class ScalewayProvider(MissiveProviderBase):
     # Subscriptions
     #########################################################
 
-    def get_or_create_subscription(self, sns, topic_arn: str, webhook_url: str):
-        """Create a subscription."""        
+    def get_or_create_subscription(self, sns, topic_arn: str | None, webhook_url: str | None):
+        """Create a subscription."""
         subscription = self.get_subscription(sns, topic_arn, webhook_url)
         if not subscription:
             return sns.subscribe(TopicArn=topic_arn, Protocol="https", Endpoint=webhook_url)
@@ -584,7 +615,7 @@ class ScalewayProvider(MissiveProviderBase):
                 merged_webhooks.append(wbh_copy)
         return merged_webhooks
 
-    def get_subscriptions(self, sns, topic_arn: str):
+    def get_subscriptions(self, sns, topic_arn: str | None):
         paginator = sns.get_paginator("list_subscriptions_by_topic")
         for page in paginator.paginate(TopicArn=topic_arn):
             for sub in page.get("Subscriptions", []):
@@ -592,17 +623,17 @@ class ScalewayProvider(MissiveProviderBase):
                     yield sub
         return None
 
-    def get_subscription(self, sns, topic_arn: str, webhook_url: str):
+    def get_subscription(self, sns, topic_arn: str | None, webhook_url: str | None):
         """Get a subscription."""
         subs = self.get_subscriptions(sns, topic_arn)
         return next((sub for sub in subs if sub.get("Endpoint") == webhook_url), None)
 
-    def delete_subscription(self, sns, webhook, webhook_url: str):
+    def delete_subscription(self, sns, webhook, webhook_url: str | None):
         """Delete a subscription."""
         topic_arn = webhook.get("sns_arn")
         subscription = self.get_subscription(sns, topic_arn, webhook_url)
         if subscription:
-            if subscription.get("SubscriptionArn") == 'pending subscription':
+            if subscription.get("SubscriptionArn") == "pending subscription":
                 raise ValueError("Pending subscription")
             return sns.unsubscribe(SubscriptionArn=subscription.get("SubscriptionArn"))
         return None

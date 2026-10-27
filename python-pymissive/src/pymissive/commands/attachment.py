@@ -20,45 +20,73 @@ _ARG_CONFIG = {
 }
 
 
-def _attachment_command(args: list[str]) -> bool:
-    """Manage attachments via provider."""
-    parsed = parse_args_from_config(args, _ARG_CONFIG, prog="attachment")
-    if parsed.get("help"):
-        from .help import print_command_help
-        return print_command_help("attachment")
-    cmd_args = parsed.get("args") or []
-    subcommand = cmd_args[0] if cmd_args else "retrieve"
+def _normalize_option_names(args):
+    return [f"--{arg[2:].replace('-', '_')}" if arg.startswith("--") else arg for arg in args]
 
+
+def _get_provider(parsed):
     provider_name = parsed.get("provider") or parsed.get("filter") or parsed.get("backend", "")
-
     if not provider_name:
         print("Error: --provider required", file=sys.stderr)
-        return False
-
+        return None
     kwargs = {"lib_name": "pymissive", "attribute_search": {"name": provider_name}}
     if parsed.get("dir"):
         kwargs["dir_path"] = parsed["dir"]
     if parsed.get("json"):
         kwargs["json"] = parsed["json"]
-
     providers = get_providers(**kwargs)
     if not providers:
         print(f"Error: Provider '{provider_name}' not found", file=sys.stderr)
+        return None
+    return provider_name, providers[0]
+
+
+def _retrieve_attachments(parsed, provider):
+    if hasattr(provider, "retrieve_attachments"):
+        provider.call_service("retrieve_attachments")
+        return True, provider.get_service_normalize("retrieve_attachments")
+    if hasattr(provider, "get_attachments_registered_letter"):
+        external_id = parsed.get("external_id", "")
+        if not external_id:
+            print("Error: --external-id required for postal attachments", file=sys.stderr)
+            return False, None
+        return True, provider.get_attachments_registered_letter(external_id=external_id)
+    print("Error: Provider does not support attachment retrieval", file=sys.stderr)
+    return False, None
+
+
+def _delete_attachment(parsed, provider) -> bool:
+    external_id = parsed.get("external_id", "")
+    document_id = parsed.get("document_id", "")
+    if not external_id or not document_id:
+        print("Error: --external-id and --document-id required for delete", file=sys.stderr)
         return False
-    provider = providers[0]
+    if not hasattr(provider, "delete_attachment_registered_letter"):
+        print("Error: Provider does not support delete_attachment_registered_letter", file=sys.stderr)
+        return False
+    provider.delete_attachment_registered_letter(external_id=external_id, document_id=document_id)
+    print("Attachment deleted.")
+    return True
+
+
+def _attachment_command(args: list[str]) -> bool:
+    """Manage attachments via provider."""
+    parsed = parse_args_from_config(_normalize_option_names(args), _ARG_CONFIG, prog="attachment")
+    if parsed.get("help"):
+        from .help import print_command_help
+
+        return print_command_help("attachment")
+    cmd_args = parsed.get("args") or []
+    subcommand = cmd_args[0] if cmd_args else "retrieve"
+
+    provider_result = _get_provider(parsed)
+    if not provider_result:
+        return False
+    provider_name, provider = provider_result
 
     if subcommand == "retrieve":
-        if hasattr(provider, "retrieve_attachments"):
-            provider.call_service("retrieve_attachments")
-            data = provider.get_service_normalize("retrieve_attachments")
-        elif hasattr(provider, "get_attachments_registered_letter"):
-            ext_id = parsed.get("external_id", "")
-            if not ext_id:
-                print("Error: --external-id required for postal attachments", file=sys.stderr)
-                return False
-            data = provider.get_attachments_registered_letter(external_id=ext_id)
-        else:
-            print("Error: Provider does not support attachment retrieval", file=sys.stderr)
+        success, data = _retrieve_attachments(parsed, provider)
+        if not success:
             return False
         print_separator()
         print_header(f"{provider_name} - attachments")
@@ -68,17 +96,7 @@ def _attachment_command(args: list[str]) -> bool:
         print("Error: add attachment not yet implemented (requires --file)", file=sys.stderr)
         return False
     elif subcommand == "delete":
-        external_id = parsed.get("external_id", "")
-        document_id = parsed.get("document_id", "")
-        if not external_id or not document_id:
-            print("Error: --external-id and --document-id required for delete", file=sys.stderr)
-            return False
-        if hasattr(provider, "delete_attachment_registered_letter"):
-            provider.delete_attachment_registered_letter(external_id=external_id, document_id=document_id)
-            print("Attachment deleted.")
-        else:
-            print("Error: Provider does not support delete_attachment_registered_letter", file=sys.stderr)
-            return False
+        return _delete_attachment(parsed, provider)
     else:
         print(f"Error: Unknown subcommand '{subcommand}'. Use: retrieve, add, delete", file=sys.stderr)
         return False

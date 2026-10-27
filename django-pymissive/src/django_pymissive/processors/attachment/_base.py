@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from django.conf import settings
-from django.utils.module_loading import import_string
+from ...utils import import_allowed_string
 
 
 # ---------------------------------------------------------------------------
@@ -22,6 +22,7 @@ DEFAULT_ATTACHMENT_PROCESSORS: list = []
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
+
 
 def get_default_attachment_processors() -> list:
     """Return the active default attachment-processor chain.
@@ -39,6 +40,7 @@ def get_default_attachment_processors() -> list:
 # ---------------------------------------------------------------------------
 # Base class
 # ---------------------------------------------------------------------------
+
 
 class MissiveAttachmentProcessor:
     """Base class for class-based attachment processors.
@@ -64,6 +66,7 @@ class MissiveAttachmentProcessor:
 # Internal resolution / invocation
 # ---------------------------------------------------------------------------
 
+
 def _resolve_processor(processor: Any) -> tuple[Any, dict]:
     """Resolve an entry to ``(callable_or_instance, extra_kwargs)``."""
     extra_kwargs: dict = {}
@@ -76,7 +79,7 @@ def _resolve_processor(processor: Any) -> tuple[Any, dict]:
         processor, extra_kwargs = processor[0], dict(processor[1] or {})
 
     if isinstance(processor, str):
-        processor = import_string(processor)
+        processor = import_allowed_string(processor)
 
     if isinstance(processor, type):
         processor = processor()
@@ -112,9 +115,7 @@ def _call_processor(
             context=context,
             **kwargs,
         )
-    raise TypeError(
-        f"Attachment processor {processor!r} is not callable and has no .process() method"
-    )
+    raise TypeError(f"Attachment processor {processor!r} is not callable and has no .process() method")
 
 
 def apply_attachment_processors(
@@ -153,27 +154,22 @@ def apply_attachment_processors(
     return current
 
 
+def _attachment_processor_owners(attachment):
+    missive = attachment.missive if getattr(attachment, "missive_id", None) else None
+    campaign = attachment.campaign if getattr(attachment, "campaign_id", None) else None
+    if missive is not None:
+        campaign = campaign or (missive.campaign if getattr(missive, "campaign_id", None) else None)
+        return (missive, campaign)
+    return (campaign,)
+
+
 def resolve_attachment_processors_for(attachment) -> list:
     """Resolve the processor chain that applies to ``attachment``.
 
     "Most specific wins": missive → campaign → defaults.
     """
-    missive = attachment.missive if getattr(attachment, "missive_id", None) else None
-    campaign = attachment.campaign if getattr(attachment, "campaign_id", None) else None
-
-    if missive is not None:
-        if missive.attachment_processors:
-            return list(missive.attachment_processors)
-        camp = campaign or (
-            missive.campaign if getattr(missive, "campaign_id", None) else None
-        )
-        if camp is not None and camp.attachment_processors:
-            return list(camp.attachment_processors)
-        return get_default_attachment_processors()
-
-    if campaign is not None:
-        if campaign.attachment_processors:
-            return list(campaign.attachment_processors)
-        return get_default_attachment_processors()
-
+    for owner in _attachment_processor_owners(attachment):
+        processors = getattr(owner, "attachment_processors", None)
+        if processors:
+            return list(processors)
     return get_default_attachment_processors()

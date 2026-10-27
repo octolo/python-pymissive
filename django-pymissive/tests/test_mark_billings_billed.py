@@ -68,9 +68,7 @@ def test_mark_billings_billed_updates_in_range_with_amount():
 
 
 def test_admin_mark_billed_get_renders_form():
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missivebilling_mark_billed")
@@ -81,9 +79,7 @@ def test_admin_mark_billed_get_renders_form():
 
 def test_admin_mark_billed_post_updates_and_redirects():
     billing = _billing(created_on=(2026, 8, 10), is_billed=False)
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missivebilling_mark_billed")

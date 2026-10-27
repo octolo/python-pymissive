@@ -34,9 +34,7 @@ def _request(**params):
 
 def _superuser_request(method="get", **params):
     request = getattr(RequestFactory(), method)("/", params)
-    request.user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    request.user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     return request
 
 
@@ -51,9 +49,7 @@ def test_all_admin_search_fields_are_queryable():
         if not model_admin.search_fields:
             continue
         try:
-            queryset, _duplicates = model_admin.get_search_results(
-                _request(q="x"), model._default_manager.all(), "x"
-            )
+            queryset, _duplicates = model_admin.get_search_results(_request(q="x"), model._default_manager.all(), "x")
             list(queryset[:1])
         except Exception as exc:
             failures.append(f"{model._meta.label}: {type(exc).__name__}: {exc}")
@@ -68,14 +64,10 @@ def test_related_object_link_escapes_object_str():
         content_type=ContentType.objects.get_for_model(user),
         object_id=str(user.pk),
     )
-    MissiveRelatedObject.objects.filter(pk=related.pk).update(
-        object_str='<img src=x onerror=alert(1)>'
-    )
+    MissiveRelatedObject.objects.filter(pk=related.pk).update(object_str="<img src=x onerror=alert(1)>")
     related.refresh_from_db()
 
-    rendered = MissiveRelatedObjectAdmin(
-        MissiveRelatedObject, admin.site
-    ).object_url_link_display(related)
+    rendered = MissiveRelatedObjectAdmin(MissiveRelatedObject, admin.site).object_url_link_display(related)
 
     assert "<img" not in rendered
     assert "&lt;img" in rendered
@@ -86,8 +78,6 @@ def test_download_proof_missing_params_returns_400():
     missive_admin = admin.site._registry[Missive]
     missive = _missive()
 
-    response = missive_admin.download_proof(
-        _superuser_request(method="post"), str(missive.pk)
-    )
+    response = missive_admin.download_proof(_superuser_request(method="post"), str(missive.pk))
 
     assert response.status_code == 400

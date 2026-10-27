@@ -32,9 +32,7 @@ def test_resend_keeps_history_and_external_id_if_post_send_fails():
         patch.object(Missive, "can_send", return_value=True),
         patch.object(Missive, "get_serialized_data", return_value={}),
         patch.object(Missive, "set_locally_ifnull"),
-        patch.object(
-            Missive, "call_provider_service", return_value={"external_id": "new-1"}
-        ),
+        patch.object(Missive, "call_provider_service", return_value={"external_id": "new-1"}),
         patch(
             "django_pymissive.models.missive.missive_post_send.send",
             side_effect=RuntimeError("after send"),
@@ -47,6 +45,4 @@ def test_resend_keeps_history_and_external_id_if_post_send_fails():
     assert original.thread_type == MissiveThreadType.HISTORY
     clone = Missive.objects.exclude(pk=original.pk).get()
     assert clone.external_id == "new-1"
-    assert MissiveEvent.objects.filter(
-        missive=clone, event=MissiveEventType.SUBMITTED
-    ).exists()
+    assert MissiveEvent.objects.filter(missive=clone, event=MissiveEventType.SUBMITTED).exists()

@@ -62,9 +62,7 @@ class MissiveWebhook(VirtualModel):
         blank=True,
         default=get_default_domain,
         verbose_name=_("Domain"),
-        help_text=_(
-            "Base domain (e.g. example.com). Webhook path is built from provider and type."
-        ),
+        help_text=_("Base domain (e.g. example.com). Webhook path is built from provider and type."),
     )
 
     objects = MissiveWebhookManager()
@@ -83,6 +81,7 @@ class MissiveWebhook(VirtualModel):
         if getattr(self.provider, "_provider", None):
             return self.provider
         from ..models.provider import MissiveProviderModel
+
         provider = self.provider_name
         return MissiveProviderModel.objects.get(name=provider)
 
@@ -99,11 +98,11 @@ class MissiveWebhook(VirtualModel):
         domain = getattr(self, "domain", None)
         if domain:
             base = f"{scheme}://{(domain or '').strip().lstrip('/')}"
-            token = ""
+            token = None
             try:
                 token = webhook_url_token_for(self.get_provider())
             except Exception:
-                token = ""
+                token = None
             return build_webhook_url(base, self.provider_name, self.type, token=token)
         return ""
 
@@ -115,17 +114,13 @@ class MissiveWebhook(VirtualModel):
         service = provider_service_name("create_webhook", self.type)
         provider = self.get_provider()
         if hasattr(provider._provider, service):
-            return provider._provider.call_service(
-                service, webhook_data=self.get_webhook_data()
-            )
+            return provider._provider.call_service(service, webhook_data=self.get_webhook_data())
 
     def update_webhook(self):
         service = provider_service_name("update_webhook", self.type)
         provider = self.get_provider()
         if hasattr(provider._provider, service):
-            return provider._provider.call_service(
-                service, webhook_data=self.get_webhook_data()
-            )
+            return provider._provider.call_service(service, webhook_data=self.get_webhook_data())
 
     def save(self, *args, **kwargs):
         """Persist on the provider. ``VirtualModel.save`` raises — do not call it."""
@@ -158,16 +153,14 @@ class MissiveWebhook(VirtualModel):
         service = provider_service_name("delete_webhook", self.type)
         provider = self.get_provider()
         if hasattr(provider._provider, service):
-            provider._provider.call_service(
-                service, webhook_data=self.get_webhook_data()
-            )
+            provider._provider.call_service(service, webhook_data=self.get_webhook_data())
         post_delete.send(sender=type(self), instance=self, using=using)
         return 1, {self._meta.label: 1}
 
 
 for field, cfg in WEBHOOK_FIELDS.items():
     if field not in ("webhook_id", "scheme", "domain"):
-        field_cfg = {
+        field_cfg: dict[str, object] = {
             "verbose_name": cfg["label"],
             "help_text": cfg["description"],
         }

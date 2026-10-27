@@ -8,9 +8,21 @@
     <link rel="stylesheet" href="{% static 'django_pymissive/css/scheduler_progress.css' %}">
 </head>
 <body>
+    {% trans "Updated" as label_updated %}
+    {% trans "error(s)" as label_errors %}
+    {% trans "err" as label_err %}
+    {% trans "Cancelled" as label_cancelled %}
+    {% trans "No missives attached to this run yet." as label_empty %}
+    {% trans "Live updates stopped. Reload the page." as label_stopped %}
     <main class="scheduler-page" id="scheduler-root"
           data-json-url="{{ json_url }}"
-          data-poll-ms="2000">
+          data-poll-ms="2000"
+          data-label-updated="{{ label_updated }}"
+          data-label-errors="{{ label_errors }}"
+          data-label-err="{{ label_err }}"
+          data-label-cancelled="{{ label_cancelled }}"
+          data-label-empty="{{ label_empty }}"
+          data-label-stopped="{{ label_stopped }}">
         <header class="scheduler-header">
             <p class="scheduler-kicker">{% trans "Campaign send" %}</p>
             <h1 class="scheduler-title">{{ progress.campaign_subject }}</h1>
@@ -37,9 +49,18 @@
                      id="scheduler-overall-bar"
                      style="width: {{ progress.progress }}%"></div>
             </div>
+            <p class="scheduler-speed" id="scheduler-average-speed"
+               {% if progress.average_send_speed is None %}hidden{% endif %}>
+                {% trans "Average speed per send" %}:
+                <span id="scheduler-average-speed-value">{{ progress.average_send_speed_display }}</span>
+            </p>
             <p class="scheduler-errors" id="scheduler-overall-errors"
                {% if not progress.total_error_count %}hidden{% endif %}>
                 {{ progress.total_error_count }} {% trans "error(s)" %}
+            </p>
+            <p class="scheduler-errors" id="scheduler-cancel"
+               {% if progress.status != "cancelled" %}hidden{% endif %}>
+                {% trans "Cancelled" %}{% if progress.cancel_reason %}: {{ progress.cancel_reason }}{% endif %}
             </p>
         </section>
 

@@ -21,9 +21,7 @@ def _url():
 
 
 def _admin_client():
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     return client
@@ -46,9 +44,7 @@ def test_form_accepts_a_provider():
 
 
 def test_form_accepts_an_optional_salt():
-    form = GenerateWebhookSecretForm(
-        data={"provider": "brevo", "missive_type": "email", "salt": "rotate-1"}
-    )
+    form = GenerateWebhookSecretForm(data={"provider": "brevo", "missive_type": "email", "salt": "rotate-1"})
     assert form.is_valid() is True
     assert form.cleaned_data["salt"] == "rotate-1"
 
@@ -68,9 +64,7 @@ def test_admin_get_renders_the_form():
 
 
 def test_admin_post_shows_the_secret_and_both_webhook_urls():
-    response = _admin_client().post(
-        _url(), {"provider": "brevo", "missive_type": "email"}
-    )
+    response = _admin_client().post(_url(), {"provider": "brevo", "missive_type": "email"})
     assert response.status_code == 200
     expected = generate_webhook_secret(
         "brevo",
@@ -89,9 +83,7 @@ def test_admin_post_shows_the_secret_and_both_webhook_urls():
 
 
 def test_admin_post_scaleway_url_includes_the_token():
-    response = _admin_client().post(
-        _url(), {"provider": "scaleway", "missive_type": "email"}
-    )
+    response = _admin_client().post(_url(), {"provider": "scaleway", "missive_type": "email"})
     assert response.status_code == 200
     token = generate_webhook_secret(
         "scaleway",

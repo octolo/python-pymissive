@@ -37,9 +37,7 @@ def weasyprint_renderer(
     underlying generator. Per-entry config kwargs (``**kwargs``) take
     precedence and are forwarded as well.
     """
-    pdf_generator_path = getattr(
-        settings, "MISSIVEPDF_GENERATOR", "django_pymissive.pdf.body_to_pdf"
-    )
+    pdf_generator_path = getattr(settings, "MISSIVEPDF_GENERATOR", "django_pymissive.pdf.body_to_pdf")
     pdf_generator = import_string(pdf_generator_path)
     runtime_kwargs = dict(context or {})
     runtime_kwargs.update(kwargs)

@@ -41,9 +41,7 @@ def test_serialized_recipient_includes_tracking_number():
 
 def test_update_recipients_persists_tracking_number():
     missive = _email_missive()
-    rec = MissiveRecipientEmail.objects.create(
-        missive=missive, name="Alice", email="alice@example.com"
-    )
+    rec = MissiveRecipientEmail.objects.create(missive=missive, name="Alice", email="alice@example.com")
     missive._update_recipients(
         [
             {
@@ -66,9 +64,7 @@ def test_update_recipients_does_not_wipe_tracking_number_when_absent():
         email="alice@example.com",
         tracking_number="2CKEEP",
     )
-    missive._update_recipients(
-        [{"internal_id": str(rec.id), "external_id": "mv-2"}]
-    )
+    missive._update_recipients([{"internal_id": str(rec.id), "external_id": "mv-2"}])
     rec.refresh_from_db()
     assert rec.tracking_number == "2CKEEP"
 
@@ -97,9 +93,7 @@ def test_duplicate_recipients_clears_tracking_number():
 
 def test_retrieve_missive_updates_tracking_number():
     missive = _email_missive(external_id="ext-1")
-    rec = MissiveRecipientEmail.objects.create(
-        missive=missive, name="Alice", email="alice@example.com"
-    )
+    rec = MissiveRecipientEmail.objects.create(missive=missive, name="Alice", email="alice@example.com")
     with patch.object(
         Missive,
         "call_provider_service",
@@ -132,9 +126,11 @@ def test_get_or_retrieve_creates_recipient_with_tracking_number():
         ],
         "events": [],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events"),
+    ):
         missive, created = retrieve_from_provider(
             provider="brevo",
             missive_type=MissiveType.EMAIL,
@@ -159,20 +155,21 @@ def test_can_tracking_numbers_requires_service_and_external_id():
 
 def test_retrieve_tracking_numbers_persists_provider_response():
     missive = _email_missive(external_id="ext-1")
-    rec = MissiveRecipientEmail.objects.create(
-        missive=missive, name="Alice", email="alice@example.com"
-    )
-    with patch.object(Missive, "can_tracking_numbers", return_value=True), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value=[
-            {
-                "internal_id": str(rec.id),
-                "external_id": "mv-1",
-                "tracking_number": "2CABC",
-            }
-        ],
-    ) as call_provider:
+    rec = MissiveRecipientEmail.objects.create(missive=missive, name="Alice", email="alice@example.com")
+    with (
+        patch.object(Missive, "can_tracking_numbers", return_value=True),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value=[
+                {
+                    "internal_id": str(rec.id),
+                    "external_id": "mv-1",
+                    "tracking_number": "2CABC",
+                }
+            ],
+        ) as call_provider,
+    ):
         result = missive.retrieve_tracking_numbers()
     call_provider.assert_called_once()
     assert call_provider.call_args.args[0] == "tracking_number"
@@ -183,9 +180,10 @@ def test_retrieve_tracking_numbers_persists_provider_response():
 
 def test_retrieve_tracking_numbers_skips_when_unsupported():
     missive = _email_missive(external_id="ext-1")
-    with patch.object(Missive, "can_tracking_numbers", return_value=False), patch.object(
-        Missive, "call_provider_service"
-    ) as call_provider:
+    with (
+        patch.object(Missive, "can_tracking_numbers", return_value=False),
+        patch.object(Missive, "call_provider_service") as call_provider,
+    ):
         assert missive.retrieve_tracking_numbers() == []
     call_provider.assert_not_called()
 
@@ -214,9 +212,7 @@ def test_tracking_url_substitutes_number_from_geoaddress_country():
             "country_code": "FR",
         },
     )
-    assert rec.tracking_url == (
-        "https://www.laposte.fr/outils/suivre-vos-envois?code=2C123456789FR"
-    )
+    assert rec.tracking_url == ("https://www.laposte.fr/outils/suivre-vos-envois?code=2C123456789FR")
 
 
 def test_tracking_url_uses_italy_when_country_code_is_it():
@@ -229,9 +225,7 @@ def test_tracking_url_uses_italy_when_country_code_is_it():
         tracking_number="RW799210633FR",
         address={"city": "Roma", "country_code": "it"},
     )
-    assert rec.tracking_url == (
-        "https://www.poste.it/cerca/index.html#/risultati-spedizioni/RW799210633FR"
-    )
+    assert rec.tracking_url == ("https://www.poste.it/cerca/index.html#/risultati-spedizioni/RW799210633FR")
 
 
 def test_tracking_url_is_none_without_tracking_number():
@@ -274,9 +268,7 @@ def test_tracking_url_is_none_for_unknown_country():
 def test_get_tracking_url_replaces_placeholder_when_number_present():
     from pymissive.postal_tracking import get_tracking_url
 
-    assert get_tracking_url("FR", "2CABC") == (
-        "https://www.laposte.fr/outils/suivre-vos-envois?code=2CABC"
-    )
+    assert get_tracking_url("FR", "2CABC") == ("https://www.laposte.fr/outils/suivre-vos-envois?code=2CABC")
     assert get_tracking_url("FR") is None
     assert get_tracking_url("BG") == "https://www.bgpost.bg/en/500"
     assert get_tracking_url(None, "2CABC") is None

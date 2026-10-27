@@ -48,9 +48,7 @@ def test_raise_for_response_keeps_body_on_exception_not_in_message():
     response.status_code = 400
     response.reason = "Bad Request"
     response.text = json.dumps(payload)
-    response.raise_for_status.side_effect = requests.HTTPError(
-        "400 Client Error", response=response
-    )
+    response.raise_for_status.side_effect = requests.HTTPError("400 Client Error", response=response)
 
     provider = MailevaProvider.__new__(MailevaProvider)
     with pytest.raises(requests.HTTPError) as excinfo:

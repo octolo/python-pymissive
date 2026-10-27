@@ -1,3 +1,5 @@
+from typing import Protocol, cast
+
 from django.db import models
 from django.db.models.expressions import Subquery, OuterRef
 from django.db.models import F, Max, Min, Q, Sum, Prefetch
@@ -13,6 +15,14 @@ from ..models.choices import (
 
 # Attribute name used by Missive.first_recipient to read prefetched data.
 FIRST_RECIPIENTS_CACHE_ATTR = "_first_recipients_cache"
+
+
+class _CountAnnotationManager(Protocol):
+    def _count_annotations(self) -> dict: ...
+
+    def _derived_count_annotations(self) -> dict: ...
+
+    def _thread_count_annotations(self) -> dict: ...
 
 
 def count_annotation_names() -> frozenset:
@@ -41,9 +51,7 @@ def count_annotation_names() -> frozenset:
         "count_history",
         "count_message",
     }
-    names.update(
-        f"count_recipient_{status.value.lower()}" for status in MissiveStatus
-    )
+    names.update(f"count_recipient_{status.value.lower()}" for status in MissiveStatus)
     return frozenset(names)
 
 
@@ -61,7 +69,7 @@ class MissiveQuerySet(models.QuerySet):
         :meth:`~django_pymissive.models.missive.Missive._annotation`), at one
         query per instance; annotate here as soon as a list displays them.
         """
-        manager = self.model._default_manager
+        manager = cast(_CountAnnotationManager, self.model._default_manager)
         qs = self.annotate(**manager._count_annotations())
         # Second annotate: is_billable / is_billed read totals declared above.
         qs = qs.annotate(**manager._derived_count_annotations())
@@ -89,7 +97,7 @@ class MissiveQuerySet(models.QuerySet):
         )
 
 
-class BaseMissiveManager(models.Manager.from_queryset(MissiveQuerySet)):
+class BaseMissiveManager(models.Manager.from_queryset(MissiveQuerySet)):  # type: ignore[misc]
     """Manager for the Missive model.
 
     ``get_queryset()`` stays a plain lookup. The counters live in
@@ -108,9 +116,7 @@ class BaseMissiveManager(models.Manager.from_queryset(MissiveQuerySet)):
         return Prefetch(
             "to_missiverecipient",
             queryset=(
-                MissiveRecipient.objects
-                .filter(recipient_type=MissiveRecipientType.RECIPIENT)
-                .order_by("name", "id")
+                MissiveRecipient.objects.filter(recipient_type=MissiveRecipientType.RECIPIENT).order_by("name", "id")
             ),
             to_attr=FIRST_RECIPIENTS_CACHE_ATTR,
         )
@@ -163,8 +169,7 @@ class BaseMissiveManager(models.Manager.from_queryset(MissiveQuerySet)):
     def is_billed_expr(self):
         return models.Case(
             models.When(
-                Q(total_billing_amount__gt=0)
-                & Q(total_billing_amount=F("total_billed_amount")),
+                Q(total_billing_amount__gt=0) & Q(total_billing_amount=F("total_billed_amount")),
                 then=True,
             ),
             default=False,
@@ -173,6 +178,7 @@ class BaseMissiveManager(models.Manager.from_queryset(MissiveQuerySet)):
 
     def total_billing_expr(self, field: str, is_billed: bool = False):
         from ..models.billing import MissiveBilling
+
         q_billed = Q(is_billed=True, missive_id=OuterRef("id")) if is_billed else Q(missive_id=OuterRef("id"))
         return Subquery(
             MissiveBilling.objects.filter(q_billed)
@@ -184,9 +190,7 @@ class BaseMissiveManager(models.Manager.from_queryset(MissiveQuerySet)):
         )
 
     def count_missive_thread(self, thread_type: MissiveThreadType):
-        qs = self.model._base_manager.get_queryset().filter(
-            thread_type=thread_type, thread_id=OuterRef("thread_id")
-        )
+        qs = self.model._base_manager.get_queryset().filter(thread_type=thread_type, thread_id=OuterRef("thread_id"))
         return Subquery(
             qs.values("thread_id").annotate(count=models.Count("id")).values("count"),
             output_field=models.IntegerField(),
@@ -260,19 +264,19 @@ class MissiveManager(BaseMissiveManager):
         )
 
 
-class MissiveHistoryManager(BaseMissiveManager):
+class MissiveHistoryManager(MissiveManager):
     """Manager for the MissiveHistory model."""
 
     def get_queryset(self):
-        return super().get_queryset().filter(thread_type=MissiveThreadType.HISTORY)
+        return BaseMissiveManager.get_queryset(self).filter(thread_type=MissiveThreadType.HISTORY)
 
 
-class MissiveMessageManager(BaseMissiveManager):
+class MissiveMessageManager(MissiveManager):
     """Manager for the MissiveMessage model."""
 
     def get_queryset(self):
         return (
-            super().get_queryset()
+            BaseMissiveManager.get_queryset(self)
             .select_related("message_by")
             .filter(thread_type=MissiveThreadType.MESSAGE)
         )

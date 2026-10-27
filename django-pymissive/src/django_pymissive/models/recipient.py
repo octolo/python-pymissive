@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -97,10 +99,7 @@ class MissiveRecipient(CommentTimestampedModel):
         null=True,
         db_index=True,
         verbose_name=_("Substitute ID"),
-        help_text=_(
-            "Provider custom_id from another internal reference. "
-            "When empty, the recipient pk is used."
-        ),
+        help_text=_("Provider custom_id from another internal reference. When empty, the recipient pk is used."),
     )
 
     tracking_number = models.CharField(
@@ -109,8 +108,7 @@ class MissiveRecipient(CommentTimestampedModel):
         null=True,
         verbose_name=_("Tracking number"),
         help_text=_(
-            "Carrier tracking reference for public tracking sites "
-            "(e.g. La Poste). Distinct from provider external_id."
+            "Carrier tracking reference for public tracking sites (e.g. La Poste). Distinct from provider external_id."
         ),
     )
 
@@ -194,18 +192,17 @@ class MissiveRecipient(CommentTimestampedModel):
     def set_status(self):
         from ..models.event import MissiveEvent
 
-        success_count, processing_count, failed_count, cancelled_count = (
-            MissiveEvent.objects.get_event_counts(recipient=self)
+        success_count, processing_count, failed_count, cancelled_count = MissiveEvent.objects.get_event_counts(
+            recipient=self
         )
-        status = status_from_event_counts(
-            success_count, processing_count, failed_count, cancelled_count
-        )
+        status = status_from_event_counts(success_count, processing_count, failed_count, cancelled_count)
         if status != self.status:
             self.status = status
             self.save(update_fields=["status"])
 
+
 class MissiveRecipientEmail(MissiveRecipient):
-    objects = MissiveRecipientEmailManager()
+    objects: ClassVar[MissiveRecipientEmailManager] = MissiveRecipientEmailManager()
 
     class Meta:
         proxy = True
@@ -219,7 +216,7 @@ class MissiveRecipientEmail(MissiveRecipient):
 
 
 class MissiveRecipientPhone(MissiveRecipient):
-    objects = MissiveRecipientPhoneManager()
+    objects: ClassVar[MissiveRecipientPhoneManager] = MissiveRecipientPhoneManager()
 
     class Meta:
         proxy = True
@@ -233,7 +230,7 @@ class MissiveRecipientPhone(MissiveRecipient):
 
 
 class MissiveRecipientAddress(MissiveRecipient):
-    objects = MissiveRecipientAddressManager()
+    objects: ClassVar[MissiveRecipientAddressManager] = MissiveRecipientAddressManager()
 
     class Meta:
         proxy = True
@@ -247,7 +244,7 @@ class MissiveRecipientAddress(MissiveRecipient):
 
 
 class MissiveRecipientApplication(MissiveRecipient):
-    objects = MissiveRecipientApplicationManager()
+    objects: ClassVar[MissiveRecipientApplicationManager] = MissiveRecipientApplicationManager()
 
     class Meta:
         proxy = True

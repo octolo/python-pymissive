@@ -62,13 +62,9 @@ def test_sending_level_event_fans_out_to_all_recipients():
     _process_event(_event("accepted"), missive)
 
     for recipient in recipients:
-        assert MissiveEvent.objects.filter(
-            missive=missive, recipient=recipient, event="accepted"
-        ).exists()
+        assert MissiveEvent.objects.filter(missive=missive, recipient=recipient, event="accepted").exists()
     # No recipient-less duplicate is created when we fan out.
-    assert not MissiveEvent.objects.filter(
-        missive=missive, recipient__isnull=True
-    ).exists()
+    assert not MissiveEvent.objects.filter(missive=missive, recipient__isnull=True).exists()
 
     missive.refresh_from_db()
     assert missive.status == MissiveStatus.PROCESSING
@@ -99,12 +95,8 @@ def test_non_lifecycle_recipientless_event_is_not_fanned_out():
     _process_event(_event("archived"), missive)
 
     # Stored once, recipient-less, so it does not drive recipient status.
-    assert MissiveEvent.objects.filter(
-        missive=missive, recipient__isnull=True, event="archived"
-    ).count() == 1
-    assert not MissiveEvent.objects.filter(
-        missive=missive, recipient__isnull=False
-    ).exists()
+    assert MissiveEvent.objects.filter(missive=missive, recipient__isnull=True, event="archived").count() == 1
+    assert not MissiveEvent.objects.filter(missive=missive, recipient__isnull=False).exists()
 
     missive.refresh_from_db()
     assert missive.status == MissiveStatus.DRAFT
@@ -124,13 +116,9 @@ def test_recipient_scoped_event_attaches_directly():
         missive,
     )
 
-    assert MissiveEvent.objects.filter(
-        missive=missive, recipient=target, event="delivered"
-    ).exists()
+    assert MissiveEvent.objects.filter(missive=missive, recipient=target, event="delivered").exists()
     # Not propagated to the other recipient.
-    assert not MissiveEvent.objects.filter(
-        missive=missive, recipient=recipients[1]
-    ).exists()
+    assert not MissiveEvent.objects.filter(missive=missive, recipient=recipients[1]).exists()
 
 
 def test_missing_occurred_at_does_not_duplicate_on_retry():
@@ -149,31 +137,17 @@ def test_recipientless_upsert_does_not_match_fanned_out_rows():
 
     _upsert_event(event, missive, None, _get_occurred_at(event["occurred_at"]))
 
-    assert (
-        MissiveEvent.objects.filter(
-            missive=missive, event="accepted", recipient__isnull=True
-        ).count()
-        == 1
-    )
-    assert (
-        MissiveEvent.objects.filter(
-            missive=missive, event="accepted", recipient__in=recipients
-        ).count()
-        == 2
-    )
+    assert MissiveEvent.objects.filter(missive=missive, event="accepted", recipient__isnull=True).count() == 1
+    assert MissiveEvent.objects.filter(missive=missive, event="accepted", recipient__in=recipients).count() == 2
 
 
 def test_identical_recipientless_event_is_unique():
     missive, _recipients = _missive_with_recipients(0)
     occurred = _get_occurred_at("2026-06-12T09:30:16Z")
-    MissiveEvent.objects.create(
-        missive=missive, event="accepted", occurred_at=occurred, reason="first"
-    )
+    MissiveEvent.objects.create(missive=missive, event="accepted", occurred_at=occurred, reason="first")
     with pytest.raises(IntegrityError):
         with transaction.atomic():
-            MissiveEvent.objects.create(
-                missive=missive, event="accepted", occurred_at=occurred, reason="second"
-            )
+            MissiveEvent.objects.create(missive=missive, event="accepted", occurred_at=occurred, reason="second")
 
 
 def test_identical_per_recipient_event_is_unique():
@@ -198,9 +172,7 @@ def test_identical_per_recipient_event_is_unique():
 def test_upsert_recovers_from_integrity_error(monkeypatch):
     missive, _recipients = _missive_with_recipients(0)
     occurred = _get_occurred_at("2026-06-12T09:30:16Z")
-    MissiveEvent.objects.create(
-        missive=missive, event="accepted", occurred_at=occurred, reason="first"
-    )
+    MissiveEvent.objects.create(missive=missive, event="accepted", occurred_at=occurred, reason="first")
 
     def boom(*args, **kwargs):
         raise IntegrityError("duplicate")
@@ -249,8 +221,6 @@ def test_submitted_sending_level_event_fans_out_to_all_recipients():
     _process_event(_event("submitted"), missive)
 
     for recipient in recipients:
-        assert MissiveEvent.objects.filter(
-            missive=missive, recipient=recipient, event="submitted"
-        ).exists()
+        assert MissiveEvent.objects.filter(missive=missive, recipient=recipient, event="submitted").exists()
     missive.refresh_from_db()
     assert missive.status == MissiveStatus.PROCESSING

@@ -23,7 +23,6 @@ class DiscordProvider(MissiveProviderBase):
         self._bot_token = self._get_config_or_env("DISCORD_BOT_TOKEN")
         self._default_channel_id = self._get_config_or_env("DISCORD_CHANNEL_ID")
 
-
     def _resolve_channel_id(self, **kwargs: Any) -> str:
         """Resolve channel id from kwargs recipients or provider config."""
         if kwargs.get("channel_id"):
@@ -41,7 +40,7 @@ class DiscordProvider(MissiveProviderBase):
 
         raise ValueError("Discord channel_id is required (kwargs, recipients, or DISCORD_CHANNEL_ID)")
 
-    def send_branded(self, **kwargs: Any) -> dict[str, Any]:
+    def send_branded(self, brand_name: str | None = None, **kwargs: Any) -> dict[str, Any]:
         """Send a branded message to a Discord channel."""
         channel_id = self._resolve_channel_id(**kwargs)
         content = kwargs.get("body_text") or kwargs.get("body_rich") or kwargs.get("subject") or ""

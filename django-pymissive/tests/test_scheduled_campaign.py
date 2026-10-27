@@ -20,11 +20,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
+from django.test import override_settings
 from django.utils import timezone
 
 from django_pymissive.managers.scheduler import count_annotations
 from django_pymissive.models.campaign import MissiveCampaign
-from django_pymissive.models.scheduler import MissiveScheduledCampaign
+from django_pymissive.models.scheduler import (
+    MissiveScheduledCampaign,
+    format_average_send_speed,
+)
 from django_pymissive.models.choices import MissiveEventType, MissiveStatus, MissiveThreadType
 from django_pymissive.models.event import MissiveEvent
 from django_pymissive.models.missive import Missive
@@ -36,6 +40,7 @@ pytestmark = pytest.mark.django_db
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _campaign(**kw) -> MissiveCampaign:
     return MissiveCampaign.objects.create(subject="Test campaign", **kw)
@@ -82,6 +87,52 @@ def test_can_send_false_when_already_started():
     MissiveScheduledCampaign.objects.filter(pk=sched.pk).update(send_date=timezone.now())
     sched.refresh_from_db()
     assert sched.can_send is False
+
+
+def test_can_send_false_when_cancelled():
+    now = timezone.now()
+    sched = _scheduled(_campaign(), send_date=now, cancelled_at=now, cancel_reason="stop")
+    assert sched.can_send is False
+    assert sched.run_status == "cancelled"
+
+
+def test_a_run_that_has_not_started_cannot_be_cancelled():
+    with pytest.raises(ValidationError):
+        _scheduled(_campaign(), cancelled_at=timezone.now())
+    sched = _scheduled(_campaign())
+    sched.cancelled_at = timezone.now()
+    with pytest.raises(ValidationError):
+        sched.save()
+
+
+def test_a_run_that_has_ended_cannot_be_cancelled():
+    now = timezone.now()
+    sched = _scheduled(_campaign(), send_date=now, ended_at=now)
+    sched.cancelled_at = now
+    with pytest.raises(ValidationError):
+        sched.clean()
+
+
+def test_a_running_run_can_be_cancelled():
+    sched = _scheduled(_campaign(), send_date=timezone.now())
+    sched.cancelled_at = timezone.now()
+    sched.clean()
+    sched.save()
+    sched.ended_at = timezone.now()
+    sched.clean()
+
+
+def test_cancel_only_stops_a_run_in_progress():
+    now = timezone.now()
+    assert _scheduled(_campaign()).cancel("x") is False
+    assert _scheduled(_campaign(), send_date=now, ended_at=now).cancel("x") is False
+
+    running = _scheduled(_campaign(), send_date=now)
+    assert running.cancel("operator") is True
+    assert running.cancel("again") is False
+    running.refresh_from_db()
+    assert running.cancelled_at is not None
+    assert running.cancel_reason == "operator"
 
 
 def test_can_send_false_when_already_ended():
@@ -279,7 +330,6 @@ def test_run_with_tracking_idempotent_on_double_call():
     c = _campaign()
     sched = _scheduled(c)
     call_count = []
-    original = MissiveScheduledCampaign.run_campaign
 
     def _counting_run(self):
         call_count.append(1)
@@ -340,10 +390,8 @@ def test_campaign_snapshot_json_safe():
     assert isinstance(snap["sender_address"], dict)
 
 
-def test_run_with_tracking_records_error_and_clears_processing():
+def test_run_with_tracking_records_error_and_closes_scheduler():
     c = _campaign()
-    c.metadata = {"processing": True}
-    c.save(update_fields=["metadata"])
     sched = _scheduled(c)
 
     def _boom():
@@ -357,8 +405,7 @@ def test_run_with_tracking_records_error_and_clears_processing():
     assert sched.ended_at is not None
     assert sched.campaign_snapshot.get("subject") == "Test campaign"
     assert "network error" in (sched.additional_config or {}).get("last_error", "")
-    c.refresh_from_db()
-    assert "processing" not in c.metadata
+    assert MissiveCampaign.objects.get(pk=c.pk).current_scheduler_id is None
 
 
 # ---------------------------------------------------------------------------
@@ -382,9 +429,7 @@ def test_run_campaign_builtin_loop_sends_drafts():
 
 def test_run_campaign_task_object_calls_method():
     c = _campaign()
-    contact = Contact.objects.create(
-        first_name="Alice", last_name="Test", email="alice@test.com"
-    )
+    contact = Contact.objects.create(first_name="Alice", last_name="Test", email="alice@test.com")
     ct = ContentType.objects.get_for_model(Contact)
     sched = _scheduled(
         c,
@@ -409,7 +454,9 @@ def test_run_campaign_external_task_backend(settings):
     _missive(c, missive_type="email")
     called_with = []
 
-    with patch("tests.fakeapp.run_campaign.run_fakeapp_campaign", side_effect=lambda sid, **kw: called_with.append(sid)):
+    with patch(
+        "tests.fakeapp.run_campaign.run_fakeapp_campaign", side_effect=lambda sid, **kw: called_with.append(sid)
+    ):
         sched.run_campaign()
 
     assert called_with == [sched.id]
@@ -499,9 +546,7 @@ def test_run_with_tracking_retry_duplicates_error_missives_at_claim():
     assert failed.scheduler_id == old_run.id
 
     # a fresh DRAFT duplicate is attached to the NEW scheduler
-    dups = Missive.objects.filter(
-        campaign=c, status=MissiveStatus.DRAFT, scheduler=sched
-    )
+    dups = Missive.objects.filter(campaign=c, status=MissiveStatus.DRAFT, scheduler=sched)
     assert dups.count() == 1
     assert dups.first().thread_id == failed.thread_id
 
@@ -532,7 +577,9 @@ def test_run_with_tracking_retry_also_sends_the_pending_drafts():
         missive.refresh_from_db()
         assert missive.scheduler_id == sched.id
     assert not Missive.objects.filter(
-        campaign=c, status=MissiveStatus.DRAFT, scheduler__isnull=True,
+        campaign=c,
+        status=MissiveStatus.DRAFT,
+        scheduler__isnull=True,
     ).exists()
 
 
@@ -596,9 +643,7 @@ def test_run_with_tracking_retry_generic_via_task_object():
     """Retry duplicates are also processed via a task_object delegate (fakeapp Contact)."""
     c = _campaign()
     _missive(c, status=MissiveStatus.FAILED, missive_type="email")
-    contact = Contact.objects.create(
-        first_name="Carol", last_name="Test", email="carol@test.com"
-    )
+    contact = Contact.objects.create(first_name="Carol", last_name="Test", email="carol@test.com")
     ct = ContentType.objects.get_for_model(Contact)
     sched = _scheduled(
         c,
@@ -633,9 +678,7 @@ def test_run_with_tracking_no_retry_leaves_errors_untouched():
 
 def test_run_campaign_raises_if_task_object_deleted():
     c = _campaign()
-    contact = Contact.objects.create(
-        first_name="Bob", last_name="Test", email="bob@test.com"
-    )
+    contact = Contact.objects.create(first_name="Bob", last_name="Test", email="bob@test.com")
     ct = ContentType.objects.get_for_model(Contact)
     sched = _scheduled(c, task_content_type=ct, task_object_id=contact.pk)
     contact.delete()
@@ -885,9 +928,7 @@ def test_get_missives_leaves_fresh_processing_alone():
 def test_stale_processing_with_external_id_is_not_reset_to_draft():
     c = _campaign()
     sched = _scheduled(c)
-    sent = _missive(
-        c, status=MissiveStatus.PROCESSING, scheduler=sched, external_id="prov-1"
-    )
+    sent = _missive(c, status=MissiveStatus.PROCESSING, scheduler=sched, external_id="prov-1")
     _age(sent)
     assert not sched.get_missives().filter(pk=sent.pk).exists()
     sent.refresh_from_db()
@@ -895,14 +936,14 @@ def test_stale_processing_with_external_id_is_not_reset_to_draft():
 
 
 def test_start_campaign_rejects_a_live_processing_run():
-    c = _campaign(metadata={"processing": True})
+    c = _campaign()
     _scheduled(c, send_date=timezone.now())
     with pytest.raises(ValidationError, match="already"):
         c.start_campaign()
 
 
 def test_start_campaign_bails_a_stale_run_and_reopens_missives():
-    c = _campaign(metadata={"processing": True})
+    c = _campaign()
     past = timezone.now() - timezone.timedelta(hours=2)
     run = _scheduled(c, send_date=past)
     _age(run, send_date=past)
@@ -910,20 +951,32 @@ def test_start_campaign_bails_a_stale_run_and_reopens_missives():
     _age(stuck)
 
     with patch.object(MissiveScheduledCampaign, "start_scheduled_campaign"):
-        c.start_campaign()
+        replacement = c.start_campaign()
 
     run.refresh_from_db()
     assert run.ended_at is not None
     assert "heartbeat" in (run.additional_config or {}).get("last_error", "")
     stuck.refresh_from_db()
     assert stuck.status == MissiveStatus.DRAFT
-    c.refresh_from_db()
-    assert c.metadata.get("processing") is True
-    assert c.to_missivecampaignsend.exclude(pk=run.pk).exists()
+    assert MissiveCampaign.objects.get(pk=c.pk).current_scheduler_id == replacement.pk
+
+
+def test_start_scheduled_campaign_dispatches_only_once_committed(django_capture_on_commit_callbacks):
+    run = _scheduled(_campaign())
+    backend = MagicMock()
+
+    with patch("django_pymissive.task.get_campaign_backend", return_value=backend):
+        with django_capture_on_commit_callbacks() as callbacks:
+            run.start_scheduled_campaign()
+        backend.delay.assert_not_called()
+
+        for callback in callbacks:
+            callback()
+    backend.delay.assert_called_once_with(str(run.id))
 
 
 def test_run_with_tracking_finalizes_when_reentered_stale():
-    c = _campaign(metadata={"processing": True})
+    c = _campaign()
     past = timezone.now() - timezone.timedelta(hours=2)
     sched = _scheduled(c, send_date=past)
     _age(sched, send_date=past)
@@ -932,17 +985,333 @@ def test_run_with_tracking_finalizes_when_reentered_stale():
     run_campaign.assert_not_called()
     sched.refresh_from_db()
     assert sched.ended_at is not None
-    c.refresh_from_db()
-    assert "processing" not in (c.metadata or {})
+    assert MissiveCampaign.objects.get(pk=c.pk).current_scheduler_id is None
 
 
 def test_process_missives_heartbeats():
     c = _campaign()
     sched = _scheduled(c)
     _missive(c)
-    with patch.object(sched, "heartbeat") as heartbeat:
+    past = timezone.now() - timezone.timedelta(hours=1)
+    MissiveScheduledCampaign.objects.filter(pk=sched.pk).update(updated_at=past)
+    sched.process_missives(lambda missive: None)
+    sched.refresh_from_db()
+    assert sched.updated_at > past
+
+
+def test_process_missives_skips_progress_hook_when_unset():
+    c = _campaign()
+    sched = _scheduled(c)
+    _missive(c)
+    with override_settings(PYMISSIVE_PROGRESS_HOOK=None):
+        with patch.object(sched, "_notify_progress") as notify:
+            sched.process_missives(lambda missive: None)
+    notify.assert_not_called()
+
+
+def test_process_missives_notifies_progress_hook_on_each_step():
+    """Four missives and two target steps → a call halfway and one at the end."""
+    c = _campaign()
+    sched = _scheduled(c)
+    for _ in range(4):
+        _missive(c, scheduler=sched)
+    seen = []
+
+    def _hook(run):
+        seen.append((run.sent_count, run.total_count))
+
+    def _send(missive):
+        Missive.objects.filter(pk=missive.pk).update(status=MissiveStatus.SUCCESS)
+
+    sched.progress_step = 2
+    with override_settings(PYMISSIVE_PROGRESS_HOOK=_hook):
+        sched.process_missives(_send)
+
+    assert seen == [(2, 4), (4, 4)]
+
+
+def test_process_missives_loads_missives_in_chunks():
+    """Five missives in chunks of two: all sent, in order, and the last step notified."""
+    c = _campaign()
+    sched = _scheduled(c)
+    for _ in range(5):
+        _missive(c, scheduler=sched)
+    expected = list(sched.get_missives().values_list("pk", flat=True))
+    deleted = expected.pop(2)
+    sent = []
+    seen = []
+
+    def _send(missive):
+        if not sent:
+            Missive.objects.filter(pk=deleted).delete()
+        sent.append(missive.pk)
+        Missive.objects.filter(pk=missive.pk).update(status=MissiveStatus.SUCCESS)
+
+    sched.progress_step = 1
+    with override_settings(
+        PYMISSIVE_SEND_CHUNK_SIZE=2,
+        PYMISSIVE_PROGRESS_HOOK=lambda run: seen.append(run.sent_count),
+    ):
+        sched.process_missives(_send)
+
+    assert sent == expected
+    assert seen == [4]
+
+
+def test_format_average_send_speed():
+    assert format_average_send_speed(None) == ""
+    assert format_average_send_speed(0.25) == "250 ms"
+    assert format_average_send_speed(1.5) == "1.50 s"
+    assert format_average_send_speed(90) == "1 min 30 s"
+
+
+def test_format_average_send_speed_rounds_before_picking_the_unit():
+    assert format_average_send_speed(0.9996) == "1.00 s"
+    assert format_average_send_speed(59.996) == "1 min 0 s"
+    assert format_average_send_speed(119.7) == "2 min 0 s"
+    assert format_average_send_speed(59.994) == "59.99 s"
+
+
+def _timed_send(clock, seconds):
+    """``send_fn`` that marks the missive sent and advances *clock* by *seconds*."""
+
+    def _send(missive):
+        Missive.objects.filter(pk=missive.pk).update(status=MissiveStatus.SUCCESS)
+        clock[0] += timezone.timedelta(seconds=seconds)
+
+    return _send
+
+
+def test_average_send_speed_is_stored_at_each_progress_step():
+    """Two steps: the hook sees the speed of the sent count just refreshed."""
+    c = _campaign()
+    clock = [timezone.now()]
+    sched = _scheduled(c, send_date=clock[0])
+    for _ in range(4):
+        _missive(c, scheduler=sched)
+    seen = []
+
+    def _hook(run):
+        seen.append((run.sent_count, run.average_send_speed))
+
+    sched.progress_step = 2
+    with override_settings(PYMISSIVE_PROGRESS_HOOK=_hook), patch("django.utils.timezone.now", lambda: clock[0]):
+        sched.process_missives(_timed_send(clock, 1))
+
+    assert seen == [(2, pytest.approx(1)), (4, pytest.approx(1))]
+    sched.refresh_from_db()
+    assert sched.average_send_speed == pytest.approx(1)
+
+
+def test_average_send_speed_is_stored_without_a_progress_hook():
+    c = _campaign()
+    clock = [timezone.now()]
+    sched = _scheduled(c, send_date=clock[0])
+    _missive(c, scheduler=sched)
+
+    with override_settings(PYMISSIVE_PROGRESS_HOOK=None), patch("django.utils.timezone.now", lambda: clock[0]):
+        sched.process_missives(_timed_send(clock, 2))
+
+    sched.refresh_from_db()
+    assert sched.average_send_speed == pytest.approx(2)
+
+
+def test_average_send_speed_leaves_out_time_and_sends_before_the_loop():
+    """A minute of build before the loop and an already sent missive do not count."""
+    c = _campaign()
+    clock = [timezone.now()]
+    sched = _scheduled(c, send_date=clock[0] - timezone.timedelta(seconds=60))
+    _missive(c, scheduler=sched, status=MissiveStatus.SUCCESS)
+    for _ in range(2):
+        _missive(c, scheduler=sched)
+
+    with override_settings(PYMISSIVE_PROGRESS_HOOK=None), patch("django.utils.timezone.now", lambda: clock[0]):
+        sched.process_missives(_timed_send(clock, 1))
+
+    sched.refresh_from_db()
+    assert sched.average_send_speed == pytest.approx(1)
+
+
+def test_progress_payload_includes_average_send_speed():
+    sched = _scheduled(_campaign(), average_send_speed=1.5)
+    payload = sched.progress_payload()
+    assert payload["average_send_speed"] == 1.5
+    assert payload["average_send_speed_display"] == "1.50 s"
+
+
+def test_process_missives_continues_when_progress_hook_fails():
+    c = _campaign()
+    sched = _scheduled(c)
+    _missive(c)
+    _missive(c)
+    sent = []
+
+    def _hook(_run):
+        raise RuntimeError("hook down")
+
+    with override_settings(PYMISSIVE_PROGRESS_HOOK=_hook):
+        sched.process_missives(lambda missive: sent.append(missive.pk))
+
+    assert len(sent) == 2
+
+
+def test_blank_progress_step_uses_the_setting():
+    c = _campaign()
+    sched = _scheduled(c)
+    for _ in range(4):
+        _missive(c)
+    seen = []
+
+    def _hook(_run):
+        seen.append(1)
+
+    with override_settings(PYMISSIVE_PROGRESS_HOOK=_hook, PYMISSIVE_PROGRESS_STEP=2):
         sched.process_missives(lambda missive: None)
-    heartbeat.assert_called()
+
+    assert len(seen) == 2
+
+
+def test_progress_hook_on_the_run_overrides_the_setting(caplog):
+    c = _campaign()
+    sched = _scheduled(c, progress_hook="tests.fakeapp.hook.log_progress")
+    _missive(c, scheduler=sched)
+
+    def _send(row):
+        Missive.objects.filter(pk=row.pk).update(status=MissiveStatus.SUCCESS)
+
+    with override_settings(PYMISSIVE_PROGRESS_HOOK=None), caplog.at_level("INFO", "tests.fakeapp.hook"):
+        sched.process_missives(_send)
+
+    assert f"Campaign {c.pk} progress: 1/1 (100%)" in caplog.text
+
+
+def test_a_run_logs_its_progress_without_a_hook(caplog):
+    c = _campaign()
+    sched = _scheduled(c, send_date=timezone.now())
+    _missive(c, scheduler=sched)
+
+    def _send(row):
+        Missive.objects.filter(pk=row.pk).update(status=MissiveStatus.SUCCESS)
+
+    with (
+        override_settings(PYMISSIVE_PROGRESS_HOOK=None),
+        caplog.at_level("INFO", "django_pymissive.models.scheduler"),
+    ):
+        sched.process_missives(_send)
+
+    assert f"Scheduled campaign {sched.pk}: sending 1 missive(s)" in caplog.text
+    assert f"Scheduled campaign {sched.pk}: 1/1 processed, 0 failed" in caplog.text
+
+
+def test_a_cancelled_run_logs_where_it_stopped(caplog):
+    c = _campaign()
+    now = timezone.now()
+    sched = _scheduled(c, send_date=now, cancelled_at=now, cancel_reason="hold")
+    _missive(c)
+
+    with caplog.at_level("INFO", "django_pymissive.models.scheduler"):
+        sched.process_missives(lambda missive: None)
+
+    assert f"Scheduled campaign {sched.pk} cancelled before missive 1/1: hold" in caplog.text
+
+
+def test_process_missives_stops_when_already_cancelled():
+    c = _campaign()
+    now = timezone.now()
+    sched = _scheduled(c, send_date=now, cancelled_at=now, cancel_reason="hold")
+    _missive(c)
+    _missive(c)
+    sent = []
+    sched.process_missives(lambda missive: sent.append(missive.pk))
+    assert sent == []
+    sched.refresh_from_db()
+    assert sched.cancel_reason == "hold"
+
+
+def test_process_missives_stops_after_cancel_mid_run():
+    c = _campaign()
+    sched = _scheduled(c)
+    _missive(c)
+    _missive(c)
+    sent = []
+
+    def _send(missive):
+        sent.append(missive.pk)
+        Missive.objects.filter(pk=missive.pk).update(status=MissiveStatus.SUCCESS)
+        MissiveScheduledCampaign.objects.filter(pk=sched.pk).update(
+            cancelled_at=timezone.now(),
+            cancel_reason="enough",
+        )
+
+    sched.process_missives(_send)
+    assert len(sent) == 1
+    assert Missive.objects.filter(campaign=c, status=MissiveStatus.DRAFT).count() == 1
+    assert Missive.objects.filter(campaign=c, status=MissiveStatus.SUCCESS).count() == 1
+    sched.refresh_from_db()
+    assert sched.cancel_reason == "enough"
+    assert sched.run_status == "cancelled"
+
+
+def test_process_missives_stops_when_another_process_ends_the_run():
+    c = _campaign()
+    sched = _scheduled(c, send_date=timezone.now())
+    for _ in range(3):
+        _missive(c)
+    sent = []
+
+    def _send(missive):
+        sent.append(missive.pk)
+        Missive.objects.filter(pk=missive.pk).update(status=MissiveStatus.SUCCESS)
+        MissiveScheduledCampaign.objects.filter(pk=sched.pk).update(ended_at=timezone.now())
+
+    sched.process_missives(_send)
+    assert len(sent) == 1
+    assert Missive.objects.filter(campaign=c, status=MissiveStatus.DRAFT).count() == 2
+    sched.refresh_from_db()
+    assert sched.cancelled_at is None
+
+
+def test_clean_rejects_a_progress_hook_that_cannot_be_used():
+    sched = _scheduled(_campaign(), progress_hook="tests.fakeapp.hook.does_not_exist")
+    with pytest.raises(ValidationError) as excinfo:
+        sched.clean()
+    assert "progress_hook" in excinfo.value.message_dict
+
+    sched.progress_hook = "tests.fakeapp.hook.DEFAULT_SLEEP_SECONDS"
+    with pytest.raises(ValidationError) as excinfo:
+        sched.clean()
+    assert "progress_hook" in excinfo.value.message_dict
+
+    sched.progress_hook = "tests.fakeapp.hook.log_progress"
+    sched.clean()
+
+
+def test_process_missives_sends_when_the_progress_hook_cannot_be_imported():
+    c = _campaign()
+    sched = _scheduled(c, progress_hook="tests.fakeapp.hook.does_not_exist")
+    _missive(c)
+    sent = []
+    sched.process_missives(lambda missive: sent.append(missive.pk))
+    assert len(sent) == 1
+
+
+def test_log_progress_hook_logs(caplog):
+    c = _campaign()
+    sched = _scheduled(c)
+    missive = _missive(c, scheduler=sched)
+
+    def _send(row):
+        Missive.objects.filter(pk=row.pk).update(status=MissiveStatus.SUCCESS)
+
+    with (
+        override_settings(PYMISSIVE_PROGRESS_HOOK="tests.fakeapp.hook.log_progress"),
+        caplog.at_level("INFO", "tests.fakeapp.hook"),
+    ):
+        sched.process_missives(_send)
+
+    assert f"Campaign {c.pk} progress: 1/1 (100%)" in caplog.text
+    missive.refresh_from_db()
+    assert missive.status == MissiveStatus.SUCCESS
 
 
 def test_future_scheduled_run_is_not_stale():
@@ -964,15 +1333,13 @@ def test_run_claim_stamps_updated_at_so_prepared_run_is_not_stale():
         assert sched.send_date is not None
         assert sched.is_stale is False
 
-    with patch.object(
-        MissiveScheduledCampaign, "run_campaign", side_effect=_assert_live
-    ):
+    with patch.object(MissiveScheduledCampaign, "run_campaign", side_effect=_assert_live):
         sched.run_with_tracking()
 
 
 def test_second_worker_does_not_finalize_a_just_claimed_run():
     """Losing the claim on a live run must not treat leftover updated_at as a crash."""
-    c = _campaign(metadata={"processing": True})
+    c = _campaign()
     live = _scheduled(c)
     _age(live)
     now = timezone.now()
@@ -989,4 +1356,3 @@ def test_second_worker_does_not_finalize_a_just_claimed_run():
     other.refresh_from_db()
     assert other.ended_at is None
     assert other.send_date is not None
-

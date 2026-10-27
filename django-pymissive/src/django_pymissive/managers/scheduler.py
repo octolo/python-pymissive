@@ -89,19 +89,23 @@ def count_annotations() -> dict:
         type_q = Q(**{f"{_M}__missive_type": missive_type})
         counts[total_annotation_name(missive_type)] = count_missive_expr(type_q)
         counts[sent_annotation_name(missive_type)] = count_missive_expr(
-            type_q, sent_missive_q(prefix=_M),
+            type_q,
+            sent_missive_q(prefix=_M),
         )
         counts[error_annotation_name(missive_type)] = count_missive_expr(
-            type_q, error_missive_q(prefix=_M),
+            type_q,
+            error_missive_q(prefix=_M),
         )
     for support in GENERIC_SUPPORT:
         support_q = Q(**missive_type_filter(support, prefix=_M))
         counts[support_count_name(support)] = count_missive_expr(support_q)
         counts[support_count_name(support, "sent")] = count_missive_expr(
-            support_q, sent_missive_q(prefix=_M),
+            support_q,
+            sent_missive_q(prefix=_M),
         )
         counts[support_count_name(support, "error")] = count_missive_expr(
-            support_q, error_missive_q(prefix=_M),
+            support_q,
+            error_missive_q(prefix=_M),
         )
     for status in MissiveStatus:
         counts[status_annotation_name(status)] = count_attempt_expr(
@@ -157,8 +161,27 @@ class MissiveScheduledCampaignQuerySet(models.QuerySet):
     def with_counts(self):
         return self.annotate(**count_annotations())
 
+    def sending(self) -> list:
+        """Runs a live worker is sending (see ``MissiveScheduledCampaign.is_sending``).
+
+        Filtered in Python to reuse ``is_stale``; only open runs are loaded.
+        """
+        open_runs = self.filter(send_date__isnull=False, ended_at__isnull=True)
+        return [run for run in open_runs if getattr(run, "is_sending", False)]
+
+    def delete(self):
+        """Refuse while any selected run is being sent."""
+        from django.db.models.deletion import ProtectedError
+
+        from ..models.scheduler import SENDING_RUN_DELETE_MESSAGE
+
+        sending = self.sending()
+        if sending:
+            raise ProtectedError(str(SENDING_RUN_DELETE_MESSAGE), set(sending))
+        return super().delete()
+
 
 class MissiveScheduledCampaignManager(
-    models.Manager.from_queryset(MissiveScheduledCampaignQuerySet)
+    models.Manager.from_queryset(MissiveScheduledCampaignQuerySet)  # type: ignore[misc]
 ):
     """Manager for MissiveScheduledCampaign (plain by default, counts opt-in)."""

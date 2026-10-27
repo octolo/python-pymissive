@@ -131,9 +131,7 @@ def _process_event(event, missive, pk=None):
         missive.set_status()
         return
 
-    fanout_recipients = (
-        list(missive.recipients) if event.get("event") in FANOUT_EVENTS else []
-    )
+    fanout_recipients = list(missive.recipients) if event.get("event") in FANOUT_EVENTS else []
     if fanout_recipients:
         # No pk here: one row per recipient, so there is no single row to target.
         # The rows all belong to the same missive, so the per-event billing
@@ -207,12 +205,8 @@ def retrieve_events(*, provider, missive_type, start_date, end_date):
     provider_obj = MissiveProviderModel.objects.get(name=str(provider))
     service = provider_service_name("retrieve_events", missive_type)
     if not hasattr(provider_obj._provider, service):
-        raise ValidationError(
-            _("This provider does not support events for this missive type.")
-        )
-    raw = provider_obj._provider.call_service(
-        service, start_date=start_date, end_date=end_date
-    )
+        raise ValidationError(_("This provider does not support events for this missive type."))
+    raw = provider_obj._provider.call_service(service, start_date=start_date, end_date=end_date)
     if isinstance(raw, dict):
         raw = raw.get("events") or raw
     from .signals import suppress_event_billings

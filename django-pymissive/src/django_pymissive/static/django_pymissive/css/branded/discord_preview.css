@@ -1,0 +1,30 @@
+.brand-discord {
+    background: #313338;
+    color: #dbdee1;
+}
+
+.brand-discord .brand-avatar {
+    background: #5865f2;
+}
+
+.brand-discord .brand-author {
+    color: #fff;
+}
+
+.brand-discord .brand-bot {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #fff;
+    background: #5865f2;
+}
+
+.brand-discord .brand-time {
+    color: #949ba4;
+}
+
+.brand-discord .brand-text a {
+    color: #00a8fc;
+}

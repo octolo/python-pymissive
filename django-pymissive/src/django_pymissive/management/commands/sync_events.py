@@ -42,9 +42,7 @@ class Command(BaseCommand):
         try:
             since = datetime.strptime(date_str, "%Y-%m-%d").date()
         except ValueError:
-            self.stderr.write(
-                self.style.ERROR(f"Invalid date format: {date_str}. Use YYYY-MM-DD.")
-            )
+            self.stderr.write(self.style.ERROR(f"Invalid date format: {date_str}. Use YYYY-MM-DD."))
             return
 
         missives = (
@@ -62,9 +60,7 @@ class Command(BaseCommand):
 
         for missive in missives:
             try:
-                deleted, _ = missive.to_missiveevent.filter(
-                    client_initiated=False
-                ).delete()
+                deleted, _ = missive.to_missiveevent.filter(client_initiated=False).delete()
 
                 if missive.has_service("retrieve"):
                     missive.retrieve_missive()
@@ -75,17 +71,9 @@ class Command(BaseCommand):
 
                 synced += 1
                 if options.get("verbosity", 1) >= 2:
-                    self.stdout.write(
-                        f"Synced events for missive {missive.id} (deleted {deleted} events)"
-                    )
+                    self.stdout.write(f"Synced events for missive {missive.id} (deleted {deleted} events)")
             except Exception as e:
                 errors += 1
-                self.stderr.write(
-                    self.style.ERROR(f"Error syncing missive {missive.id}: {e}")
-                )
+                self.stderr.write(self.style.ERROR(f"Error syncing missive {missive.id}: {e}"))
 
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"Done: {synced} synced, {errors} errors (total: {total})"
-            )
-        )
+        self.stdout.write(self.style.SUCCESS(f"Done: {synced} synced, {errors} errors (total: {total})"))

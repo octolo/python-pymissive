@@ -19,7 +19,7 @@ def test_send_registered_letter_success_is_request_for_any_2xx(status_code):
 
     with (
         patch.object(provider, "_request", return_value=response),
-        patch("pymissive.providers.maileva.is_disable_send", return_value=False),
+        patch("pymissive.providers.maileva.provider.is_disable_send", return_value=False),
     ):
         data = provider.send_registered_letter()
 

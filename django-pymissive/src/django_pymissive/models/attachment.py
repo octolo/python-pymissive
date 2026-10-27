@@ -1,8 +1,10 @@
 """MissiveAttachment model."""
 
+import logging
 import os
 import uuid
 from datetime import date
+from typing import ClassVar
 
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -37,6 +39,8 @@ _PAGE_ORDER_TYPES = (
     MissiveAttachmentType.VIRTUAL_ATTACHMENT,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _page_order_q() -> models.Q:
     return models.Q(attachment_type__in=_PAGE_ORDER_TYPES)
@@ -48,7 +52,7 @@ def _default_attachment_object_arguments():
 
 def _attachment_upload_to(instance, filename):
     """Return upload path based on attachment class."""
-    upload_to = getattr(settings, 'PYMISSIVE_ATTACHMENT_UPLOAD_TO', None)
+    upload_to = getattr(settings, "PYMISSIVE_ATTACHMENT_UPLOAD_TO", None)
     if upload_to:
         return import_string(upload_to)(instance, filename)
     today = date.today()
@@ -64,7 +68,7 @@ def _get_attachment_file_storage():
     - str: import path to storage class, instantiated with ()
     - instance: use as-is (e.g. DataroomStorage())
     """
-    storage = getattr(settings, 'PYMISSIVE_ATTACHMENT_FILE_STORAGE', None)
+    storage = getattr(settings, "PYMISSIVE_ATTACHMENT_FILE_STORAGE", None)
     if storage is None:
         return default_storage
     if isinstance(storage, str):
@@ -89,7 +93,7 @@ class ConfigurableAttachmentStorage(Storage):
             self._storage = _get_attachment_file_storage()
         return self._storage
 
-    def _open(self, name, mode='rb'):
+    def _open(self, name, mode="rb"):
         return self._backend._open(name, mode)
 
     def _save(self, name, content, max_length=None):
@@ -137,7 +141,7 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         blank=True,
         help_text=_("Campaign to which this file is attached"),
     )
-    
+
     missive = models.ForeignKey(
         "django_pymissive.Missive",
         on_delete=models.CASCADE,
@@ -170,9 +174,7 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         null=True,
         blank=True,
         verbose_name=_("Object ID"),
-        help_text=_(
-            "ID of the object to which this file is attached (integer pk as well as UUID)"
-        ),
+        help_text=_("ID of the object to which this file is attached (integer pk as well as UUID)"),
     )
 
     attachment_object_arguments = JSONField(
@@ -202,9 +204,7 @@ class MissiveBaseAttachment(CommentTimestampedModel):
     linked = models.BooleanField(
         default=True,
         verbose_name=_("Linked"),
-        help_text=_(
-            "If true, the attachment is offered as an access link instead of being physically attached"
-        ),
+        help_text=_("If true, the attachment is offered as an access link instead of being physically attached"),
     )
 
     priority = models.PositiveIntegerField(
@@ -234,7 +234,9 @@ class MissiveBaseAttachment(CommentTimestampedModel):
     class Meta:
         verbose_name = _("Attachment")
         verbose_name_plural = _("Attachments")
-        ordering = ["priority",]
+        ordering = [
+            "priority",
+        ]
         # Every access goes through the GenericRelation of a missive or a
         # campaign, never through the attachment itself.
         indexes = [
@@ -279,10 +281,7 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         regular annex; ``generate_first_document`` still uses that prefix
         only as a storage name.
         """
-        return (
-            self.attachment_type == MissiveAttachmentType.ATTACHMENT
-            and self.priority == FIRST_DOCUMENT_PRIORITY
-        )
+        return self.attachment_type == MissiveAttachmentType.ATTACHMENT and self.priority == FIRST_DOCUMENT_PRIORITY
 
     def _resolved_name(self) -> str:
         """Best-effort full path/name of the underlying file.
@@ -314,7 +313,10 @@ class MissiveBaseAttachment(CommentTimestampedModel):
                         try:
                             handle.close()
                         except Exception:
-                            pass
+                            logger.debug(
+                                "Unable to close virtual attachment",
+                                exc_info=True,
+                            )
         else:
             name = getattr(self.attachment_file, "name", None) or ""
         self.__dict__["_resolved_name_cache"] = name
@@ -355,10 +357,12 @@ class MissiveBaseAttachment(CommentTimestampedModel):
 
     @property
     def can_be_modified(self):
-        if hasattr(self, "missive"):
-            return self.missive.can_be_modified
-        if hasattr(self, "campaign"):
-            return self.campaign.can_be_modified
+        missive = self.missive
+        if missive is not None:
+            return missive.can_be_modified
+        campaign = self.campaign
+        if campaign is not None:
+            return campaign.can_be_modified
         return False
 
     def can_access_document(self):
@@ -478,9 +482,7 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         elif self.campaign_id:
             from .campaign import MissiveCampaign
 
-            list(
-                MissiveCampaign.objects.select_for_update().filter(pk=self.campaign_id)
-            )
+            list(MissiveCampaign.objects.select_for_update().filter(pk=self.campaign_id))
 
     def calculate_priority(self):
         """Return next priority. First-document uses 0; others use 1, 2, 3... (0 is reserved)."""
@@ -496,9 +498,7 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         else:
             return 1
         qs = qs.exclude(priority=FIRST_DOCUMENT_PRIORITY)
-        max_priority = qs.aggregate(Max("priority"))["priority__max"] or (
-            FIRST_DOCUMENT_PRIORITY
-        )
+        max_priority = qs.aggregate(Max("priority"))["priority__max"] or (FIRST_DOCUMENT_PRIORITY)
         return max(1, max_priority + 1)
 
     def _recalculate_sibling_priorities(self):
@@ -510,7 +510,7 @@ class MissiveBaseAttachment(CommentTimestampedModel):
     def can_access_attachment(self):
         """Checks if the attachment can be accessed."""
         if self.attachment_type == MissiveAttachmentType.VIRTUAL_ATTACHMENT:
-            return (self.attachment_object and self.attachment_object_arguments)
+            return self.attachment_object and self.attachment_object_arguments
         return self.attachment_file and self.attachment_file.url
 
     def clean(self):
@@ -536,7 +536,12 @@ class MissiveBaseAttachment(CommentTimestampedModel):
     def save(self, *args, **kwargs):
         """Auto priority on insert (use ``_state.adding``, not ``pk`` — UUID set at init)."""
         if self.attachment_object_id is not None:
-            self.attachment_object_id = object_id_value(self.attachment_object_id)
+            content_type = self.attachment_content_type
+            model = content_type.model_class() if content_type is not None else None
+            self.attachment_object_id = object_id_value(
+                self.attachment_object_id,
+                pk_field=model._meta.pk if model is not None else None,
+            )
         if self._state.adding and (self.missive_id or self.campaign_id):
             for attempt in range(2):
                 try:
@@ -551,10 +556,11 @@ class MissiveBaseAttachment(CommentTimestampedModel):
             return
         super().save(*args, **kwargs)
 
+
 class MissiveAttachment(MissiveBaseAttachment):
     """Attachment for missives."""
 
-    objects = MissiveAttachmentManager()
+    objects: ClassVar[MissiveAttachmentManager] = MissiveAttachmentManager()
 
     class Meta:
         proxy = True
@@ -565,7 +571,7 @@ class MissiveAttachment(MissiveBaseAttachment):
 class MissiveVirtualAttachment(MissiveBaseAttachment):
     """Virtual attachment for missives."""
 
-    objects = MissiveVirtualAttachmentManager()
+    objects: ClassVar[MissiveVirtualAttachmentManager] = MissiveVirtualAttachmentManager()
 
     class Meta:
         proxy = True
@@ -576,7 +582,7 @@ class MissiveVirtualAttachment(MissiveBaseAttachment):
 class CampaignAttachment(MissiveBaseAttachment):
     """Attachment for campaigns."""
 
-    objects = CampaignAttachmentManager()
+    objects: ClassVar[CampaignAttachmentManager] = CampaignAttachmentManager()
 
     class Meta:
         proxy = True
@@ -587,17 +593,18 @@ class CampaignAttachment(MissiveBaseAttachment):
 class CampaignVirtualAttachment(MissiveBaseAttachment):
     """Virtual attachment for campaigns."""
 
-    objects = CampaignVirtualAttachmentManager()
+    objects: ClassVar[CampaignVirtualAttachmentManager] = CampaignVirtualAttachmentManager()
 
     class Meta:
         proxy = True
         verbose_name = _("Campaign Virtual Attachment")
         verbose_name_plural = _("Campaign Virtual Attachments")
 
+
 class MissiveProof(MissiveBaseAttachment):
     """Proof for missives."""
 
-    objects = MissiveProofManager()
+    objects: ClassVar[MissiveProofManager] = MissiveProofManager()
 
     class Meta:
         proxy = True

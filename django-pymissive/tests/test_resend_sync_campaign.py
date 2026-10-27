@@ -188,9 +188,7 @@ def test_campaign_named_id_is_generated_from_subject():
 
 
 def test_campaign_named_id_uses_settings_generator():
-    with override_settings(
-        PYMISSIVE_CAMPAIGN_NAMED_ID_GENERATOR="tests.generators.test_campaign_named_id"
-    ):
+    with override_settings(PYMISSIVE_CAMPAIGN_NAMED_ID_GENERATOR="tests.generators.test_campaign_named_id"):
         first = _campaign(subject="Summer Campaign")
         second = _campaign(subject="Summer Campaign")
     assert first.named_id == "test-summer-campaign"

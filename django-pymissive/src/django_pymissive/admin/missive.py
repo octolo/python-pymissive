@@ -2,29 +2,32 @@
 
 import json
 import mimetypes
+from typing import cast
 
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.template.response import TemplateResponse
 from django.urls import reverse
-from django.utils.html import format_html
-from django.utils.safestring import mark_safe
+from django.utils.html import format_html, format_html_join
 from django.utils.translation import gettext_lazy as _
 from django.utils.text import format_lazy
-from django_boosted import AdminBoostModel
+from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
 from django.contrib.admin.utils import unquote as admin_unquote
 from django.contrib import messages
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect
-from phonenumber_field.modelfields import PhoneNumberField
-from phonenumber_field.formfields import PhoneNumberField as PhoneNumberFormField
-from phonenumber_field.formfields import SplitPhoneNumberField
+from phonenumber_field.modelfields import PhoneNumberField  # type: ignore[import-untyped]
+from phonenumber_field.formfields import PhoneNumberField as PhoneNumberFormField  # type: ignore[import-untyped]
+from phonenumber_field.formfields import SplitPhoneNumberField  # type: ignore[import-untyped]
 from urllib.parse import urlencode
-from django_geoaddress.fields import GeoaddressField
+from django_geoaddress.fields import GeoaddressField  # type: ignore[import-untyped]
+from pymissive.utils import is_fake_provider_allowed
+from ..fake_webhooks import delay_fake_webhooks, sent_fake_missives
 from ..forms.missive import RetrieveMissiveForm
 from ..retrieve import retrieve_from_provider as do_retrieve_from_provider
 from ..models.missive import Missive
+from ..managers.missive import MissiveQuerySet
 from ..models.recipient import MissiveRecipient
 from .recipient import (
     MissiveRecipientEmailInline,
@@ -45,7 +48,8 @@ from .event import MissiveEventInline
 from .billing import MissiveBillingInline
 from .related_object import MissiveRelatedObjectInline
 from ..models.choices import get_missive_style, MissiveStatus, MissiveThreadType, MissiveSupport
-from django_boosted import admin_boost_view, admin_boost_action
+from django_boosted import admin_boost_view, admin_boost_action  # type: ignore[import-untyped]
+
 
 class IsBillableListFilter(admin.SimpleListFilter):
     """Custom filter for is_billable annotation (not a model field)."""
@@ -123,6 +127,7 @@ class HistoryOrMessageListFilter(admin.SimpleListFilter):
             return queryset
         return queryset.filter(thread_type=MissiveThreadType.MISSIVE)
 
+
 @admin.register(Missive)
 class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     """Admin for missive model."""
@@ -175,6 +180,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         "thread_display",
         "thread_id",
         "thread_type",
+        "campaign_target_display",
     ]
     raw_id_fields = [
         "campaign",
@@ -194,13 +200,13 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
 
     def get_queryset(self, request):
         """Annotate the counters the changelist and change form read."""
-        return (
+        queryset = (
             super()
             .get_queryset(request)
             .select_related("campaign", "scheduler")
             .prefetch_related(Missive.objects.first_recipients_prefetch())
-            .with_counts()
         )
+        return cast(MissiveQuerySet, queryset).with_counts()
 
     def save_formset(self, request, form, formset, change):
         super().save_formset(request, form, formset, change)
@@ -220,11 +226,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         readonly = list(super().get_readonly_fields(request, obj))
         if not missive_admin_locked(obj):
             return readonly
-        geoaddress_names = {
-            field.name
-            for field in self.model._meta.get_fields()
-            if isinstance(field, GeoaddressField)
-        }
+        geoaddress_names = {field.name for field in self.model._meta.get_fields() if isinstance(field, GeoaddressField)}
         for field in self.model._meta.get_fields():
             if (not field.is_relation or field.one_to_one) and field.name not in [
                 "id",
@@ -243,9 +245,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
                 return PhoneNumberFormField(**kwargs)
             return SplitPhoneNumberField(**kwargs)
         formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
-        if isinstance(db_field, GeoaddressField) and missive_admin_locked(
-            getattr(self, "_lock_obj", None)
-        ):
+        if isinstance(db_field, GeoaddressField) and missive_admin_locked(getattr(self, "_lock_obj", None)):
             lock_geoaddress_formfield(formfield)
         return formfield
 
@@ -254,10 +254,9 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             context["show_save"] = False
             context["show_save_and_continue"] = False
             context["show_save_and_add_another"] = False
-        return super().render_change_form(
-            request, context, add=add, change=change, form_url=form_url, obj=obj
-        )
+        return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
 
+    @admin.display(description=_("Recipient"))
     def recipient_display(self, obj):
         recipient = obj.first_recipient
         if isinstance(recipient, MissiveRecipient):
@@ -267,8 +266,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             return self.format_with_help_text(text, recipient.target)
         return self.format_label(_("No recipient"), label_type="warning")
 
-    recipient_display.short_description = _("Recipient")
-
+    @admin.display(description=_("Billing"))
     def billing_display(self, obj):
         if obj.total_billed_amount is not None:
             label_type = "success" if obj.is_billed else "warning"
@@ -278,8 +276,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             return self.format_label(f"{obj.total_billing_amount:.3f}", size="small", label_type=label_type)
         return "-"
 
-    billing_display.short_description = _("Billing")
-
+    @admin.display(description=_("Sender"))
     def sender_display(self, obj):
         sender = obj.get_sender()
         name = sender["name"] or _("No sender name")
@@ -291,15 +288,13 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             return self.format_label(_("No sender"), label_type="warning")
         return self.format_with_help_text(name, target)
 
-    sender_display.short_description = _("Sender")
-
+    @admin.display(description=_("External ID"))
     def external_id_display(self, obj):
         if not obj.external_id:
             return "-"
         return self.format_label(obj.external_id, size="large", label_type="success")
 
-    external_id_display.short_description = _("External ID")
-
+    @admin.display(description=_("Provider"))
     def provider_display(self, obj):
         if not obj.provider:
             return "-"
@@ -308,22 +303,16 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             obj.provider._provider.display_name,
         )
 
-    provider_display.short_description = _("Provider")
-
+    @admin.display(description=_("Status / Last Event Date"))
     def status_display(self, obj):
         priority_style = get_missive_style(obj.priority)
-        priority_html = self.format_label(
-            obj.get_priority_display(), size="small", label_type=priority_style
-        )
+        priority_html = self.format_label(obj.get_priority_display(), size="small", label_type=priority_style)
         status_style = get_missive_style(obj.status)
-        status_html = self.format_label(
-            obj.get_status_display(), size="small", label_type=status_style
-        )
+        status_html = self.format_label(obj.get_status_display(), size="small", label_type=status_style)
         html = format_html("{} {}", priority_html, status_html)
         return self.format_with_help_text(html, obj.last_event_date)
 
-    status_display.short_description = _("Status / Last Event Date")
-
+    @admin.display(description=_("Message(s)/History(s)/Thread"))
     def thread_display(self, obj):
         message = self.format_label(
             format_lazy(_("{} message(s)"), obj.count_message or 0),
@@ -338,8 +327,6 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         html = format_html("{} {}", message, history)
         return self.format_with_help_text(html, obj.get_thread_type_display())
 
-    thread_display.short_description = _("Message(s)/History(s)/Thread")
-
     @admin_boost_view("redirect", _("Preview"))
     def preview(self, request, obj):
         return obj.get_browser_preview_path()
@@ -348,17 +335,12 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         """Draft missives whose provider implements ``preview_<missive_type>``."""
         return self.is_draft(obj) and obj.can_preview_missive()
 
-    @admin_boost_view(
-        "confirm",
-        _("Preview (provider)")
-    )
+    @admin_boost_view("confirm", _("Preview (provider)"))
     def preview_provider_confirm(self, request, obj, confirmed=False):
         if obj.status != MissiveStatus.DRAFT:
             messages.warning(
                 request,
-                _(
-                    "Provider preview is only available when the missive is in draft status."
-                ),
+                _("Provider preview is only available when the missive is in draft status."),
             )
             return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
         if not obj.can_preview_missive():
@@ -370,18 +352,13 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         if not confirmed:
             return {
                 "confirm": _(
-                    "Run provider preview? This calls the provider API "
-                    "(e.g. preview_registered_letter on Maileva)."
+                    "Run provider preview? This calls the provider API (e.g. preview_registered_letter on Maileva)."
                 )
             }
         try:
-            response = obj.call_provider_service(
-                "preview", **obj.get_serialized_data()
-            )
+            response = obj.call_provider_service("preview", **obj.get_serialized_data())
             preview_result = json.dumps(
-                response
-                if isinstance(response, (dict, list))
-                else {"result": response},
+                response if isinstance(response, (dict, list)) else {"result": response},
                 indent=2,
                 ensure_ascii=False,
                 default=str,
@@ -398,9 +375,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
                 "preview_result": preview_result,
                 "object": obj,
                 "original": obj,
-                "original_url": reverse(
-                    "admin:django_pymissive_missive_change", args=[obj.pk]
-                ),
+                "original_url": reverse("admin:django_pymissive_missive_change", args=[obj.pk]),
             }
         )
         request.current_app = self.admin_site.name
@@ -410,6 +385,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             context,
         )
 
+    @admin.display(description=_("Event(s)/Related(s)/Subject"))
     def event_display(self, obj):
         event_related_html = format_html(
             "{} {}",
@@ -424,16 +400,16 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             ),
         )
         return self.format_with_help_text(event_related_html, obj.subject)
-    event_display.short_description = _("Event(s)/Related(s)/Subject")
 
+    @admin.display(description=_("Campaign / Last Send Date"))
     def campaign_display(self, obj):
         if obj.campaign is None:
             return "-"
         return self.format_with_help_text(
-            self.format_label(obj.campaign.subject, size="small"),
-            obj.last_campaign_send_date)
-    campaign_display.short_description = _("Campaign / Last Send Date")
+            self.format_label(obj.campaign.subject, size="small"), obj.last_campaign_send_date
+        )
 
+    @admin.display(description=_("Scheduler"))
     def scheduler_display(self, obj):
         if obj.scheduler_id is None:
             return "-"
@@ -447,14 +423,20 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             ),
         )
         return self.format_with_help_text(status_html, when)
-    scheduler_display.short_description = _("Scheduler")
+
+    @admin.display(description=_("Campaign target"))
+    def campaign_target_display(self, obj):
+        row = obj.to_campaigntarget.first() if obj and obj.pk else None
+        if row is None:
+            return "-"
+        url = reverse("admin:django_pymissive_campaigntarget_change", args=[row.pk])
+        return format_html('<a href="{}">{}</a>', url, row.object_str or row.pk)
 
     def change_fieldsets(self):
         """Configure fieldsets for change view."""
         self.add_to_fieldset(
             None,
             [
-
                 "provider",
                 "missive_type",
                 "acknowledgement",
@@ -479,6 +461,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             [
                 "campaign",
                 "scheduler",
+                "campaign_target_display",
                 "status",
                 "webhook_url",
                 "external_id_display",
@@ -488,7 +471,9 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
                 "thread_type",
             ],
         )
-        self.add_to_fieldset(_("Comment/Timestamps"), ["comment", "created_at", "updated_at"], classes=("wide", "collapse"))
+        self.add_to_fieldset(
+            _("Comment/Timestamps"), ["comment", "created_at", "updated_at"], classes=("wide", "collapse")
+        )
         self.add_to_fieldset(
             _("Configs"),
             [
@@ -513,35 +498,33 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             ],
         )
 
+    @admin.display(description=_("Total Billed Amount"))
     def total_billed_amount_display(self, obj):
         if obj.total_billed_amount is None:
             return "-"
         label_type = "success" if obj.is_billed else "warning"
         return self.format_label(f"{obj.total_billed_amount:.3f}", size="small", label_type=label_type)
-    total_billed_amount_display.short_description = _("Total Billed Amount")
 
+    @admin.display(description=_("Total Billing Amount"))
     def total_billing_amount_display(self, obj):
         if obj.total_billing_amount is None:
             return "-"
         label_type = "info" if obj.is_billed else "danger"
         return self.format_label(f"{obj.total_billing_amount:.3f}", size="small", label_type=label_type)
-    total_billing_amount_display.short_description = _("Total Billing Amount")
 
+    @admin.display(description=_("Total Estimate Amount"))
     def total_estimate_amount_display(self, obj):
         if obj.total_estimate_amount is None:
             return "-"
         return self.format_label(f"{obj.total_estimate_amount:.3f}", size="small", label_type="info")
-    total_estimate_amount_display.short_description = _("Total Estimate Amount")
 
+    @admin.display(boolean=True, description=_("Is billable"))
     def is_billable_display(self, obj):
         return obj.is_billable
-    is_billable_display.short_description = _("Is billable")
-    is_billable_display.boolean = True
 
+    @admin.display(boolean=True, description=_("Is Billed"))
     def is_billed_display(self, obj):
         return obj.is_billed
-    is_billed_display.short_description = _("Is Billed")
-    is_billed_display.boolean = True
 
     def provider_has_service(self, obj, service):
         from pymissive.config import provider_service_name
@@ -574,10 +557,10 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         return items
 
     def is_draft(self, obj):
-        return (obj and obj.pk and obj.status == MissiveStatus.DRAFT)
+        return obj and obj.pk and obj.status == MissiveStatus.DRAFT
 
     def is_not_cancelled(self, obj):
-        return (obj and obj.pk and obj.status != MissiveStatus.CANCELLED)
+        return obj and obj.pk and obj.status != MissiveStatus.CANCELLED
 
     def has_change_permission(self, request, obj=None):
         # A locked missive is never editable, whatever rights the user has.
@@ -599,9 +582,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
 
     @admin_boost_action("prepare_missive", _("Prepare"))
     def handle_prepare_missive(self, request, object_id):
-        self.call_object_method(
-            request, object_id, "prepare_missive", _("Missive prepared successfully.")
-        )
+        self.call_object_method(request, object_id, "prepare_missive", _("Missive prepared successfully."))
 
     def has_resend_missive_permission(self, request, obj=None):
         return (
@@ -618,9 +599,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
 
     @admin_boost_view("confirm", _("Resend"), hidden=True)
     def resend_missive(self, request, obj, confirmed=False):
-        waiting = self.confirm_action(
-            request, obj, confirmed, _("Are you sure you want to resend this missive?")
-        )
+        waiting = self.confirm_action(request, obj, confirmed, _("Are you sure you want to resend this missive?"))
         if waiting:
             return waiting
         new_missive = obj.resend_missive()
@@ -649,9 +628,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
 
     @admin_boost_view("confirm", _("Send"), hidden=True)
     def send_missive(self, request, obj, confirmed=False):
-        waiting = self.confirm_action(
-            request, obj, confirmed, _("Are you sure you want to send this missive?")
-        )
+        waiting = self.confirm_action(request, obj, confirmed, _("Are you sure you want to send this missive?"))
         if waiting:
             return waiting
         obj.send_missive()
@@ -672,9 +649,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
 
     @admin_boost_action("cancel_missive", _("Cancel"))
     def handle_cancel_missive(self, request, object_id):
-        self.call_object_method(
-            request, object_id, "cancel_missive", _("Missive cancelled successfully.")
-        )
+        self.call_object_method(request, object_id, "cancel_missive", _("Missive cancelled successfully."))
 
     def has_delete_missive_permission(self, request, obj=None):
         return bool(
@@ -732,10 +707,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
 
     def has_refresh_from_provider_permission(self, request, obj=None):
         return bool(
-            self.has_action_rights(request, obj)
-            and obj
-            and obj.pk
-            and self.provider_has_service(obj, "retrieve")
+            self.has_action_rights(request, obj) and obj and obj.pk and self.provider_has_service(obj, "retrieve")
         )
 
     @admin_boost_view("confirm", _("Retrieve from provider"))
@@ -772,14 +744,10 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
 
     @admin_boost_action("retrieve_missive", _("Status"))
     def handle_retrieve_missive(self, request, object_id):
-        self.call_object_method(
-            request, object_id, "retrieve_missive", _("Missive status updated successfully.")
-        )
+        self.call_object_method(request, object_id, "retrieve_missive", _("Missive status updated successfully."))
 
     def has_retrieve_tracking_numbers_permission(self, request, obj=None):
-        return bool(
-            self.has_action_rights(request, obj) and obj and obj.can_tracking_numbers()
-        )
+        return bool(self.has_action_rights(request, obj) and obj and obj.can_tracking_numbers())
 
     @admin_boost_action("retrieve_tracking_numbers", _("Tracking number"))
     def handle_retrieve_tracking_numbers(self, request, object_id):
@@ -831,9 +799,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
 
     @admin_boost_action("set_billed", _("Mark as paid"))
     def handle_set_billed(self, request, object_id):
-        self.call_object_method(
-            request, object_id, "set_billed", _("Missive marked as paid successfully.")
-        )
+        self.call_object_method(request, object_id, "set_billed", _("Missive marked as paid successfully."))
 
     def has_handle_history_permission(self, request, obj=None):
         return bool(obj and obj.pk and obj.count_history)
@@ -876,7 +842,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
                 '<input type="hidden" name="csrfmiddlewaretoken" value="{}">'
                 '<input type="hidden" name="filename" value="{}">'
                 '<button type="submit">{}</button>'
-                '</form></div>',
+                "</form></div>",
                 url_download,
                 csrf,
                 proof["filename"],
@@ -884,7 +850,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             )
             for proof in proofs
         ]
-        return {"message": mark_safe(" ".join(str(link) for link in html_links))}
+        return {"message": format_html_join(" ", "{}", ((link,) for link in html_links))}
 
     def has_download_proof_permission(self, request, obj=None):
         return bool(self.has_action_rights(request, obj) and obj and obj.can_proofs())
@@ -899,16 +865,16 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             return HttpResponse(_("Missing filename"), status=400)
         # The provider URL is resolved server-side from the proof listing and is
         # never read from the body, so a forged url cannot be fetched.
-        proof = next(
-            (p for p in obj.get_proofs() if p.get("filename") == filename), None
-        )
+        proof = next((p for p in obj.get_proofs() if p.get("filename") == filename), None)
         if proof is None:
             return HttpResponse(_("Unknown proof"), status=404)
-        content = obj.download_proof(**{
-            "filename": filename,
-            "url": proof["url"],
-            "data": obj.get_serialized_data(attachments=False),
-        })
+        content = obj.download_proof(
+            **{
+                "filename": filename,
+                "url": proof["url"],
+                "data": obj.get_serialized_data(attachments=False),
+            }
+        )
         if content is None:
             messages.warning(request, _("Proof not available"))
             return self.redirect_to_change(obj)
@@ -924,6 +890,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     def save_proofs(self, request, obj, confirmed=False):
         from django.core.files.base import ContentFile
         from ..models.choices import MissiveAttachmentType
+
         waiting = self.confirm_action(
             request,
             obj,
@@ -936,11 +903,13 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         for proof in proofs:
             filename = proof["filename"]
             url = proof["url"]
-            content = obj.download_proof(**{
-                "filename": filename,
-                "url": url,
-                "data": obj.get_serialized_data(attachments=False),
-            })
+            content = obj.download_proof(
+                **{
+                    "filename": filename,
+                    "url": url,
+                    "data": obj.get_serialized_data(attachments=False),
+                }
+            )
             if content is None:
                 continue
             obj.to_missiveattachment.get_or_create(
@@ -960,7 +929,44 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
 
     @admin_boost_action("get_billings", _("Get billings"))
     def handle_get_billings(self, request, object_id):
-        obj = self.call_object_method(
-            request, object_id, "get_billings", _("Billings retrieved successfully.")
-        )
+        obj = self.call_object_method(request, object_id, "get_billings", _("Billings retrieved successfully."))
         return self.redirect_to_change(obj)
+
+    def get_boost_list_tools(self, request):
+        tools = super().get_boost_list_tools(request)
+        if is_fake_provider_allowed():
+            return tools
+        return [item for item in tools if not str(item.get("url", "")).rstrip("/").endswith("fake-webhooks")]
+
+    @admin_boost_view("confirm", _("Fake webhooks"), requires_object=False)
+    def fake_webhooks(self, request, confirmed=False):
+        """Enqueue a random webhook for every sent fake missive."""
+        self.require_action_rights(request)
+        changelist = reverse("admin:django_pymissive_missive_changelist")
+        if not is_fake_provider_allowed():
+            messages.error(
+                request,
+                _("Fake provider is disabled: set PYMISSIVE_ALLOW_FAKE_PROVIDER to use it."),
+            )
+            return redirect(changelist)
+        count = sent_fake_missives().count()
+        if not confirmed:
+            return {
+                "confirm": format_lazy(
+                    _(
+                        "Post a random webhook for each of {count} sent fake "
+                        "missive(s)? Each recipient is set to delivered, failed, "
+                        "still in progress, or cancelled."
+                    ),
+                    count=count,
+                ),
+            }
+        delay_fake_webhooks()
+        messages.info(
+            request,
+            format_lazy(
+                _("Fake webhooks started for {count} missive(s)."),
+                count=count,
+            ),
+        )
+        return redirect(changelist)

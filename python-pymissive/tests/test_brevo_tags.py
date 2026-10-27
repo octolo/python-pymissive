@@ -27,7 +27,16 @@ def test_tags_accepts_list_string_and_webhook_json():
     assert provider._tags('["welcome", "invoice"]') == ["welcome", "invoice"]
     assert provider._tags(None) == []
     assert provider._tags(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]) == [
-        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "f",
+        "g",
+        "h",
+        "i",
+        "j",
     ]
 
 
@@ -73,7 +82,8 @@ def brevo_email_sdk(monkeypatch):
     monkeypatch.setitem(sys.modules, "brevo.transactional_emails", emails)
 
 
-def test_send_email_forwards_tags(monkeypatch, brevo_email_sdk):
+@pytest.mark.usefixtures("brevo_email_sdk")
+def test_send_email_forwards_tags(monkeypatch):
     monkeypatch.delenv("PYMISSIVE_DISABLE_SEND", raising=False)
     provider = _provider()
     client = MagicMock()
@@ -95,7 +105,8 @@ def test_send_email_forwards_tags(monkeypatch, brevo_email_sdk):
     assert sent["tags"] == ["welcome", "invoice"]
 
 
-def test_send_email_omits_empty_tags(monkeypatch, brevo_email_sdk):
+@pytest.mark.usefixtures("brevo_email_sdk")
+def test_send_email_omits_empty_tags(monkeypatch):
     monkeypatch.delenv("PYMISSIVE_DISABLE_SEND", raising=False)
     provider = _provider()
     client = MagicMock()
@@ -143,9 +154,7 @@ def test_retrieve_events_email_filters_by_tags():
     client.transactional_emails.get_email_event_report.return_value = SimpleNamespace(events=[])
     provider._get_email_client = MagicMock(return_value=client)
 
-    provider.retrieve_events(
-        date(2026, 8, 20), date(2026, 8, 20), missive_type="email", tags=["invoice"]
-    )
+    provider.retrieve_events(date(2026, 8, 20), date(2026, 8, 20), missive_type="email", tags=["invoice"])
 
     sent = client.transactional_emails.get_email_event_report.call_args.kwargs
     assert sent["tags"] == '["invoice"]'
@@ -159,10 +168,8 @@ def test_retrieve_events_sms_filters_by_tags(monkeypatch):
         captured["query"] = parse_qs(urlparse(req.full_url).query)
         return _Body(b'{"events": []}')
 
-    monkeypatch.setattr("pymissive.providers.brevo.urlopen", urlopen)
-    provider.retrieve_events(
-        date(2026, 8, 20), date(2026, 8, 20), missive_type="sms", tags=["invoice"]
-    )
+    monkeypatch.setattr("pymissive.providers.brevo.provider.urlopen", urlopen)
+    provider.retrieve_events(date(2026, 8, 20), date(2026, 8, 20), missive_type="sms", tags=["invoice"])
 
     assert captured["query"]["tags"] == ['["invoice"]']
 
@@ -178,9 +185,7 @@ def test_send_email_sdk_body_contains_tags(monkeypatch):
     captured = {}
 
     def fake_request(self, path=None, *, method, json=None, omit=None, request_options=None, **kwargs):
-        body, _data = get_request_body(
-            json=json, data=None, request_options=request_options, omit=omit
-        )
+        body, _data = get_request_body(json=json, data=None, request_options=request_options, omit=omit)
         captured["path"] = path
         captured["body"] = body
 

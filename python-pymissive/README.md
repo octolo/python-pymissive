@@ -67,7 +67,7 @@ messaging platforms, where the sender identity is the bot rather than an address
 
 | Provider | Class | Missive types | Extra |
 |---|---|---|---|
-| Brevo | `BrevoAPIProvider` | `email`, `sms`, `whatsapp`, `branded` | `[brevo]` |
+| Brevo | `BrevoAPIProvider` | `email`, `sms`, `branded` (including WhatsApp) | `[brevo]` |
 | Scaleway | `ScalewayProvider` | `email`, `branded` | `[scaleway]` |
 | Maileva | `MailevaProvider` | `letter`, `registered_letter`, `branded` | — |
 | SMSPartner | `PartnerProvider` | `sms`, `branded` | — |
@@ -76,9 +76,17 @@ messaging platforms, where the sender identity is the bot rather than an address
 | Discord | `DiscordProvider` | `branded` | `[discord]` |
 | Hand delivery | `HandDeliveryProvider` | `hand_delivery`, `branded` | — |
 
-`providers/todo/` holds one-class placeholders (SendGrid, Mailgun, Twilio,
-Telegram, FCM, APN, SMTP, …). They are a backlog, not an API: they are not
-importable and nothing is wired to them.
+### Planned providers
+
+The following providers are roadmap items only. They are not shipped as Python
+modules and cannot be imported:
+
+- **Email**: Django email backend, SMTP, SendGrid, Mailgun, Amazon SES
+- **SMS**: Twilio, Vonage
+- **Instant messaging**: Telegram, Signal, Messenger
+- **Postal and registered delivery**: La Poste, AR24, Certeurope
+- **Push notifications**: Firebase Cloud Messaging (FCM), Apple Push
+  Notification service (APNs), in-app notifications
 
 ## Architecture
 
@@ -119,14 +127,15 @@ For more details, see the documentation in the `docs/` folder:
 ## Development
 
 ```bash
-pip install -e .
+pip install -e ".[test]"
 
-# Lint (same command as CI, from the repository root)
+# Tests and lint
+python -m pytest
 ruff check src
 ```
 
-This package has no test suite of its own yet: CI only checks that it imports.
-The behaviour of the providers is covered by the suite in `django-pymissive/`.
+The core package has its own provider, CLI, webhook and packaging tests under
+`tests/`. Django integration tests live separately in `django-pymissive/tests/`.
 
 ## License
 

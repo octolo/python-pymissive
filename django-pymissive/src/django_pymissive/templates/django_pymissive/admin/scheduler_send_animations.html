@@ -1,0 +1,109 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls django_pymissive_animations %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+{% pymissive_animations_css %}
+<style>
+  .send-animations { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  .send-animations .plain { margin: 0; padding: 16px; border: 1px solid var(--hairline-color); border-radius: 8px; }
+  @media (max-width: 760px) {
+    .send-animations { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{{ changelist_url }}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; <a href="{{ original_url }}">{{ original }}</a>
+  &rsaquo; {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+{% if frames %}
+<div id="send-animations" class="send-animations" data-progress-url="{{ progress_url }}" data-poll-ms="2000">
+  {% for frame in frames %}
+    {% if frame.preset %}
+    <div id="frame-{{ frame.missive_type }}"></div>
+    {% else %}
+    <p class="plain" id="plain-{{ frame.missive_type }}">{{ frame.label }}</p>
+    {% endif %}
+  {% endfor %}
+</div>
+{{ frames|json_script:"send-animation-frames" }}
+{% else %}
+<p>{% translate "Nothing to send on this run." %}</p>
+{% endif %}
+{% endblock %}
+
+{% block extrabody %}
+{{ block.super }}
+{% if frames %}
+{% pymissive_animations_labels %}
+{% pymissive_animations_js %}
+<script>
+  const root = document.getElementById("send-animations");
+  const frames = JSON.parse(document.getElementById("send-animation-frames").textContent);
+  const widgets = {};
+
+  function apply(frame, finished) {
+    const widget = widgets[frame.missive_type];
+    if (widget) {
+      widget.counter.update(frame.remaining, frame.total, frame.errors);
+      widget.counter.setSummary(finished && frame.total > 0);
+      return;
+    }
+    const plain = document.getElementById("plain-" + frame.missive_type);
+    if (plain) plain.textContent = frame.label + " — " + frame.remaining + " / " + frame.total;
+  }
+
+  frames.forEach(frame => {
+    if (!frame.preset) {
+      apply(frame, false);
+      return;
+    }
+    widgets[frame.missive_type] = PymissiveAnimation.mountCard(
+      "frame-" + frame.missive_type,
+      frame.preset,
+      {
+        title: frame.label,
+        total: frame.total,
+        remaining: frame.remaining,
+        errors: frame.errors,
+        counter: true,
+        summary: frame.remaining === 0 && frame.total > 0,
+      }
+    );
+  });
+
+  const pollMs = Number(root.dataset.pollMs || 2000);
+  async function refresh() {
+    let response;
+    try {
+      response = await fetch(root.dataset.progressUrl, { headers: { Accept: "application/json" } });
+    } catch (error) {
+      return;
+    }
+    if (!response.ok) return;
+    const data = await response.json();
+    const finished = data.status === "completed" || data.status === "cancelled";
+    frames.forEach(frame => {
+      const counts = (data.by_type || {})[frame.missive_type];
+      if (!counts) return;
+      frame.total = counts.total;
+      frame.remaining = Math.max(0, counts.total - counts.sent - counts.error);
+      frame.errors = counts.error;
+      apply(frame, finished);
+    });
+    if (!finished) setTimeout(refresh, pollMs);
+  }
+  setTimeout(refresh, pollMs);
+</script>
+{% endif %}
+{% endblock %}

@@ -121,6 +121,12 @@ body {
     background: #2563eb;
 }
 
+.scheduler-speed {
+    margin: 8px 0 0;
+    font-size: 0.85rem;
+    color: #4b5563;
+}
+
 .scheduler-errors,
 .type-errors {
     margin: 8px 0 0;

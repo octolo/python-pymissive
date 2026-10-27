@@ -31,9 +31,7 @@ def test_seed_creates_categories_then_contacts_with_category():
 
 def test_seed_tops_up_only_the_missing_rows():
     Category.objects.create(name="Pro")
-    Contact.objects.create(
-        first_name="Ada", last_name="Lovelace", email="ada@example.com"
-    )
+    Contact.objects.create(first_name="Ada", last_name="Lovelace", email="ada@example.com")
     call_command("seed_fake_contacts", ncategory=3, ncontact=4)
     assert Category.objects.count() == 3
     assert Contact.objects.count() == 4
@@ -45,18 +43,10 @@ def test_seed_tops_up_only_the_missing_rows():
 def test_seed_randcampaign_and_randmissive_default_to_one_each():
     call_command("seed_fake_contacts", ncategory=2, ncontact=4)
     campaign = MissiveCampaign.objects.create(subject="camp")
-    missive = Missive.objects.create(
-        missive_type="email", subject="m", body_rich="<p>hi</p>"
-    )
+    missive = Missive.objects.create(missive_type="email", subject="m", body_rich="<p>hi</p>")
     call_command("seed_fake_contacts", randcampaign=1, randmissive=1, seed=1)
-    campaign_objs = [
-        rel.content_object
-        for rel in CampaignRelatedObject.objects.filter(campaign=campaign)
-    ]
-    missive_objs = [
-        rel.content_object
-        for rel in MissiveRelatedObject.objects.filter(missive=missive)
-    ]
+    campaign_objs = [rel.content_object for rel in CampaignRelatedObject.objects.filter(campaign=campaign)]
+    missive_objs = [rel.content_object for rel in MissiveRelatedObject.objects.filter(missive=missive)]
     assert sum(isinstance(obj, Contact) for obj in campaign_objs) == 1
     assert sum(isinstance(obj, Category) for obj in campaign_objs) == 1
     assert sum(isinstance(obj, Contact) for obj in missive_objs) == 1
@@ -69,18 +59,10 @@ def test_seed_randcampaign_and_randmissive_default_to_one_each():
 def test_seed_rand_count_attaches_n_of_each_type():
     call_command("seed_fake_contacts", ncategory=3, ncontact=4)
     campaign = MissiveCampaign.objects.create(subject="camp")
-    missive = Missive.objects.create(
-        missive_type="email", subject="m", body_rich="<p>hi</p>"
-    )
+    missive = Missive.objects.create(missive_type="email", subject="m", body_rich="<p>hi</p>")
     call_command("seed_fake_contacts", randcampaign=2, randmissive=2, seed=1)
-    campaign_objs = [
-        rel.content_object
-        for rel in CampaignRelatedObject.objects.filter(campaign=campaign)
-    ]
-    missive_objs = [
-        rel.content_object
-        for rel in MissiveRelatedObject.objects.filter(missive=missive)
-    ]
+    campaign_objs = [rel.content_object for rel in CampaignRelatedObject.objects.filter(campaign=campaign)]
+    missive_objs = [rel.content_object for rel in MissiveRelatedObject.objects.filter(missive=missive)]
     assert sum(isinstance(obj, Contact) for obj in campaign_objs) == 2
     assert sum(isinstance(obj, Category) for obj in campaign_objs) == 2
     assert sum(isinstance(obj, Contact) for obj in missive_objs) == 2

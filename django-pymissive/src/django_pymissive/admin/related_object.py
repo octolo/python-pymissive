@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
-from django_boosted import AdminBoostModel
+from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
 from django.utils.html import format_html
 from django.urls import reverse
 
@@ -21,7 +21,7 @@ class BaseRelatedObjectAdmin:
             )
         except Exception:
             return None
-    
+
     @admin.display(description=_("Object URL Link"))
     def object_url_link_display(self, obj):
         """Return a link to the related object in the admin site."""
@@ -44,7 +44,9 @@ class MissiveRelatedObjectInline(admin.TabularInline, BaseRelatedObjectAdmin):
         "object_id",
         "object_url_link_display",
     ]
-    readonly_fields = ["object_url_link_display",]
+    readonly_fields = [
+        "object_url_link_display",
+    ]
 
 
 @admin.register(MissiveRelatedObject)
@@ -72,7 +74,9 @@ class MissiveRelatedObjectAdmin(AdminBoostModel, BaseRelatedObjectAdmin):
         "object_url_link_display",
         "created_at",
     ]
-    raw_id_fields = ["missive",]
+    raw_id_fields = [
+        "missive",
+    ]
 
     def change_fieldsets(self):
         """Configure fieldsets for change view."""
@@ -96,8 +100,9 @@ class CampaignRelatedObjectInline(admin.TabularInline, BaseRelatedObjectAdmin):
         "object_id",
         "object_url_link_display",
     ]
-    readonly_fields = ["object_url_link_display",]
-
+    readonly_fields = [
+        "object_url_link_display",
+    ]
 
 
 @admin.register(CampaignRelatedObject)
@@ -122,7 +127,9 @@ class CampaignRelatedObjectAdmin(AdminBoostModel, BaseRelatedObjectAdmin):
         "created_at",
         "updated_at",
     ]
-    raw_id_fields = ["campaign",]
+    raw_id_fields = [
+        "campaign",
+    ]
 
     def change_fieldsets(self):
         """Configure fieldsets for change view."""

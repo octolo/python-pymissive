@@ -46,9 +46,7 @@ def _process_billing(missive, bill):
     lookup = {
         "missive": missive,
         "invoice": bill.get("invoice") or None,
-        "recipient": (
-            get_recipient(missive, bill["recipient"]) if bill.get("recipient") else None
-        ),
+        "recipient": (get_recipient(missive, bill["recipient"]) if bill.get("recipient") else None),
     }
     defaults = {
         "billing_amount": bill.get("billing_amount"),
@@ -63,9 +61,7 @@ def _lookup_billing_missive(bill) -> Missive | None:
     missive = lookup_missive(partner_id=bill.get("external_id"))
     if missive is not None:
         return missive
-    return lookup_missive(
-        uid=bill.get("substitute_id") or bill.get("user_reference")
-    )
+    return lookup_missive(uid=bill.get("substitute_id") or bill.get("user_reference"))
 
 
 def load_provider_billings(**kwargs) -> list:
@@ -74,7 +70,10 @@ def load_provider_billings(**kwargs) -> list:
 
     provider = kwargs.get("provider")
     provider = MissiveProviderModel.objects.get(name=provider)
-    service_name = provider_service_name("get_billings", kwargs.get("missive_type"))
+    missive_type = kwargs.get("missive_type")
+    if not isinstance(missive_type, str):
+        raise TypeError("missive_type must be a string")
+    service_name = provider_service_name("get_billings", missive_type)
     if not hasattr(provider._provider, service_name):
         return []
     billings = provider._provider.call_service_formatted(service_name, **kwargs)
@@ -103,12 +102,8 @@ def retrieve_billings(*, provider, missive_type, start_date, end_date):
     provider_obj = MissiveProviderModel.objects.get(name=str(provider))
     service = provider_service_name("retrieve_billings", missive_type)
     if not hasattr(provider_obj._provider, service):
-        raise ValidationError(
-            _("This provider does not support billings for this missive type.")
-        )
-    raw = provider_obj._provider.call_service(
-        service, start_date=start_date, end_date=end_date
-    )
+        raise ValidationError(_("This provider does not support billings for this missive type."))
+    raw = provider_obj._provider.call_service(service, start_date=start_date, end_date=end_date)
     if isinstance(raw, dict):
         raw = raw.get("billings") or raw.get("items") or raw
     if not isinstance(raw, list):
@@ -160,14 +155,16 @@ def _csv_value(value) -> str:
 
 def billings_export_queryset(*, start_date, end_date, provider=None, missive_type=None):
     """Billings whose ``created_at`` falls in ``[start_date, end_date]``."""
-    qs = MissiveBilling.objects.select_related(
-        "missive", "missive__campaign", "recipient"
-    ).prefetch_related(
-        "missive__to_missiverelatedobject__content_type",
-        "missive__campaign__to_campaignrelatedobject__content_type",
-    ).filter(
-        created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
+    qs = (
+        MissiveBilling.objects.select_related("missive", "missive__campaign", "recipient")
+        .prefetch_related(
+            "missive__to_missiverelatedobject__content_type",
+            "missive__campaign__to_campaignrelatedobject__content_type",
+        )
+        .filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+        )
     )
     if provider:
         qs = qs.filter(missive__provider=str(provider))
@@ -210,9 +207,7 @@ def related_objects_by_content_type(missive) -> dict:
     seen: set[tuple[str, object]] = set()
     _collect_live_related(missive.to_missiverelatedobject, into=grouped, seen=seen)
     if getattr(missive, "campaign_id", None):
-        _collect_live_related(
-            missive.campaign.to_campaignrelatedobject, into=grouped, seen=seen
-        )
+        _collect_live_related(missive.campaign.to_campaignrelatedobject, into=grouped, seen=seen)
     return grouped
 
 
@@ -254,7 +249,7 @@ def extra_field_widths(grouped_list: list[dict], extra_fields: list[str]) -> dic
 
 
 def extra_field_headers(extra_fields: list[str], widths: dict[str, int]) -> list[str]:
-    headers = []
+    headers: list[str] = []
     for path in extra_fields:
         n = widths.get(_path_content_type(path), 1)
         headers.extend(f"{path}.{i}" for i in range(1, n + 1))
@@ -373,10 +368,7 @@ def _pivot_identity_row(group) -> list[str]:
 def _extra_columns(billings, extra_fields):
     if not extra_fields:
         return [{} for _ in billings], {}
-    grouped_list = [
-        related_objects_by_content_type(billing.missive) if billing.missive else {}
-        for billing in billings
-    ]
+    grouped_list = [related_objects_by_content_type(billing.missive) if billing.missive else {} for billing in billings]
     widths = extra_field_widths(grouped_list, extra_fields)
     return grouped_list, widths
 

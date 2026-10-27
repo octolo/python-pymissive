@@ -9,9 +9,7 @@ from pymissive.providers.maileva import MailevaProvider
 def _provider():
     provider = MailevaProvider.__new__(MailevaProvider)
     provider.is_mode_sandbox = lambda: False
-    provider.get_endpoint = (
-        lambda endpoint, prefix="api": "https://api.maileva.com/billing/v1/recipient_items"
-    )
+    provider.get_endpoint = lambda _endpoint, prefix="api": "https://api.maileva.com/billing/v1/recipient_items"
     provider._get_headers = lambda: {}
     return provider
 
@@ -58,14 +56,12 @@ def test_retrieve_billings_paginates_and_maps_user_reference():
     }
     pages = [first_page, second_page]
 
-    def fake_request(method, url, headers=None, timeout=None, params=None, **kwargs):
+    def fake_request(_method, url, params=None, **_kwargs):
         captured.append({"url": url, "params": params})
         return FakeResponse(pages[len(captured) - 1])
 
     with patch("pymissive.providers.maileva.requests.request", fake_request):
-        result = MailevaProvider.retrieve_billings(
-            _provider(), date(2026, 8, 1), date(2026, 8, 31)
-        )
+        result = MailevaProvider.retrieve_billings(_provider(), date(2026, 8, 1), date(2026, 8, 31))
 
     assert len(result["billings"]) == 101
     first = result["billings"][0]
@@ -92,7 +88,5 @@ def test_retrieve_billings_paginates_and_maps_user_reference():
 def test_retrieve_billings_sandbox_is_empty():
     provider = _provider()
     provider.is_mode_sandbox = lambda: True
-    result = MailevaProvider.retrieve_billings(
-        provider, "2026-08-01", "2026-08-31"
-    )
+    result = MailevaProvider.retrieve_billings(provider, "2026-08-01", "2026-08-31")
     assert result == {"billings": []}

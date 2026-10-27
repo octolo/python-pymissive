@@ -39,7 +39,7 @@ Usage::
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from pymissive.config import MISSIVE_TYPES, missive_support_for_type, normalize_missive_type
 
@@ -62,6 +62,20 @@ def _support_for_type(missive_type: str) -> str:
         f"Unknown missive_type {missive_type!r}: no support category found. "
         f"Available types: {', '.join(sorted(MISSIVE_TYPES))}."
     )
+
+
+def _defined_fields(**values):
+    return {field: value for field, value in values.items() if value is not None}
+
+
+def _recipient_model_and_value(support, models, *, email, phone, address, notification_id):
+    if support == "email":
+        return models["email"], ("email", email)
+    if support == "phone":
+        return models["phone"], ("phone", phone)
+    if support == "address":
+        return models["address"], ("address", address)
+    return models["application"], ("notification_id", notification_id)
 
 
 def send_missive(
@@ -173,51 +187,48 @@ def send_missive(
     # Resolve (and validate) the support before creating any DB row.
     support = _support_for_type(missive_type)
 
-    missive_kwargs: dict = {
+    missive_kwargs = {
         "missive_type": missive_type,
         "status": MissiveStatus.DRAFT,
+        **_defined_fields(
+            subject=subject,
+            body_rich=body_rich,
+            body_text=body_text,
+            sender_name=sender_name,
+            sender_email=sender_email,
+            sender_phone=sender_phone,
+            sender_address=sender_address,
+            reply_to_name=reply_to_name,
+            reply_to_email=reply_to_email,
+            campaign=campaign,
+            provider=provider,
+            acknowledgement=acknowledgement,
+            delivery_mode=delivery_mode,
+            priority=priority,
+            brand_name=brand_name,
+        ),
     }
-    for _field, _value in (
-        ("subject", subject),
-        ("body_rich", body_rich),
-        ("body_text", body_text),
-        ("sender_name", sender_name),
-        ("sender_email", sender_email),
-        ("sender_phone", sender_phone),
-        ("sender_address", sender_address),
-        ("reply_to_name", reply_to_name),
-        ("reply_to_email", reply_to_email),
-        ("campaign", campaign),
-        ("provider", provider),
-        ("acknowledgement", acknowledgement),
-        ("delivery_mode", delivery_mode),
-        ("priority", priority),
-        ("brand_name", brand_name),
-    ):
-        if _value is not None:
-            missive_kwargs[_field] = _value
     if extra_missive_fields:
         missive_kwargs.update(extra_missive_fields)
 
     missive = Missive.objects.create(**missive_kwargs)
 
     recipient_kwargs: dict = {"missive": missive, "name": name}
-    if support == "email":
-        recipient_cls = MissiveRecipientEmail
-        if email is not None:
-            recipient_kwargs["email"] = email
-    elif support == "phone":
-        recipient_cls = MissiveRecipientPhone
-        if phone is not None:
-            recipient_kwargs["phone"] = phone
-    elif support == "address":
-        recipient_cls = MissiveRecipientAddress
-        if address is not None:
-            recipient_kwargs["address"] = address
-    else:
-        recipient_cls = MissiveRecipientApplication
-        if notification_id is not None:
-            recipient_kwargs["notification_id"] = notification_id
+    recipient_cls, (recipient_field, recipient_value) = _recipient_model_and_value(
+        support,
+        {
+            "email": MissiveRecipientEmail,
+            "phone": MissiveRecipientPhone,
+            "address": MissiveRecipientAddress,
+            "application": MissiveRecipientApplication,
+        },
+        email=email,
+        phone=phone,
+        address=address,
+        notification_id=notification_id,
+    )
+    if recipient_value is not None:
+        recipient_kwargs[recipient_field] = recipient_value
     if extra_recipient_fields:
         recipient_kwargs.update(extra_recipient_fields)
 
@@ -247,7 +258,7 @@ def _make_type_shortcut(missive_type: str):
 
 
 # ── auto-generate send_<type>() for every registered missive type ──────────
-_shortcuts: dict[str, "callable"] = {}
+_shortcuts: dict[str, Callable[..., "Missive"]] = {}
 
 for _mt in MISSIVE_TYPES:
     _fn_name, _fn = _make_type_shortcut(_mt)

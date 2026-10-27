@@ -67,9 +67,7 @@ def test_export_form_requires_dates():
 
 
 def test_export_form_rejects_end_before_start():
-    form = ExportBillingsForm(
-        data={"start_date": "2026-02-01", "end_date": "2026-01-01"}
-    )
+    form = ExportBillingsForm(data={"start_date": "2026-02-01", "end_date": "2026-01-01"})
     assert form.is_valid() is False
 
 
@@ -147,9 +145,7 @@ def test_csv_includes_recipient_and_amounts():
 
 
 def test_admin_export_csv_get_renders_form():
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missivebilling_export_csv")
@@ -160,9 +156,7 @@ def test_admin_export_csv_get_renders_form():
 
 def test_admin_export_csv_post_downloads_file():
     _billing(created_on=(2026, 8, 10))
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missivebilling_export_csv")
@@ -188,9 +182,7 @@ def test_csv_without_extra_fields_does_not_resolve_related_objects():
         start_date=date(2026, 1, 1),
         end_date=date(2026, 1, 31),
     )
-    with patch(
-        "django_pymissive.billings.related_objects_by_content_type"
-    ) as related:
+    with patch("django_pymissive.billings.related_objects_by_content_type") as related:
         csv_text = render_billings_csv(qs)
     related.assert_not_called()
     assert "1.2500" in csv_text
@@ -317,9 +309,7 @@ def test_csv_related_object_fields_expand_one_column_per_object():
 
 def test_admin_export_csv_post_includes_related_fields():
     _billing_with_contact(last_name="Dupont", category_name="VIP", created_on=(2026, 8, 10))
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missivebilling_export_csv")
@@ -422,9 +412,7 @@ def test_admin_export_csv_one_row_checkbox():
         missive=missive,
         billing_amount=Decimal("2.0000"),
     )
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missivebilling_export_csv")
@@ -440,4 +428,3 @@ def test_admin_export_csv_one_row_checkbox():
     rows = list(csv.reader(StringIO(_response_text(response))))
     assert "registered letter" in rows[0]
     assert rows[1][rows[0].index("registered letter")] == "2.0000"
-

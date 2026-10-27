@@ -34,17 +34,13 @@ def test_missive_save_leaves_substitute_id_null():
 
 def test_recipient_save_leaves_substitute_id_null():
     missive = _email_missive()
-    rec = MissiveRecipientEmail.objects.create(
-        missive=missive, name="Alice", email="alice@example.com"
-    )
+    rec = MissiveRecipientEmail.objects.create(missive=missive, name="Alice", email="alice@example.com")
     assert rec.substitute_id is None
 
 
 def test_serialized_recipient_sends_null_substitute_id_when_unset():
     missive = _email_missive()
-    rec = MissiveRecipientEmail.objects.create(
-        missive=missive, name="Alice", email="alice@example.com"
-    )
+    rec = MissiveRecipientEmail.objects.create(missive=missive, name="Alice", email="alice@example.com")
     data = rec.get_serialized_data()
     assert data["substitute_id"] is None
     assert data["id"] == str(rec.id)
@@ -119,9 +115,11 @@ def test_retrieve_stores_missive_and_recipient_substitute_id():
         ],
         "events": [],
     }
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive, "call_provider_service", return_value=response
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value=response),
+        patch.object(Missive, "handle_events"),
+    ):
         missive, created = retrieve_from_provider(
             provider="brevo",
             missive_type=MissiveType.EMAIL,
@@ -138,11 +136,15 @@ def test_retrieve_stores_missive_and_recipient_substitute_id():
 
 def test_retrieve_from_uid_without_custom_id_keeps_uid_as_substitute():
     uid = uuid4()
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={"external_id": "from-uid", "subject": "From uid", "events": []},
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={"external_id": "from-uid", "subject": "From uid", "events": []},
+        ),
+        patch.object(Missive, "handle_events"),
+    ):
         missive, created = retrieve_from_provider(
             provider="brevo",
             missive_type=MissiveType.EMAIL,
@@ -154,16 +156,20 @@ def test_retrieve_from_uid_without_custom_id_keeps_uid_as_substitute():
 
 def test_retrieve_does_not_store_pk_as_substitute_id():
     missive = _email_missive(external_id="ext-1")
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={
-            "external_id": "ext-1",
-            "custom_id": str(missive.pk),
-            "subject": "Hello",
-            "events": [],
-        },
-    ), patch.object(Missive, "handle_events"):
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={
+                "external_id": "ext-1",
+                "custom_id": str(missive.pk),
+                "subject": "Hello",
+                "events": [],
+            },
+        ),
+        patch.object(Missive, "handle_events"),
+    ):
         retrieve_from_provider(missive=missive)
     missive.refresh_from_db()
     assert missive.substitute_id is None
@@ -181,9 +187,7 @@ def _billing_provider():
 
     provider = MailevaProvider.__new__(MailevaProvider)
     provider.is_mode_sandbox = lambda: False
-    provider.get_endpoint = (
-        lambda endpoint, prefix="api": "https://api.maileva.com/billing/v1/recipient_items"
-    )
+    provider.get_endpoint = lambda _endpoint, prefix="api": "https://api.maileva.com/billing/v1/recipient_items"
     provider._get_headers = lambda: {}
     return provider
 
@@ -202,7 +206,7 @@ def test_get_billings_registered_letter_user_reference_is_substitute_id_not_exte
         def json(self):
             return {"paging": {"total_results": 0}, "items": []}
 
-    def fake_request(method, url, headers=None, timeout=None, params=None, **kwargs):
+    def fake_request(_method, url, params=None, **_kwargs):
         captured["url"] = url
         captured["params"] = params
         return FakeResponse()
@@ -232,7 +236,7 @@ def test_get_billings_registered_letter_user_reference_falls_back_to_missive_pk(
         def json(self):
             return {"items": []}
 
-    def fake_request(method, url, headers=None, timeout=None, params=None, **kwargs):
+    def fake_request(_method, url, params=None, **_kwargs):
         captured["url"] = url
         captured["params"] = params
         return FakeResponse()
@@ -260,9 +264,7 @@ def test_get_billings_registered_letter_returns_empty_when_not_invoiced():
         def json(self):
             return {"paging": {"total_results": 0}, "items": []}
 
-    with patch(
-        "pymissive.providers.maileva.requests.request", lambda *a, **k: FakeResponse()
-    ):
+    with patch("pymissive.providers.maileva.requests.request", lambda *a, **k: FakeResponse()):
         billings = MailevaProvider.get_billings_registered_letter(
             _billing_provider(),
             id="pk",

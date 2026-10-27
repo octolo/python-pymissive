@@ -49,5 +49,4 @@ __all__ = [
     "MissiveRecipientPhoneManager",
     "MissiveRecipientAddressManager",
     "MissiveRecipientApplicationManager",
-
 ]

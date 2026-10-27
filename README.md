@@ -41,17 +41,17 @@ or pip will look for a released version on PyPI.
 
 ```bash
 # Core library
-cd python-pymissive && pip install -e .
+(cd python-pymissive && pip install -e ".[test]")
 
 # Django integration, against the local core
-cd django-pymissive && pip install -e ../python-pymissive && pip install -e ".[test]"
+(cd django-pymissive && pip install -e ../python-pymissive && pip install -e ".[test]")
 ```
 
-The test suite lives in `django-pymissive/`; the core package has no tests of
-its own yet and CI only checks that it imports.
+Each package has its own test suite:
 
 ```bash
-cd django-pymissive && python manage.py check && python -m pytest
+(cd python-pymissive && python -m pytest)
+(cd django-pymissive && python manage.py check && python -m pytest)
 
 # Linting, from the repository root (same command as CI)
 ruff check python-pymissive/src django-pymissive/src

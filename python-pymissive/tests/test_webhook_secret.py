@@ -18,9 +18,7 @@ def test_same_seed_is_stable():
 
 def test_provider_is_case_insensitive():
     when = date(2026, 9, 14)
-    assert generate_webhook_secret("Brevo", "x", when=when) == generate_webhook_secret(
-        "brevo", "x", when=when
-    )
+    assert generate_webhook_secret("Brevo", "x", when=when) == generate_webhook_secret("brevo", "x", when=when)
 
 
 def test_date_and_extra_change_the_token():
@@ -62,9 +60,7 @@ def test_cli_requires_provider(capsys):
 
 
 def test_cli_secret_prints_the_token(capsys, monkeypatch):
-    monkeypatch.setattr(
-        webhook_cmd, "collect_mouse_entropy", lambda seconds: "mouse-samples"
-    )
+    monkeypatch.setattr(webhook_cmd, "collect_mouse_entropy", lambda seconds: "mouse-samples")
     assert webhook_cmd._webhook_command(["secret", "--provider", "brevo"]) is True
     out = capsys.readouterr().out
     expected = generate_webhook_secret("brevo", "mouse-samples")

@@ -31,12 +31,8 @@ def test_body_text_compiled_uses_sms_signature_for_sms_missive():
         body_text="hello",
     )
     compiled = missive.body_text_compiled
-    assert compiled.endswith(SIGNATURE_SMS), (
-        f"SMS body_text_compiled must carry the SMS signature; got {compiled!r}"
-    )
-    assert SIGNATURE_TEXT not in compiled, (
-        "SMS body_text_compiled must NOT carry the long email signature"
-    )
+    assert compiled.endswith(SIGNATURE_SMS), f"SMS body_text_compiled must carry the SMS signature; got {compiled!r}"
+    assert SIGNATURE_TEXT not in compiled, "SMS body_text_compiled must NOT carry the long email signature"
     assert compiled == missive.body_sms_compiled, (
         "SMS body_text_compiled and body_sms_compiled must agree (one renders "
         "the preview, the other is what the provider receives)"

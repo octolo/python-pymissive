@@ -96,6 +96,96 @@ def _ref(i):
     return f"DATASET-{i:06d}"
 
 
+def _distribution(count, missive_types):
+    per_type = ceil(count / len(missive_types))
+    remaining = count
+    result = {}
+    for missive_type in missive_types:
+        result[missive_type] = min(per_type, remaining)
+        remaining -= result[missive_type]
+    return result
+
+
+def _resolve_campaign(command, campaign_id, subject):
+    from django_pymissive.models import MissiveCampaign
+
+    if campaign_id is None:
+        command.stdout.write("No campaign — missives will be created standalone.")
+        return None
+    if campaign_id:
+        try:
+            campaign = MissiveCampaign.objects_plain.get(pk=campaign_id)
+        except Exception as exc:
+            raise CommandError(f"Campaign not found: {exc}") from exc
+        command.stdout.write(f"Using campaign: {campaign.subject} ({campaign.pk})")
+        return campaign
+    campaign = MissiveCampaign.objects.create(
+        subject=subject or f"Dataset {timezone.now().strftime('%Y-%m-%d %H:%M')}",
+        email_body_rich="<p>Dataset body</p>",
+        email_body_text="Dataset body",
+        phone_body_text="Dataset SMS body",
+    )
+    command.stdout.write(command.style.SUCCESS(f"Created campaign: {campaign.subject} ({campaign.pk})"))
+    return campaign
+
+
+def _recipient_contact(missive_type, index):
+    from django_pymissive.models.choices import MissiveSupport
+
+    if missive_type == "sms":
+        return MissiveSupport.PHONE, {"phone": _phone(index)}
+    if missive_type in ("letter", "registered_letter", "ere", "hand_delivery"):
+        return MissiveSupport.ADDRESS, {"address": _address(index)}
+    return MissiveSupport.EMAIL, {"email": _email(index)}
+
+
+def _create_type_batch(campaign, missive_type, count, start_index):
+    from django_pymissive.models import Missive
+    from django_pymissive.models.choices import (
+        MissiveRecipientType,
+        MissiveStatus,
+    )
+    from django_pymissive.models.recipient import MissiveRecipient
+
+    missives = []
+    for index in range(start_index, start_index + count):
+        name = _name(index)
+        reference = _ref(index)
+        missive = Missive(
+            **({} if campaign is None else {"campaign": campaign}),
+            missive_type=missive_type,
+            subject=f"[{missive_type.upper()}] Test {reference}",
+            body_rich=_BODY_RICH.get(missive_type, "").format(name=name, ref=reference) or None,
+            body_text=_BODY_TEXT.get(missive_type, "").format(name=name, ref=reference) or None,
+            status=MissiveStatus.DRAFT,
+        )
+        missive._ensure_missive_defaults()
+        missives.append(missive)
+
+    created = Missive.objects.bulk_create(missives)
+    recipients = []
+    for offset, missive in enumerate(created):
+        index = start_index + offset
+        support, contact = _recipient_contact(missive_type, index)
+        recipients.append(
+            MissiveRecipient(
+                missive=missive,
+                recipient_type=MissiveRecipientType.RECIPIENT,
+                recipient_support=support,
+                name=_name(index),
+                **contact,
+            )
+        )
+    MissiveRecipient.objects.bulk_create(recipients)
+    return len(created)
+
+
+def _success_message(total_created, campaign):
+    if campaign is None:
+        return f"\n✓ {total_created} standalone missive(s) created"
+    return f"\n✓ {total_created} missive(s) created in campaign '{campaign.subject}' ({campaign.pk})"
+
+
 class Command(BaseCommand):
     help = (
         "Generate a synthetic dataset of DRAFT missives for testing. "
@@ -144,136 +234,33 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from django_pymissive.models import MissiveCampaign, Missive
-        from django_pymissive.models.recipient import MissiveRecipient
-        from django_pymissive.models.choices import (
-            MissiveRecipientType,
-            MissiveStatus,
-            MissiveSupport,
-        )
-
         count = options["count"]
         if count < 1:
             raise CommandError("count must be ≥ 1.")
 
-        types = options["types"] or DEFAULT_TYPES
-        types = [t.lower() for t in types]
-
-        # ---- resolve campaign ----
-        # options["campaign_id"] is:
-        #   None  → flag absent → no campaign
-        #   ""    → --campaign alone → create a new campaign
-        #   "<id>"→ --campaign <uuid> → use existing campaign
-        campaign_id = options.get("campaign_id")
-        if campaign_id is None:
-            campaign = None
-            self.stdout.write("No campaign — missives will be created standalone.")
-        elif campaign_id == "":
-            subject = options["subject"] or f"Dataset {timezone.now().strftime('%Y-%m-%d %H:%M')}"
-            campaign = MissiveCampaign.objects.create(
-                subject=subject,
-                email_body_rich="<p>Dataset body</p>",
-                email_body_text="Dataset body",
-                phone_body_text="Dataset SMS body",
-            )
-            self.stdout.write(self.style.SUCCESS(f"Created campaign: {campaign.subject} ({campaign.pk})"))
-        else:
-            try:
-                campaign = MissiveCampaign.objects_plain.get(pk=campaign_id)
-            except (MissiveCampaign.DoesNotExist, Exception) as exc:
-                raise CommandError(f"Campaign not found: {exc}") from exc
-            self.stdout.write(f"Using campaign: {campaign.subject} ({campaign.pk})")
-
-        # ---- distribute count across types ----
-        per_type = ceil(count / len(types))
-        # adjust last type so total == count
-        distribution = {}
-        remaining = count
-        for i, t in enumerate(types):
-            if i == len(types) - 1:
-                distribution[t] = remaining
-            else:
-                distribution[t] = min(per_type, remaining)
-                remaining -= distribution[t]
+        missive_types = [value.lower() for value in options["types"] or DEFAULT_TYPES]
+        campaign = _resolve_campaign(
+            self,
+            options.get("campaign_id"),
+            options.get("subject"),
+        )
+        distribution = _distribution(count, missive_types)
 
         self.stdout.write(
-            "Distribution: " + " | ".join(f"{t}: {n}" for t, n in distribution.items())
+            "Distribution: " + " | ".join(f"{missive_type}: {amount}" for missive_type, amount in distribution.items())
         )
 
-        # ---- create missives ----
         total_created = 0
         global_index = 0
-
         for missive_type, type_count in distribution.items():
-            missives = []
-            recipients = []
-
-            for i in range(type_count):
-                idx = global_index + i
-                name = _name(idx)
-                ref = _ref(idx)
-
-                body_rich = _BODY_RICH.get(missive_type, "").format(name=name, ref=ref) or None
-                body_text = _BODY_TEXT.get(missive_type, "").format(name=name, ref=ref) or None
-
-                m = Missive(
-                    **({} if campaign is None else {"campaign": campaign}),
-                    missive_type=missive_type,
-                    subject=f"[{missive_type.upper()}] Test {ref}",
-                    body_rich=body_rich,
-                    body_text=body_text,
-                    status=MissiveStatus.DRAFT,
-                )
-                m._ensure_missive_defaults()
-                missives.append(m)
-
-            created = Missive.objects.bulk_create(missives)
-
-            for i, m in enumerate(created):
-                idx = global_index + i
-                name = _name(idx)
-                if missive_type == "email":
-                    recipients.append(MissiveRecipient(
-                        missive=m,
-                        recipient_type=MissiveRecipientType.RECIPIENT,
-                        recipient_support=MissiveSupport.EMAIL,
-                        name=name,
-                        email=_email(idx),
-                    ))
-                elif missive_type == "sms":
-                    recipients.append(MissiveRecipient(
-                        missive=m,
-                        recipient_type=MissiveRecipientType.RECIPIENT,
-                        recipient_support=MissiveSupport.PHONE,
-                        name=name,
-                        phone=_phone(idx),
-                    ))
-                elif missive_type in ("letter", "registered_letter", "ere", "hand_delivery"):
-                    recipients.append(MissiveRecipient(
-                        missive=m,
-                        recipient_type=MissiveRecipientType.RECIPIENT,
-                        recipient_support=MissiveSupport.ADDRESS,
-                        name=name,
-                        address=_address(idx),
-                    ))
-                else:
-                    # generic fallback — email
-                    recipients.append(MissiveRecipient(
-                        missive=m,
-                        recipient_type=MissiveRecipientType.RECIPIENT,
-                        recipient_support=MissiveSupport.EMAIL,
-                        name=name,
-                        email=_email(idx),
-                    ))
-
-            MissiveRecipient.objects.bulk_create(recipients)
-
-            total_created += len(created)
-            global_index += type_count
-            self.stdout.write(f"  {missive_type}: {len(created)} missive(s) created")
-
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"\n✓ {total_created} missive(s) created in campaign '{campaign.subject}' ({campaign.pk})"
+            created = _create_type_batch(
+                campaign,
+                missive_type,
+                type_count,
+                global_index,
             )
-        )
+            total_created += created
+            global_index += type_count
+            self.stdout.write(f"  {missive_type}: {created} missive(s) created")
+
+        self.stdout.write(self.style.SUCCESS(_success_message(total_created, campaign)))

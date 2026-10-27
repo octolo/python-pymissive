@@ -52,9 +52,11 @@ def test_dry_run_skips_provider(settings):
     settings.PYMISSIVE_DISABLE_SEND = False
     missive = _email_missive()
 
-    with patch.object(Missive, "can_send", return_value=True), patch.object(
-        Missive, "get_serialized_data", return_value={}
-    ), patch.object(Missive, "call_provider_service") as call_provider:
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch.object(Missive, "call_provider_service") as call_provider,
+    ):
         missive.send_missive()
 
     call_provider.assert_not_called()
@@ -79,11 +81,11 @@ def test_disable_send_calls_provider_and_records_request(settings):
         "message": "Send disabled (PYMISSIVE_DISABLE_SEND)",
     }
 
-    with patch.object(Missive, "can_send", return_value=True), patch.object(
-        Missive, "get_serialized_data", return_value={}
-    ), patch.object(
-        Missive, "call_provider_service", return_value=dict(disabled_response)
-    ) as call_provider:
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch.object(Missive, "call_provider_service", return_value=dict(disabled_response)) as call_provider,
+    ):
         missive.send_missive()
 
     call_provider.assert_called_once()
@@ -112,9 +114,11 @@ def test_disable_send_persists_staged_external_id(settings):
         "attachments": [],
     }
 
-    with patch.object(Missive, "can_send", return_value=True), patch.object(
-        Missive, "get_serialized_data", return_value={}
-    ), patch.object(Missive, "call_provider_service", return_value=dict(staged_response)):
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch.object(Missive, "call_provider_service", return_value=dict(staged_response)),
+    ):
         missive.send_missive()
 
     missive.refresh_from_db()
@@ -133,11 +137,11 @@ def test_real_send_uses_provider_response(settings):
         "attachments": [],
     }
 
-    with patch.object(Missive, "can_send", return_value=True), patch.object(
-        Missive, "get_serialized_data", return_value={}
-    ), patch.object(
-        Missive, "call_provider_service", return_value=dict(response)
-    ) as call_provider:
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch.object(Missive, "call_provider_service", return_value=dict(response)) as call_provider,
+    ):
         missive.send_missive()
 
     call_provider.assert_called_once()
@@ -158,12 +162,14 @@ def test_real_send_provider_exception_records_error_event(settings):
     settings.PYMISSIVE_DISABLE_SEND = False
     missive = _email_missive()
 
-    with patch.object(Missive, "can_send", return_value=True), patch.object(
-        Missive, "get_serialized_data", return_value={}
-    ), patch.object(
-        Missive,
-        "call_provider_service",
-        side_effect=RuntimeError("provider timeout"),
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            side_effect=RuntimeError("provider timeout"),
+        ),
     ):
         missive.send_missive()
 
@@ -185,9 +191,11 @@ def test_real_send_without_external_id_records_error_event(settings):
 
     response = {"message": "Invalid API key", "code": 401}
 
-    with patch.object(Missive, "can_send", return_value=True), patch.object(
-        Missive, "get_serialized_data", return_value={}
-    ), patch.object(Missive, "call_provider_service", return_value=dict(response)):
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch.object(Missive, "call_provider_service", return_value=dict(response)),
+    ):
         missive.send_missive()
 
     missive.refresh_from_db()
@@ -207,12 +215,14 @@ def test_send_failure_event_survives_atomic_block(settings):
     settings.PYMISSIVE_DISABLE_SEND = False
     missive = _email_missive()
 
-    with patch.object(Missive, "can_send", return_value=True), patch.object(
-        Missive, "get_serialized_data", return_value={}
-    ), patch.object(
-        Missive,
-        "call_provider_service",
-        side_effect=RuntimeError("provider timeout"),
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            side_effect=RuntimeError("provider timeout"),
+        ),
     ):
         with transaction.atomic():
             missive.send_missive()
@@ -229,21 +239,25 @@ def test_each_send_failure_appends_error_event(settings):
     settings.PYMISSIVE_DISABLE_SEND = False
     missive = _email_missive()
 
-    with patch.object(Missive, "can_send", return_value=True), patch.object(
-        Missive, "get_serialized_data", return_value={}
-    ), patch.object(
-        Missive,
-        "call_provider_service",
-        side_effect=RuntimeError("first failure"),
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            side_effect=RuntimeError("first failure"),
+        ),
     ):
         missive.send_missive()
 
-    with patch.object(Missive, "can_send", return_value=True), patch.object(
-        Missive, "get_serialized_data", return_value={}
-    ), patch.object(
-        Missive,
-        "call_provider_service",
-        side_effect=RuntimeError("second failure"),
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            side_effect=RuntimeError("second failure"),
+        ),
     ):
         missive.send_missive()
 
@@ -260,8 +274,9 @@ def test_can_send_allows_error_retry_without_resend():
     missive.status = MissiveStatus.ERROR
     missive.save(update_fields=["status"])
 
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        missive, "check_email", return_value=True
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(missive, "check_email", return_value=True),
     ):
         assert missive.can_send() is True
 
@@ -271,15 +286,16 @@ def test_send_does_not_fetch_billings_and_survives_a_billing_outage(settings):
     settings.PYMISSIVE_DISABLE_SEND = False
     missive = _email_missive()
 
-    with patch.object(Missive, "can_send", return_value=True), patch.object(
-        Missive, "get_serialized_data", return_value={}
-    ), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={"external_id": "prov-1"},
-    ), patch.object(
-        Missive, "get_billings", side_effect=RuntimeError("billing down")
-    ) as get_billings:
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={"external_id": "prov-1"},
+        ),
+        patch.object(Missive, "get_billings", side_effect=RuntimeError("billing down")) as get_billings,
+    ):
         missive.send_missive()
 
     get_billings.assert_not_called()
@@ -294,8 +310,9 @@ def test_can_send_rejects_processing_even_without_external_id():
     missive.external_id = ""
     missive.save(update_fields=["status", "external_id"])
 
-    with patch.object(Missive, "has_service", return_value=True), patch.object(
-        missive, "check_email", return_value=True
+    with (
+        patch.object(Missive, "has_service", return_value=True),
+        patch.object(missive, "check_email", return_value=True),
     ):
         assert missive.can_send() is False
 
@@ -344,13 +361,15 @@ def test_send_missive_second_caller_does_not_hit_provider(settings):
     missive = _email_missive()
     other = Missive.objects.get(pk=missive.pk)
 
-    with patch.object(Missive, "can_send", return_value=True), patch.object(
-        Missive, "get_serialized_data", return_value={}
-    ), patch.object(
-        Missive,
-        "call_provider_service",
-        return_value={"external_id": "prov-1"},
-    ) as call_provider:
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch.object(
+            Missive,
+            "call_provider_service",
+            return_value={"external_id": "prov-1"},
+        ) as call_provider,
+    ):
         missive.send_missive()
         with pytest.raises(MissiveAlreadySending):
             other.send_missive()

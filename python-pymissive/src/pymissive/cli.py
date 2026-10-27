@@ -15,6 +15,7 @@ def main(argv: list[str] | None = None) -> int:
     # --help / -h: show README or command doc
     if args and args[0] in ("--help", "-h"):
         from pymissive.commands.help import print_readme
+
         success = print_readme()
         return 0 if success else 1
 

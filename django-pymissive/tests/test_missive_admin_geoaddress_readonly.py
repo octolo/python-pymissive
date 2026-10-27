@@ -32,9 +32,7 @@ def _postal_missive(**kwargs) -> Missive:
 
 
 def _admin_client():
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     return client
@@ -82,10 +80,7 @@ def test_tracking_number_is_clickable_on_recipient_admin():
     response = client.get(url)
     assert response.status_code == 200
     html = response.content.decode()
-    assert (
-        'href="https://www.laposte.fr/outils/suivre-vos-envois?code=2C123456789FR"'
-        in html
-    )
+    assert 'href="https://www.laposte.fr/outils/suivre-vos-envois?code=2C123456789FR"' in html
     assert "2C123456789FR" in html
     assert 'target="_blank"' in html
 
@@ -108,10 +103,7 @@ def test_tracking_number_is_clickable_on_missive_address_inline():
     response = client.get(url)
     assert response.status_code == 200
     html = response.content.decode()
-    assert (
-        'href="https://www.laposte.fr/outils/suivre-vos-envois?code=2C123456789FR"'
-        in html
-    )
+    assert 'href="https://www.laposte.fr/outils/suivre-vos-envois?code=2C123456789FR"' in html
     assert "2C123456789FR" in html
 
 

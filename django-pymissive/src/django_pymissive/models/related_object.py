@@ -1,5 +1,8 @@
 """MissiveRelatedObject model for linking missives to other models."""
 
+import logging
+from typing import ClassVar
+
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
@@ -11,6 +14,8 @@ from ..managers.related_object import (
     MissiveRelatedObjectManager,
     object_id_value,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class BaseRelatedObject(CommentTimestampedModel):
@@ -32,11 +37,9 @@ class BaseRelatedObject(CommentTimestampedModel):
         editable=False,
         max_length=500,
         verbose_name=_("Object String Representation"),
-        help_text=_(
-            "String representation of the related object (saved for reference if object is deleted)"
-        ),
+        help_text=_("String representation of the related object (saved for reference if object is deleted)"),
     )
-    objects = MissiveRelatedObjectManager()
+    objects: ClassVar[models.Manager] = MissiveRelatedObjectManager()
 
     class Meta:
         abstract = True
@@ -47,17 +50,27 @@ class BaseRelatedObject(CommentTimestampedModel):
     def save(self, *args, **kwargs):
         """Normalize the object id and save the string representation."""
         if self.object_id is not None:
-            self.object_id = object_id_value(self.object_id)
+            model = self.content_type.model_class()
+            self.object_id = object_id_value(
+                self.object_id,
+                pk_field=model._meta.pk if model is not None else None,
+            )
         if self.content_object:
             try:
                 self.object_str = str(self.content_object)
             except Exception:
-                pass
+                logger.warning(
+                    "Unable to render related object %s:%s",
+                    self.content_type_id,
+                    self.object_id,
+                    exc_info=True,
+                )
         super().save(*args, **kwargs)
 
 
 class MissiveRelatedObject(BaseRelatedObject):
     """Model to link a missive to any other Django model."""
+
     missive = models.ForeignKey(
         "django_pymissive.Missive",
         on_delete=models.CASCADE,
@@ -66,7 +79,7 @@ class MissiveRelatedObject(BaseRelatedObject):
         help_text=_("Missive to which this object is related"),
     )
 
-    objects = MissiveRelatedObjectManager()
+    objects: ClassVar[models.Manager] = MissiveRelatedObjectManager()
 
     class Meta:
         verbose_name = _("Missive Related Object")
@@ -86,6 +99,7 @@ class MissiveRelatedObject(BaseRelatedObject):
 
 class CampaignRelatedObject(BaseRelatedObject):
     """Model to link a campaign to any other Django model."""
+
     campaign = models.ForeignKey(
         "django_pymissive.MissiveCampaign",
         on_delete=models.CASCADE,
@@ -94,14 +108,14 @@ class CampaignRelatedObject(BaseRelatedObject):
         help_text=_("Campaign to which this object is related"),
     )
 
-    objects = CampaignRelatedObjectManager()
+    objects: ClassVar[models.Manager] = CampaignRelatedObjectManager()
 
     class Meta:
         verbose_name = _("Campaign Related Object")
         verbose_name_plural = _("Campaign Related Objects")
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["content_type", "object_id"])]
-    
+
     def __str__(self):
         if self.content_object:
             return f"{self.campaign} -> {self.content_object}"

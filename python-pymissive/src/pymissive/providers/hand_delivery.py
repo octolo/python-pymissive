@@ -112,17 +112,12 @@ class HandDeliveryProvider(MissiveProviderBase):
         return [
             {
                 "internal_id": recipient.get("id"),
-                "external_id": (
-                    recipient.get("external_id")
-                    or self._build_recipient_external_id(sender, recipient)
-                ),
+                "external_id": (recipient.get("external_id") or self._build_recipient_external_id(sender, recipient)),
             }
             for recipient in (recipients or [])
         ]
 
-    def _serialize_attachments(
-        self, attachments: list[dict[str, Any]] | None
-    ) -> list[dict[str, Any]]:
+    def _serialize_attachments(self, attachments: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         return [
             {
                 "internal_id": attachment.get("id"),
@@ -145,12 +140,14 @@ class HandDeliveryProvider(MissiveProviderBase):
             rec_id = rec_in.get("id")
             if not rec_id:
                 continue
-            events.append({
-                "external_id": missive_external_id,
-                "event": event,
-                "event_date": when.isoformat(),
-                "recipient": {"id": rec_id},
-            })
+            events.append(
+                {
+                    "external_id": missive_external_id,
+                    "event": event,
+                    "event_date": when.isoformat(),
+                    "recipient": {"id": rec_id},
+                }
+            )
         return events
 
     def _resolve_missive_external_id(
@@ -180,7 +177,11 @@ class HandDeliveryProvider(MissiveProviderBase):
             "recipients": recipients_out,
             "attachments": attachments_out,
             "events": self._build_per_recipient_events(
-                event, recipients_in, recipients_out, external_id, when,
+                event,
+                recipients_in,
+                recipients_out,
+                external_id,
+                when,
             ),
         }
 
@@ -232,7 +233,10 @@ class HandDeliveryProvider(MissiveProviderBase):
     #########################################################
 
     def get_normalize_event(self, data: dict[str, Any]) -> str:
-        return self.events_association.get(data.get("event"), "unknown")
+        event = data.get("event")
+        if not isinstance(event, str):
+            return "unknown"
+        return self.events_association.get(event, "unknown")
 
     def get_normalize_occurred_at(self, data: dict[str, Any]) -> str:
         return data.get("event_date") or data.get("occurred_at") or self._now_iso()

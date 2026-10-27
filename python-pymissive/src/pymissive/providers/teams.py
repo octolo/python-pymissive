@@ -8,11 +8,32 @@ the webhook URL (TEAMS_WEBHOOK_URL or per-recipient ``webhook_url``).
 import json
 from typing import Any
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from pymissive.utils import HTTP_TIMEOUT
+from pymissive.utils import HTTP_TIMEOUT, require_https_url
 
 from .base import MissiveProviderBase
+
+
+_WEBHOOK_HOSTS = ("outlook.office.com", "outlook.office365.com")
+_WEBHOOK_HOST_SUFFIXES = (".webhook.office.com", ".logic.azure.com", ".environment.api.powerplatform.com")
+
+
+class _NoRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_WEBHOOK_OPENER = build_opener(_NoRedirects)
+
+
+def _require_teams_webhook_url(url: str) -> str:
+    url = require_https_url(url)
+    hostname = urlparse(url).hostname or ""
+    if hostname not in _WEBHOOK_HOSTS and not hostname.endswith(_WEBHOOK_HOST_SUFFIXES):
+        raise ValueError("Teams webhook URL must use a Microsoft Teams webhook host")
+    return url
 
 
 class TeamsProvider(MissiveProviderBase):
@@ -28,8 +49,7 @@ class TeamsProvider(MissiveProviderBase):
     config_keys = ["TEAMS_WEBHOOK_URL"]
     site_url = "https://www.microsoft.com/microsoft-teams"
     documentation_url = (
-        "https://learn.microsoft.com/microsoftteams/platform/webhooks-and-connectors/"
-        "how-to/add-incoming-webhook"
+        "https://learn.microsoft.com/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook"
     )
 
     def __init__(self, **kwargs: str | None) -> None:
@@ -55,18 +75,16 @@ class TeamsProvider(MissiveProviderBase):
             "Teams webhook_url is required (kwargs, recipients, or TEAMS_WEBHOOK_URL)",
         )
 
-    def send_branded(self, **kwargs: Any) -> dict[str, Any]:
-        """Post a message to a Teams channel using an Incoming Webhook."""
-        webhook_url = self._resolve_webhook_url(**kwargs)
+    @staticmethod
+    def _build_payload(kwargs: dict[str, Any]) -> dict[str, Any]:
         subject = (kwargs.get("subject") or "").strip()
         text = kwargs.get("body_text") or kwargs.get("body_rich") or kwargs.get("subject") or ""
         text = str(text).strip()
         if not text:
             raise ValueError("Teams message text is required (body_text, body_rich, or subject)")
 
-        # Simple text works on all Teams webhook versions; MessageCard adds a title when subject differs.
         if subject and subject != text:
-            payload_obj: dict[str, Any] = {
+            return {
                 "@type": "MessageCard",
                 "@context": "https://schema.org/extensions",
                 "summary": subject[:160],
@@ -74,22 +92,20 @@ class TeamsProvider(MissiveProviderBase):
                 "title": subject,
                 "text": text,
             }
-        else:
-            payload_obj = {"text": text}
+        return {"text": text}
 
-        payload = json.dumps(payload_obj).encode("utf-8")
+    @staticmethod
+    def _post_webhook(webhook_url: str, payload_obj: dict[str, Any]) -> dict[str, Any]:
         request = Request(
             url=webhook_url,
-            data=payload,
+            data=json.dumps(payload_obj).encode("utf-8"),
             headers={"Content-Type": "application/json; charset=utf-8"},
             method="POST",
         )
-
         try:
-            with urlopen(request, timeout=HTTP_TIMEOUT) as response:
+            with _WEBHOOK_OPENER.open(request, timeout=HTTP_TIMEOUT) as response:  # nosec B310
                 body = response.read().decode("utf-8")
                 message_id = body.strip() or "sent"
-                # No channel_id (unlike Slack/Discord): destination is the webhook URL.
                 return {
                     "id": message_id,
                     "channel_id": "",
@@ -98,3 +114,8 @@ class TeamsProvider(MissiveProviderBase):
         except HTTPError as error:
             err_body = error.read().decode("utf-8") if error.fp else ""
             raise RuntimeError(f"Teams webhook error {error.code}: {err_body}") from error
+
+    def send_branded(self, brand_name: str | None = None, **kwargs: Any) -> dict[str, Any]:
+        """Post a message to a Teams channel using an Incoming Webhook."""
+        webhook_url = _require_teams_webhook_url(self._resolve_webhook_url(**kwargs))
+        return self._post_webhook(webhook_url, self._build_payload(kwargs))

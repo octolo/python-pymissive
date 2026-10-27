@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 
 #: Default ``urlopen`` / ``requests`` timeout (seconds). ``None`` would wait forever.
 HTTP_TIMEOUT = 30
 #: Uploads and downloads of PDFs (Maileva registered letter, deposit proofs).
 HTTP_DOCUMENT_TIMEOUT = 120
+
+
+def require_https_url(url: str) -> str:
+    """Reject URLs that could make HTTP clients open local or credentialed resources."""
+    parsed = urlparse(url)
+    if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("URL must be an HTTPS URL without embedded credentials")
+    return url
 
 
 def _truthy(value) -> bool:
@@ -16,18 +25,24 @@ def _truthy(value) -> bool:
     return bool(value)
 
 
-def is_disable_send() -> bool:
-    """Return True when provider ``send`` calls must be skipped.
-
-    Reads ``PYMISSIVE_DISABLE_SEND`` from the environment first, then from
-    Django settings when available. Defaults to False.
-    """
-    env = os.environ.get("PYMISSIVE_DISABLE_SEND")
+def _flag(name: str) -> bool:
+    """Read a boolean from the environment first, then from Django settings."""
+    env = os.environ.get(name)
     if env is not None:
         return _truthy(env)
     try:
         from django.conf import settings
 
-        return _truthy(getattr(settings, "PYMISSIVE_DISABLE_SEND", False))
+        return _truthy(getattr(settings, name, False))
     except Exception:
         return False
+
+
+def is_disable_send() -> bool:
+    """Return True when provider ``send`` calls must be skipped (``PYMISSIVE_DISABLE_SEND``)."""
+    return _flag("PYMISSIVE_DISABLE_SEND")
+
+
+def is_fake_provider_allowed() -> bool:
+    """Return True when the ``fake`` provider may accept sends (``PYMISSIVE_ALLOW_FAKE_PROVIDER``)."""
+    return _flag("PYMISSIVE_ALLOW_FAKE_PROVIDER")

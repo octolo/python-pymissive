@@ -1705,6 +1705,521 @@ msgstr "Aperçu : {} ({})"
 msgid "Preview: {}"
 msgstr "Aperçu : {}"
 
+msgid "Add this to your application: a container, the CSS file, the animation library, then the mount call in your application code. The counter is driven by the returned API."
+msgstr "À mettre dans ton application : un conteneur, la feuille CSS, la bibliothèque d’animations, puis l’appel de montage dans le code de l’application. Le compteur est piloté par l’API retournée."
+
+msgid "Animations"
+msgstr "Animations"
+
+msgid "Apply configuration"
+msgstr "Appliquer la configuration"
+
+msgid "Average seconds per missive sent, measured from the start of this run. Refreshed at each progress step, together with the sent count."
+msgstr "Nombre moyen de secondes par missive envoyée, mesuré depuis le début de cet envoi. Recalculé à chaque pas de progression, en même temps que le nombre envoyé."
+
+msgid "Average speed per send"
+msgstr "Vitesse moyenne par envoi"
+
+msgid "Brand color"
+msgstr "Couleur de marque"
+
+msgid "Build target processors"
+msgstr "Processeurs de construction de cible"
+
+msgid "Caller name"
+msgstr "Nom de l’appelant"
+
+msgid "Chain that builds missives for this run. Leave empty to copy the campaign's chain when this run is saved. A target with its own chain still replaces it."
+msgstr "Chaîne qui construit les missives de cet envoi. Laisser vide pour recopier la chaîne de la campagne à l'enregistrement. Une cible qui a sa propre chaîne la remplace quand même."
+
+msgid "Communication animations"
+msgstr "Animations de communication"
+
+msgid "Counter"
+msgstr "Compteur"
+
+msgid "Apply these changes? {changes}"
+msgstr "Appliquer ces changements ? {changes}"
+
+msgid "Custom combination"
+msgstr "Combinaison personnalisée"
+
+msgid "Custom configuration"
+msgstr "Configuration personnalisée"
+
+msgid "Custom preview"
+msgstr "Aperçu personnalisé"
+
+msgid "Default chain that builds a target's missive. A scheduled run with an empty chain copies this list when it is saved. A target or a run with its own chain replaces it. Each entry may be a dotted path, a [path, kwargs] pair, or a {\"processor\": path, \"kwargs\": {...}} dict."
+msgstr "Chaîne par défaut qui construit la missive d'une cible. Un envoi planifié dont la chaîne est vide recopie cette liste à l'enregistrement. Une cible ou un envoi qui a sa propre chaîne la remplace. Chaque entrée peut être un chemin pointé, une paire [chemin, kwargs], ou un dict {\"processor\": chemin, \"kwargs\": {...}}."
+
+msgid "Email with AR — marked envelope"
+msgstr "Email avec AR — enveloppe marquée AR"
+
+msgid "Email — blue envelope"
+msgstr "Email — enveloppe bleue"
+
+msgid "Errors"
+msgstr "Erreurs"
+
+msgid "Frames are mounted from this page with"
+msgstr "Les cadres sont montés depuis cette page avec"
+
+msgid "Generate a draft missive for this target?"
+msgstr "Générer une missive brouillon pour cette cible ?"
+
+msgid "Generate missive"
+msgstr "Générer la missive"
+
+msgid "Globe"
+msgstr "Mappemonde"
+
+msgid "Ground bar"
+msgstr "Barre au sol"
+
+msgid "Hello! 👋"
+msgstr "Salut ! 👋"
+
+msgid "IDs and mount calls stay in your own HTML or JavaScript."
+msgstr "Les IDs et les appels de montage restent dans le HTML ou le JavaScript propre à ton application."
+
+msgid "Illustrated background"
+msgstr "Fond illustré"
+
+msgid "Integration code"
+msgstr "Code d’intégration"
+
+msgid "Load providers"
+msgstr "Charger les providers"
+
+msgid "Long text is fine: the lower area grows to fit it."
+msgstr "Le texte peut être long : la zone inférieure s’adapte à sa hauteur."
+
+msgid "Mailbox"
+msgstr "Boîte aux lettres"
+
+msgid "Mailbox with AR"
+msgstr "Boîte aux lettres avec AR"
+
+msgid "Missive generated."
+msgstr "Missive générée."
+
+msgid "No build processor is configured for this target."
+msgstr "Aucun processeur de construction n'est configuré pour cette cible."
+
+msgid "No missive could be generated for this target."
+msgstr "Aucune missive n'a pu être générée pour cette cible."
+
+msgid "Number of items"
+msgstr "Nombre d’éléments"
+
+msgid "PYMISSIVE_DEFAULT_PROVIDER has no per-type provider to load. A plain string is the fallback and is not written here."
+msgstr "PYMISSIVE_DEFAULT_PROVIDER n'a pas de provider par type à charger. Une simple chaîne est le repli et n'est pas enregistrée ici."
+
+msgid "Phone — SMS"
+msgstr "Téléphone — SMS"
+
+msgid "Phone — Voice call"
+msgstr "Téléphone — Voice Call"
+
+msgid "Phone — Notification"
+msgstr "Téléphone — Notification"
+
+msgid "A notification arrives on the phone"
+msgstr "Une notification arrive sur le téléphone"
+
+msgid "New message"
+msgstr "Nouveau message"
+
+msgid "Hand delivery"
+msgstr "Remise en main propre"
+
+msgid "The letter is handed over against signature"
+msgstr "Le courrier est remis contre signature"
+
+msgid "Door — Hand delivery"
+msgstr "Porte — Remise en main propre"
+
+msgid "HANDED OVER"
+msgstr "REMIS EN MAIN PROPRE"
+
+msgid "Postal mail — yellow envelope"
+msgstr "Courrier postal — enveloppe jaune"
+
+msgid "Presets and code samples"
+msgstr "Préréglages et exemples de code"
+
+msgid "Press Enter to add another message. Each send picks one at random, without changing how many are sent."
+msgstr "Appuie sur Entrée pour ajouter un autre message. Chaque envoi en choisit un au hasard, sans changer le nombre d’envois."
+
+msgid "Press Enter to add the next message. Each line becomes its own animated bubble."
+msgstr "Appuie sur Entrée pour créer le message suivant. Chaque ligne devient une bulle animée distincte."
+
+msgid "Processors that build this target's missive before it is sent. When non-empty, REPLACES the run, the campaign, and PYMISSIVE_DEFAULT_BUILD_TARGET_PROCESSORS. Each entry may be a dotted path, a [path, kwargs] pair, or a {\"processor\": path, \"kwargs\": {...}} dict. The first processor that returns a missive is used."
+msgstr "Processeurs qui construisent la missive de cette cible avant l'envoi. S'il n'est pas vide, REMPLACE l'envoi, la campagne et PYMISSIVE_DEFAULT_BUILD_TARGET_PROCESSORS. Chaque entrée peut être un chemin pointé, une paire [chemin, kwargs], ou un dict {\"processor\": chemin, \"kwargs\": {...}}. Le premier processeur qui renvoie une missive est utilisé."
+
+msgid "Receiver type"
+msgstr "Type de récepteur"
+
+msgid "Registered mail — yellow envelope with AR"
+msgstr "Courrier recommandé — enveloppe jaune avec AR"
+
+msgid "Remaining sends"
+msgstr "Envois restants"
+
+msgid "SMS messages (one message per line)"
+msgstr "Messages SMS (un message par ligne)"
+
+msgid "Screen — Email"
+msgstr "Écran — Email"
+
+msgid "Screen — Email with AR"
+msgstr "Écran — Email avec AR"
+
+msgid "See you soon!"
+msgstr "À bientôt !"
+
+msgid "Send type"
+msgstr "Type d’envoi"
+
+msgid "Send types"
+msgstr "Types d’envoi"
+
+msgid "Sending the message…"
+msgstr "Envoi du message en cours…"
+
+msgid "Set the combination, speed, number of items, counter and layout here. This form calls"
+msgstr "Configure ici la combinaison, la vitesse, le nombre d’éléments, le compteur et l’habillage. Cette interface appelle"
+
+msgid "Shared settings"
+msgstr "Réglages partagés"
+
+msgid "Simulate 90 remaining"
+msgstr "Simuler 90 restants"
+
+msgid "Speed"
+msgstr "Vitesse"
+
+msgid "Styles come from"
+msgstr "Les styles viennent de"
+
+msgid "Summary when finished"
+msgstr "Résumé à la fin"
+
+msgid "Text under the ground"
+msgstr "Texte sous le sol"
+
+msgid "Text under the ground bar"
+msgstr "Texte sous la barre au sol"
+
+msgid "Thanks 😊"
+msgstr "Merci 😊"
+
+msgid "These settings apply to the custom preview and to every preset."
+msgstr "Ces réglages s’appliquent à l’aperçu personnalisé et à chaque préréglage."
+
+msgid "These six animations use the default settings (1× speed and 3 items). The title and subtitle come from each animation. Open “View the code” under an example to copy its setup into your own page."
+msgstr "Ces six animations utilisent les paramètres par défaut (vitesse 1× et 3 éléments). Le titre et le sous-titre proviennent directement de chaque animation. Ouvre « Voir le code » sous un exemple pour copier son montage dans ta propre page."
+
+msgid "These animations use the shared settings above. The title and subtitle come from each animation. Open “View the code” under an example to copy its setup into your own page."
+msgstr "Ces animations utilisent les réglages partagés ci-dessus. Le titre et le sous-titre proviennent de chaque animation. Ouvre « Voir le code » sous un exemple pour copier son montage dans ta propre page."
+
+msgid "This target no longer exists."
+msgstr "Cette cible n'existe plus."
+
+msgid "To mix several send types or pick another receiver, pass a list and the receiver option:"
+msgstr "Pour mélanger plusieurs types d’envoi ou choisir un autre récepteur, passer une liste et l’option receiver :"
+
+msgid "Total sends"
+msgstr "Total des envois"
+
+msgid "View the integration code"
+msgstr "Voir le code d’intégration"
+
+msgid "Voice call"
+msgstr "Appel vocal"
+
+msgid "White counter background"
+msgstr "Fond blanc du compteur"
+
+msgid "per send"
+msgstr "par envoi"
+
+msgid "{created} configuration(s) created, {replaced} replaced, {unchanged} unchanged."
+msgstr "{created} configuration(s) créée(s), {replaced} remplacée(s), {unchanged} inchangée(s)."
+
+msgid "A run that has not started cannot be cancelled."
+msgstr "Un envoi qui n'a pas démarré ne peut pas être annulé."
+
+msgid "A run that has ended cannot be cancelled."
+msgstr "Un envoi terminé ne peut pas être annulé."
+
+#, python-format
+msgid "Progress hook %(path)s cannot be imported."
+msgstr "Le hook de progression %(path)s est introuvable."
+
+#, python-format
+msgid "Progress hook %(path)s is not callable."
+msgstr "Le hook de progression %(path)s n'est pas appelable."
+
+msgid "Updated"
+msgstr "Mis à jour"
+
+msgid "error(s)"
+msgstr "erreur(s)"
+
+msgid "err"
+msgstr "err."
+
+msgid "No missives attached to this run yet."
+msgstr "Aucune missive n'est encore rattachée à cet envoi."
+
+msgid "Overall progress"
+msgstr "Progression globale"
+
+msgid "Progress by channel"
+msgstr "Progression par canal"
+
+msgid "By status"
+msgstr "Par statut"
+
+msgid "JSON payload"
+msgstr "Données JSON"
+
+msgid "An email arrives in an inbox"
+msgstr "Un courrier électronique arrive dans une boîte de réception"
+
+msgid "Email with AR"
+msgstr "Email avec accusé de réception"
+
+msgid "Read or delivery confirmation"
+msgstr "Confirmation de lecture ou de réception"
+
+msgid "Postal mail"
+msgstr "Courrier postal"
+
+msgid "Envelopes arrive in the mailbox"
+msgstr "Des enveloppes arrivent dans la boîte aux lettres"
+
+msgid "Registered mail with AR"
+msgstr "Courrier recommandé avec AR"
+
+msgid "Tracked envelope and proof of delivery"
+msgstr "Enveloppe suivie et preuve de réception"
+
+msgid "Messages arrive on the phone"
+msgstr "Des messages arrivent sur le téléphone"
+
+msgid "A call arrives on the phone"
+msgstr "Un appel arrive sur le téléphone"
+
+msgid "AR"
+msgstr "AR"
+
+msgid "Email received"
+msgstr "Email reçu"
+
+msgid "Confirmation sent"
+msgstr "Confirmation envoyée"
+
+msgid "Hi! 👋"
+msgstr "Salut ! 👋"
+
+msgid "Messages"
+msgstr "Messages"
+
+msgid "Hello!"
+msgstr "Coucou !"
+
+msgid "How are you?"
+msgstr "Ça va ?"
+
+msgid "Incoming call"
+msgstr "Appel entrant"
+
+msgid "Voice"
+msgstr "Vocal"
+
+msgid "RECEIPT ACKNOWLEDGED"
+msgstr "ACCUSÉ REÇU"
+
+msgid "Preview of the send to the selected receiver"
+msgstr "Aperçu de l’envoi vers le récepteur sélectionné"
+
+msgid "Send progress counter"
+msgstr "Compteur de progression des envois"
+
+msgid "Send progress"
+msgstr "Progression des envois"
+
+msgid "remaining"
+msgstr "restants"
+
+msgid "processed"
+msgstr "traité"
+
+msgctxt "one send"
+msgid "sent"
+msgstr "envoyé"
+
+msgctxt "several sends"
+msgid "sent"
+msgstr "envoyés"
+
+msgid "error"
+msgstr "erreur"
+
+msgid "errors"
+msgstr "erreurs"
+
+msgid "{sent} sent, {errors} errors out of {total}"
+msgstr "{sent} envoyés, {errors} erreurs sur {total}"
+
+msgid "{total} sends in total"
+msgstr "{total} envois au total"
+
+msgid "Cancel send"
+msgstr "Annuler l'envoi"
+
+msgid "Cancel reason"
+msgstr "Motif d'annulation"
+
+msgid "Cancellation requested: the send stops before its next missive."
+msgstr "Annulation demandée : l'envoi s'arrête avant sa prochaine missive."
+
+msgid "Only a send in progress can be cancelled."
+msgstr "Seul un envoi en cours peut être annulé."
+
+msgid "A campaign send in progress cannot be deleted: cancel it first."
+msgstr "Un envoi de campagne en cours ne peut pas être supprimé : annulez-le d'abord."
+
+#, python-format
+msgid "%(paths)s not allowed by settings.PYMISSIVE_ALLOWED_TASK_BACKENDS."
+msgstr "%(paths)s non autorisé par settings.PYMISSIVE_ALLOWED_TASK_BACKENDS."
+
+msgid "Live updates stopped. Reload the page."
+msgstr "Mises à jour en direct arrêtées. Rechargez la page."
+
+msgid "Selections of this target"
+msgstr "Sélections de cette cible"
+
+msgid "With missive"
+msgstr "Avec missive"
+
+msgid "Abandoned"
+msgstr "Abandonnée"
+
+msgid "State"
+msgstr "État"
+
+msgid "Targets"
+msgstr "Cibles"
+
+msgid "{} pending"
+msgstr "{} en attente"
+
+msgid "{} abandoned"
+msgstr "{} abandonnée(s)"
+
+msgid "Missives of the thread"
+msgstr "Missives du fil"
+
+#, python-format
+msgid "Abandoned: %(reason)s"
+msgstr "Abandonnée : %(reason)s"
+
+msgid "Abandoned at"
+msgstr "Abandonnée le"
+
+msgid ""
+"Set when the target is given up without a missive. The row leaves the "
+"selection and stays as a trace."
+msgstr ""
+"Renseigné quand la cible est abandonnée sans missive. La ligne sort de la "
+"sélection et reste comme trace."
+
+msgid "Abandon reason"
+msgstr "Motif d'abandon"
+
+msgid "Abandon"
+msgstr "Abandonner"
+
+msgid "Target abandoned."
+msgstr "Cible abandonnée."
+
+msgid "Only a target still waiting for its missive can be abandoned."
+msgstr "Seule une cible qui attend encore sa missive peut être abandonnée."
+
+msgid "Abandon selected targets"
+msgstr "Abandonner les cibles sélectionnées"
+
+#, python-format
+msgid "%(count)d target abandoned."
+msgid_plural "%(count)d targets abandoned."
+msgstr[0] "%(count)d cible abandonnée."
+msgstr[1] "%(count)d cibles abandonnées."
+
+msgid "Campaign target"
+msgstr "Cible de campagne"
+
+msgid "Campaign targets"
+msgstr "Cibles de campagne"
+
+msgid "Content type"
+msgstr "Type de contenu"
+
+msgid "Object"
+msgstr "Objet"
+
+msgid "Channel this target is selected on (email, sms, letter, …)."
+msgstr "Canal sur lequel cette cible est sélectionnée (email, sms, courrier, …)."
+
+msgid "Primary key of the target (integer or UUID, stored as text)."
+msgstr "Clé primaire de la cible (entier ou UUID, stockée en texte)."
+
+msgid "String form of the target, kept if the object is later deleted."
+msgstr "Forme textuelle de la cible, conservée si l'objet est supprimé ensuite."
+
+msgid "Missive cannot be sent: no provider set"
+msgstr "La missive ne peut pas être envoyée : aucun provider défini"
+
+msgid "Every configuration already matches PYMISSIVE_DEFAULT_PROVIDER."
+msgstr "Toutes les configurations correspondent déjà à PYMISSIVE_DEFAULT_PROVIDER."
+
+msgid "{type} → {new} (new)"
+msgstr "{type} → {new} (nouveau)"
+
+msgid "{type}: {old} → {new} (replaced)"
+msgstr "{type} : {old} → {new} (remplacé)"
+
+msgid "Progress"
+msgstr "Avancement"
+
+msgid "Sending"
+msgstr "Envoi"
+
+msgid "Nothing to send on this run."
+msgstr "Rien à envoyer pour cet envoi."
+
+msgid "Fake webhooks"
+msgstr "Webhooks fake"
+
+msgid "Fake provider is disabled: set PYMISSIVE_ALLOW_FAKE_PROVIDER to use it."
+msgstr "Le provider fake est désactivé : définir PYMISSIVE_ALLOW_FAKE_PROVIDER pour l'utiliser."
+
+#, python-brace-format
+msgid ""
+"Post a random webhook for each of {count} sent fake missive(s)? Each "
+"recipient is set to delivered, failed, still in progress, or cancelled."
+msgstr ""
+"Envoyer un webhook aléatoire pour chacune des {count} missive(s) fake déjà "
+"envoyée(s) ? Chaque destinataire passe aléatoirement en délivré, échec, "
+"toujours en cours, ou annulé."
+
+#, python-brace-format
+msgid "Fake webhooks started for {count} missive(s)."
+msgstr "Webhooks fake lancés pour {count} missive(s)."
+
 #~ msgid "None"
 #~ msgstr "Aucun"
 
@@ -1795,9 +2310,6 @@ msgstr "Aperçu : {}"
 
 #~ msgid "Mailed"
 #~ msgstr "Posté"
-
-#~ msgid "Postal mail"
-#~ msgstr "Courrier postal"
 
 #~ msgid "Printed"
 #~ msgstr "Imprimé"

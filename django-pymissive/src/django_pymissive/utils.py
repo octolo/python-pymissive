@@ -1,6 +1,5 @@
 """Utility functions for django_pymissive."""
 
-import logging
 import os
 from datetime import timedelta
 from urllib.parse import urlparse
@@ -15,15 +14,10 @@ from django.utils.translation import gettext_lazy as _
 from .models.choices import MissiveRecipientType
 from .models.recipient import MissiveRecipient
 
-logger = logging.getLogger(__name__)
-
 
 def serialize_model_for_context(obj) -> dict:
     """Plain dict for templates (no live model — avoids callable access like ``delete()``)."""
-    data = {
-        field.attname: field.value_from_object(obj)
-        for field in obj._meta.concrete_fields
-    }
+    data = {field.attname: field.value_from_object(obj) for field in obj._meta.concrete_fields}
     if callable(getattr(obj, "to_context_dict", None)):
         data.update(obj.to_context_dict())
     return data
@@ -75,11 +69,7 @@ def get_default_domain():
     """Return default domain (host) from settings or localhost:8000.
     If setting is a full URL, extracts the netloc for use in webhook domain field.
     """
-    domain = (
-        getattr(settings, "MISSIVE_DOMAIN", None)
-        or getattr(settings, "DOMAIN", None)
-        or "localhost:8000"
-    )
+    domain = getattr(settings, "MISSIVE_DOMAIN", None) or getattr(settings, "DOMAIN", None) or "localhost:8000"
     domain = str(domain).strip().rstrip("/")
     if domain.startswith(("http://", "https://")):
         parsed = urlparse(domain)
@@ -117,9 +107,7 @@ def get_base_url(domain=None, scheme=None, trailing_slash=True):
     return f"{base}/" if trailing_slash else base
 
 
-def build_webhook_url(
-    domain: str, provider_name: str, missive_type: str, token: str = ""
-) -> str:
+def build_webhook_url(domain: str, provider_name: str, missive_type: str, token: str | None = None) -> str:
     """Build full webhook URL from domain, provider and missive type.
 
     ``token`` is the path secret for providers that cannot send an
@@ -162,6 +150,16 @@ def _recipient_lookup(qs, **kwargs):
         return None
 
 
+def _first_recipient_match(qs, lookups):
+    for field, value in lookups:
+        if value in (None, ""):
+            continue
+        found = _recipient_lookup(qs, **{field: value})
+        if found:
+            return found
+    return None
+
+
 def get_recipient(missive, recipient_data):
     """Resolve recipient from missive and recipient_data dict.
 
@@ -176,34 +174,23 @@ def get_recipient(missive, recipient_data):
     qs = MissiveRecipient.objects.filter(missive=missive)
     internal_id = recipient_data.get("id") or recipient_data.get("internal_id")
     substitute_id = recipient_data.get("substitute_id") or internal_id
-    if substitute_id not in (None, ""):
-        found = _recipient_lookup(qs, substitute_id=str(substitute_id))
-        if found:
-            return found
-    if internal_id not in (None, ""):
-        found = _recipient_lookup(qs, pk=internal_id)
-        if found:
-            return found
     name = (recipient_data.get("name") or "").strip()
-    if name:
-        found = _recipient_lookup(qs, name=name)
-        if found:
-            return found
     external_id = recipient_data.get("external_id")
-    if external_id not in (None, ""):
-        found = _recipient_lookup(qs, external_id=external_id)
-        if found:
-            return found
     email = recipient_data.get("email")
-    if email:
-        found = _recipient_lookup(qs, email=email)
-        if found:
-            return found
     phone = recipient_data.get("phone")
-    if phone:
-        found = _recipient_lookup(qs, phone=phone)
-        if found:
-            return found
+    found = _first_recipient_match(
+        qs,
+        (
+            ("substitute_id", str(substitute_id) if substitute_id not in (None, "") else None),
+            ("pk", internal_id),
+            ("name", name),
+            ("external_id", external_id),
+            ("email", email),
+            ("phone", phone),
+        ),
+    )
+    if found:
+        return found
     if internal_id or external_id or name:
         return _recipient_lookup(qs, recipient_type=MissiveRecipientType.RECIPIENT)
     return None
@@ -291,20 +278,14 @@ def validate_attachment_for_missive_type(filename: str, missive_type: str | None
         return
     if not allowed:
         raise ValidationError(
-            _("Attachments are not allowed for missive type '%(type)s'.")
-            % {"type": missive_type or "?"}
+            _("Attachments are not allowed for missive type '%(type)s'.") % {"type": missive_type or "?"}
         )
     if not filename:
-        raise ValidationError(
-            _("Attachment filename is required to validate against allowed extensions.")
-        )
+        raise ValidationError(_("Attachment filename is required to validate against allowed extensions."))
     ext = os.path.splitext(filename)[1].lower()
     if ext not in allowed:
         raise ValidationError(
-            _(
-                "File extension '%(ext)s' is not allowed for missive type "
-                "'%(type)s'. Allowed extensions: %(allowed)s."
-            )
+            _("File extension '%(ext)s' is not allowed for missive type '%(type)s'. Allowed extensions: %(allowed)s.")
             % {
                 "ext": ext or "(none)",
                 "type": missive_type or "?",
@@ -313,52 +294,121 @@ def validate_attachment_for_missive_type(filename: str, missive_type: str | None
         )
 
 
-def is_progress_enabled() -> bool:
-    """Return True when scheduled-campaign progress tracking is enabled.
+_PACKAGE_PREFIXES = ("django_pymissive.", "pymissive.")
 
-    Controlled by ``settings.PYMISSIVE_PROGRESS_ENABLED`` (default True).
-    When disabled, ``MissiveScheduledCampaign.run_campaign`` sends missives
-    without updating the counter or calling the progress hook.
+
+def is_import_allowed(path: str) -> bool:
+    """Whether a dotted path may be imported and called.
+
+    ``settings.PYMISSIVE_ALLOWED_TASK_BACKENDS`` lists the allowed prefixes;
+    unset (``None``) allows every path. The package's own modules are always
+    allowed.
     """
-    return bool(getattr(settings, "PYMISSIVE_PROGRESS_ENABLED", True))
+    if path.startswith(_PACKAGE_PREFIXES):
+        return True
+    allowed = getattr(settings, "PYMISSIVE_ALLOWED_TASK_BACKENDS", None)
+    if allowed is None:
+        return True
+    return any(path == entry or path.startswith(f"{entry}.") for entry in allowed)
 
 
-def default_progress_hook(scheduled) -> None:
-    """Default progress hook: log the current run progress to the console.
+def import_allowed_string(path: str):
+    """``import_string`` restricted to :func:`is_import_allowed` paths."""
+    if not is_import_allowed(path):
+        raise ImportError(f"{path} is not allowed by settings.PYMISSIVE_ALLOWED_TASK_BACKENDS.")
+    return import_string(path)
 
-    Receives the :class:`~django_pymissive.models.campaign.MissiveScheduledCampaign`
-    being run, which exposes ``sent_count``, ``total_count`` and ``progress``.
+
+def processor_path(entry):
+    """Dotted path of a processor entry, or ``None`` when it has none."""
+    if isinstance(entry, dict):
+        entry = entry.get("processor") or entry.get("path")
+    elif isinstance(entry, (list, tuple)) and len(entry) == 2:
+        entry = entry[0]
+    return entry if isinstance(entry, str) else None
+
+
+def validate_import_paths(instance, *field_names) -> None:
+    """Raise ``ValidationError`` for paths in *field_names* that are not allowed.
+
+    Each field holds a dotted path or a list of processor entries.
     """
-    logger.info(
-        "Campaign %s progress: %s/%s (%s%%)",
-        scheduled.campaign_id,
-        getattr(scheduled, "sent_count", 0),
-        getattr(scheduled, "total_count", 0),
-        scheduled.progress,
-    )
+    errors = {}
+    for name in field_names:
+        value = getattr(instance, name, None) or []
+        entries = value if isinstance(value, list) else [value]
+        refused = [path for path in map(processor_path, entries) if path and not is_import_allowed(path)]
+        if refused:
+            errors[name] = _("%(paths)s not allowed by settings.PYMISSIVE_ALLOWED_TASK_BACKENDS.") % {
+                "paths": ", ".join(refused)
+            }
+    if errors:
+        raise ValidationError(errors)
 
 
 def _resolve_hook(hook):
     """Resolve a single hook (dotted path string or callable) to a callable."""
-    return hook if callable(hook) else import_string(hook)
+    return hook if callable(hook) else import_allowed_string(hook)
 
 
-def get_progress_hooks():
-    """Resolve the configured progress hooks to a list of callables.
+#: Target number of progress-hook calls over a full run.
+PROGRESS_STEP_DEFAULT = 20
 
-    ``settings.PYMISSIVE_PROGRESS_HOOK`` may be:
 
-    - **unset / None** → ``[default_progress_hook]`` (console log).
-    - a single dotted import path (string) or callable → a one-item list.
-    - a list/tuple of dotted paths and/or callables → resolved in order.
+def progress_step_default() -> int:
+    """Return ``settings.PYMISSIVE_PROGRESS_STEP`` (default 20).
 
-    Each hook is called with the scheduled campaign at every progress step.
+    This is how many times a full run should call its progress hook. A value
+    below 1 falls back to the default.
     """
-    hook = getattr(settings, "PYMISSIVE_PROGRESS_HOOK", None)
+    raw = getattr(settings, "PYMISSIVE_PROGRESS_STEP", PROGRESS_STEP_DEFAULT)
+    try:
+        step = int(raw)
+    except (TypeError, ValueError):
+        return PROGRESS_STEP_DEFAULT
+    if step < 1:
+        return PROGRESS_STEP_DEFAULT
+    return step
+
+
+#: Missives loaded at a time by a campaign send loop.
+SEND_CHUNK_SIZE_DEFAULT = 500
+
+
+def send_chunk_size() -> int:
+    """Return ``settings.PYMISSIVE_SEND_CHUNK_SIZE`` (default 500).
+
+    A value below 1 falls back to the default.
+    """
+    raw = getattr(settings, "PYMISSIVE_SEND_CHUNK_SIZE", SEND_CHUNK_SIZE_DEFAULT)
+    try:
+        size = int(raw)
+    except (TypeError, ValueError):
+        return SEND_CHUNK_SIZE_DEFAULT
+    if size < 1:
+        return SEND_CHUNK_SIZE_DEFAULT
+    return size
+
+
+def get_progress_hooks(hook=None):
+    """Resolve a progress hook to a list of callables.
+
+    ``hook`` defaults to ``settings.PYMISSIVE_PROGRESS_HOOK``. Pass a value
+    to override the setting (the scheduler's ``progress_hook`` field).
+
+    Unset, ``None`` or empty → ``[]``: the send loop does not notify. The
+    progress page still reads live counts.
+
+    A single dotted import path or callable becomes a one-item list. A
+    list or tuple of paths and/or callables is resolved in order. Each hook
+    receives the scheduled campaign.
+    """
     if hook is None:
-        return [default_progress_hook]
+        hook = getattr(settings, "PYMISSIVE_PROGRESS_HOOK", None)
+    if not hook:
+        return []
     if isinstance(hook, (list, tuple)):
-        return [_resolve_hook(h) for h in hook]
+        return [_resolve_hook(item) for item in hook]
     return [_resolve_hook(hook)]
 
 
@@ -415,9 +465,7 @@ STALE_PROCESSING_SECONDS_DEFAULT = 30 * 60
 
 def stale_processing_seconds() -> int:
     """Return ``settings.PYMISSIVE_STALE_PROCESSING_SECONDS`` (default 1800)."""
-    return int(getattr(
-        settings, "PYMISSIVE_STALE_PROCESSING_SECONDS", STALE_PROCESSING_SECONDS_DEFAULT
-    ))
+    return int(getattr(settings, "PYMISSIVE_STALE_PROCESSING_SECONDS", STALE_PROCESSING_SECONDS_DEFAULT))
 
 
 def stale_processing_cutoff():

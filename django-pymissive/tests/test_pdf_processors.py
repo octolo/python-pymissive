@@ -239,12 +239,8 @@ def test_auto_font_size_decreases_with_line_length():
     # with Helvetica-Bold for the new rotated-AABB auto-fit (which hits the
     # 12pt floor around ~114 chars for a single line).
     sizes = [_auto(["x" * n]) for n in (15, 30, 60, 100)]
-    assert sizes == sorted(sizes, reverse=True), (
-        f"font_size must shrink monotonically as text grows: {sizes}"
-    )
-    assert all(a > b for a, b in zip(sizes, sizes[1:])), (
-        f"every step must be strictly smaller: {sizes}"
-    )
+    assert sizes == sorted(sizes, reverse=True), f"font_size must shrink monotonically as text grows: {sizes}"
+    assert all(a > b for a, b in zip(sizes, sizes[1:])), f"every step must be strictly smaller: {sizes}"
 
 
 def test_auto_font_size_decreases_with_line_count():
@@ -258,12 +254,8 @@ def test_auto_font_size_decreases_with_line_count():
 
     line = "watermark"  # short enough that height (not width) drives the size
     sizes = [_auto([line] * n) for n in (3, 4, 5, 6, 8, 10)]
-    assert sizes == sorted(sizes, reverse=True), (
-        f"font_size must shrink as more lines are stacked: {sizes}"
-    )
-    assert all(a > b for a, b in zip(sizes, sizes[1:])), (
-        f"every step must be strictly smaller: {sizes}"
-    )
+    assert sizes == sorted(sizes, reverse=True), f"font_size must shrink as more lines are stacked: {sizes}"
+    assert all(a > b for a, b in zip(sizes, sizes[1:])), f"every step must be strictly smaller: {sizes}"
 
 
 def test_auto_font_size_saturates_at_ceiling_for_short_text():
@@ -283,9 +275,7 @@ def test_auto_font_size_respects_floor_for_huge_text():
     floor = 12.0
     huge = ["société - monsieur Aurelien Gustave prevault" * 20] * 3
     size = _auto(huge, floor=floor, ceiling=110.0)
-    assert size == floor, (
-        f"Expected clamp to floor={floor} for very long text, got {size}"
-    )
+    assert size == floor, f"Expected clamp to floor={floor} for very long text, got {size}"
 
 
 def test_auto_font_size_respects_ceiling_for_tiny_text():
@@ -294,9 +284,7 @@ def test_auto_font_size_respects_ceiling_for_tiny_text():
 
     ceiling = 110.0
     size = _auto(["."], floor=12.0, ceiling=ceiling)
-    assert size == ceiling, (
-        f"Expected clamp to ceiling={ceiling} for trivial text, got {size}"
-    )
+    assert size == ceiling, f"Expected clamp to ceiling={ceiling} for trivial text, got {size}"
 
 
 def test_auto_font_size_always_within_bounds():
@@ -310,17 +298,17 @@ def test_auto_font_size_always_within_bounds():
         ["société - monsieur Aurelien Gustave prevault", "2026 12 05 15:15"],
         ["a" * 200],
         ["line"] * 10,
-        ["société exemple",
-         "M. Aurelien Gustave prevault",
-         "DRAFT — NE PAS DIFFUSER",
-         "réf. dossier 2026/12-005",
-         "généré 2026-12-05 15:15"],
+        [
+            "société exemple",
+            "M. Aurelien Gustave prevault",
+            "DRAFT — NE PAS DIFFUSER",
+            "réf. dossier 2026/12-005",
+            "généré 2026-12-05 15:15",
+        ],
     ]
     for lines in cases:
         size = _auto(lines, floor=floor, ceiling=ceiling)
-        assert floor <= size <= ceiling, (
-            f"font_size {size} out of [{floor}, {ceiling}] for {lines!r}"
-        )
+        assert floor <= size <= ceiling, f"font_size {size} out of [{floor}, {ceiling}] for {lines!r}"
 
 
 def test_watermark_processor_long_text_stays_legible_via_floor():
@@ -387,13 +375,8 @@ def test_watermark_processor_font_size_shrinks_via_processor():
     plain = _build_minimal_pdf()
     # Lengths chosen so the auto-fit is in the width-driven band on A4
     # (above the ceiling plateau for short text, above the floor for huge text).
-    sizes = [
-        _watermark_font_size(watermark_processor(None, plain, text="x" * n))
-        for n in (15, 30, 60, 100)
-    ]
-    assert sizes == sorted(sizes, reverse=True), (
-        f"font size embedded in the PDF must shrink as the text grows: {sizes}"
-    )
+    sizes = [_watermark_font_size(watermark_processor(None, plain, text="x" * n)) for n in (15, 30, 60, 100)]
+    assert sizes == sorted(sizes, reverse=True), f"font size embedded in the PDF must shrink as the text grows: {sizes}"
     assert all(a > b for a, b in zip(sizes, sizes[1:])), sizes
 
 
@@ -475,12 +458,10 @@ def test_watermark_block_does_not_overflow_the_page_when_rotated():
     extent_y = w_text * s_ + h_block * c
 
     assert extent_x <= A4_W, (
-        f"watermark rotated AABB width {extent_x:.1f}pt overflows A4 page "
-        f"width {A4_W:.1f}pt (font_size={size:.2f}pt)"
+        f"watermark rotated AABB width {extent_x:.1f}pt overflows A4 page width {A4_W:.1f}pt (font_size={size:.2f}pt)"
     )
     assert extent_y <= A4_H, (
-        f"watermark rotated AABB height {extent_y:.1f}pt overflows A4 page "
-        f"height {A4_H:.1f}pt (font_size={size:.2f}pt)"
+        f"watermark rotated AABB height {extent_y:.1f}pt overflows A4 page height {A4_H:.1f}pt (font_size={size:.2f}pt)"
     )
 
 
@@ -498,37 +479,23 @@ def test_watermark_font_size_kwarg_is_a_ceiling_not_a_pin():
 
     # Short text → would naturally pick 110pt without the cap; with cap=60
     # it must clamp down to 60pt.
-    short = _watermark_font_size(
-        watermark_processor(None, plain, text="DRAFT", font_size=cap)
-    )
+    short = _watermark_font_size(watermark_processor(None, plain, text="DRAFT", font_size=cap))
     assert short == pytest.approx(cap, abs=1e-6), (
         f"short text with font_size={cap} should saturate at the cap, got {short}"
     )
 
     # Long text → naturally smaller than the cap; the cap must NOT inflate
     # it (no min/max swap), AND auto-shrink must still kick in.
-    long = _watermark_font_size(
-        watermark_processor(None, plain, text="x" * 60, font_size=cap)
-    )
-    assert long < cap, (
-        f"long text must still auto-shrink below the cap ({cap}pt), got {long}"
-    )
+    long = _watermark_font_size(watermark_processor(None, plain, text="x" * 60, font_size=cap))
+    assert long < cap, f"long text must still auto-shrink below the cap ({cap}pt), got {long}"
     # And it must shrink monotonically as the text grows, even with the cap on
     # (until the floor is reached).
-    longer = _watermark_font_size(
-        watermark_processor(None, plain, text="x" * 90, font_size=cap)
-    )
-    assert longer < long, (
-        f"longer text must shrink further below the cap: {longer} vs {long}"
-    )
+    longer = _watermark_font_size(watermark_processor(None, plain, text="x" * 90, font_size=cap))
+    assert longer < long, f"longer text must shrink further below the cap: {longer} vs {long}"
 
     # Pathological text → still bottoms out at the floor (12pt), cap unchanged.
-    huge = _watermark_font_size(
-        watermark_processor(None, plain, text=["x" * 800] * 3, font_size=cap)
-    )
-    assert huge == pytest.approx(12.0, abs=1e-6), (
-        f"pathological text should still clamp to the 12pt floor, got {huge}"
-    )
+    huge = _watermark_font_size(watermark_processor(None, plain, text=["x" * 800] * 3, font_size=cap))
+    assert huge == pytest.approx(12.0, abs=1e-6), f"pathological text should still clamp to the 12pt floor, got {huge}"
 
 
 # ---------------------------------------------------------------------------

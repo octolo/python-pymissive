@@ -37,9 +37,7 @@ def _missive(**kwargs) -> Missive:
 
 
 def _staff(username, *codenames):
-    user = get_user_model().objects.create_user(
-        username=username, password="x", is_staff=True
-    )
+    user = get_user_model().objects.create_user(username=username, password="x", is_staff=True)
     for codename in codenames:
         user.user_permissions.add(Permission.objects.get(codename=codename))
     return get_user_model().objects.get(pk=user.pk)
@@ -67,9 +65,11 @@ def test_download_proof_ignores_a_forged_url():
         captured.update(kwargs)
         return b"%PDF-1.4"
 
-    with patch.object(Missive, "get_proofs", return_value=PROOFS), patch.object(
-        Missive, "download_proof", side_effect=_capture
-    ), patch.object(Missive, "get_serialized_data", return_value={}):
+    with (
+        patch.object(Missive, "get_proofs", return_value=PROOFS),
+        patch.object(Missive, "download_proof", side_effect=_capture),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+    ):
         response = missive_admin.download_proof(
             _request(
                 _staff("attacker", "view_missive", "change_missive"),
@@ -88,9 +88,7 @@ def test_download_proof_rejects_an_unlisted_filename():
     missive = _missive()
     missive_admin = admin.site._registry[Missive]
 
-    with patch.object(Missive, "get_proofs", return_value=PROOFS), patch.object(
-        Missive, "download_proof"
-    ) as download:
+    with patch.object(Missive, "get_proofs", return_value=PROOFS), patch.object(Missive, "download_proof") as download:
         response = missive_admin.download_proof(
             _request(
                 _staff("prober", "view_missive", "change_missive"),
@@ -121,9 +119,7 @@ def test_download_proof_rejects_get():
     missive = _missive()
     missive_admin = admin.site._registry[Missive]
 
-    with patch.object(Missive, "get_proofs") as get_proofs, patch.object(
-        Missive, "download_proof"
-    ) as download:
+    with patch.object(Missive, "get_proofs") as get_proofs, patch.object(Missive, "download_proof") as download:
         response = missive_admin.download_proof(
             _request(
                 _staff("getter", "view_missive"),
@@ -142,12 +138,8 @@ def test_save_proofs_get_does_not_call_the_provider():
     missive_admin = admin.site._registry[Missive]
     editor = _request(_staff("editor-proofs", "view_missive", "change_missive"))
 
-    with patch.object(Missive, "get_proofs") as get_proofs, patch.object(
-        Missive, "download_proof"
-    ) as download:
-        payload = _unwrapped(missive_admin, "save_proofs")(
-            missive_admin, editor, missive
-        )
+    with patch.object(Missive, "get_proofs") as get_proofs, patch.object(Missive, "download_proof") as download:
+        payload = _unwrapped(missive_admin, "save_proofs")(missive_admin, editor, missive)
 
     assert "confirm" in payload
     get_proofs.assert_not_called()
@@ -220,9 +212,7 @@ def test_the_send_confirm_view_refuses_a_view_only_account():
     """
     missive = _missive()
     missive_admin = admin.site._registry[Missive]
-    viewer = _request(
-        _staff("viewer-send", "view_missive"), method="post", action="confirm"
-    )
+    viewer = _request(_staff("viewer-send", "view_missive"), method="post", action="confirm")
 
     with patch.object(Missive, "send_missive") as send:
         with pytest.raises(PermissionDenied):
@@ -248,11 +238,24 @@ def test_the_campaign_start_view_refuses_a_view_only_account():
 
     with patch.object(MissiveCampaign, "start_campaign") as start:
         with pytest.raises(PermissionDenied):
-            _unwrapped(campaign_admin, "start_campaign")(
-                campaign_admin, viewer, campaign, confirmed=True
-            )
+            _unwrapped(campaign_admin, "start_campaign")(campaign_admin, viewer, campaign, confirmed=True)
 
     start.assert_not_called()
+
+
+def test_the_campaign_start_view_opens_the_scheduled_run():
+    from django.urls import reverse
+
+    campaign = MissiveCampaign.objects.create(subject="Promo")
+    campaign_admin = admin.site._registry[MissiveCampaign]
+    editor = _request(
+        _staff("editor-campaign", "view_missivecampaign", "change_missivecampaign"),
+    )
+
+    response = _unwrapped(campaign_admin, "start_campaign")(campaign_admin, editor, campaign, confirmed=True)
+
+    scheduled = campaign.to_missivecampaignsend.get()
+    assert response.url == reverse("admin:django_pymissive_missivescheduledcampaign_change", args=[scheduled.pk])
 
 
 def test_can_proofs_is_false_without_a_provider_service():

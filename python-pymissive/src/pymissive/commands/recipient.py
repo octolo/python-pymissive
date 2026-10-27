@@ -15,39 +15,49 @@ _ARG_CONFIG = {
 }
 
 
+def _parse_recipients(raw: str) -> list | None:
+    if not raw:
+        print("Error: --recipients required (JSON array)", file=sys.stderr)
+        return None
+    try:
+        recipients = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"Invalid JSON: {exc}", file=sys.stderr)
+        return None
+    if not isinstance(recipients, list):
+        print("Error: recipients must be a JSON array", file=sys.stderr)
+        return None
+    return recipients
+
+
+def _valid_recipients(recipients: list) -> list:
+    valid = []
+    for index, recipient in enumerate(recipients):
+        if not isinstance(recipient, dict):
+            print(f"Warning: recipient[{index}] must be object", file=sys.stderr)
+        elif {"email", "phone", "address"} & recipient.keys():
+            valid.append(recipient)
+        else:
+            print(f"Warning: recipient[{index}] missing email/phone/address", file=sys.stderr)
+    return valid
+
+
 def _recipient_command(args: list[str]) -> bool:
     """Validate and format recipient data."""
     parsed = parse_args_from_config(args, _ARG_CONFIG, prog="recipient")
     if parsed.get("help"):
         from .help import print_command_help
+
         return print_command_help("recipient")
     cmd_args = parsed.get("args") or []
     subcommand = cmd_args[0] if cmd_args else "validate"
 
-    recipients_raw = parsed.get("recipients", "")
-    if not recipients_raw:
-        print("Error: --recipients required (JSON array)", file=sys.stderr)
-        return False
-    try:
-        recipients = json.loads(recipients_raw)
-    except json.JSONDecodeError as e:
-        print(f"Invalid JSON: {e}", file=sys.stderr)
-        return False
-    if not isinstance(recipients, list):
-        print("Error: recipients must be a JSON array", file=sys.stderr)
+    recipients = _parse_recipients(parsed.get("recipients", ""))
+    if recipients is None:
         return False
 
     if subcommand == "validate":
-        valid = []
-        for i, r in enumerate(recipients):
-            if isinstance(r, dict):
-                if "email" in r or "phone" in r or "address" in r:
-                    valid.append(r)
-                else:
-                    print(f"Warning: recipient[{i}] missing email/phone/address", file=sys.stderr)
-            else:
-                print(f"Warning: recipient[{i}] must be object", file=sys.stderr)
-        print(json.dumps(valid, indent=2))
+        print(json.dumps(_valid_recipients(recipients), indent=2))
     elif subcommand == "format":
         print(json.dumps(recipients, indent=2))
     else:
@@ -59,5 +69,5 @@ def _recipient_command(args: list[str]) -> bool:
 
 recipient_command = Command(
     _recipient_command,
-    "Validate/format recipients (recipient validate --recipients '[{\"email\":\"x@y.com\"}]')",
+    'Validate/format recipients (recipient validate --recipients \'[{"email":"x@y.com"}]\')',
 )

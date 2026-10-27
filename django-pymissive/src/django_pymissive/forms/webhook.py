@@ -4,6 +4,7 @@ from django import forms
 from django.utils.translation import gettext_lazy as _
 
 from ..models.missive import Missive
+from ._fields import model_formfield
 
 
 class GenerateWebhookSecretForm(forms.Form):
@@ -11,11 +12,15 @@ class GenerateWebhookSecretForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["provider"] = Missive._meta.get_field("provider").formfield(
+        self.fields["provider"] = model_formfield(
+            Missive,
+            "provider",
             required=True,
             label=_("Provider"),
         )
-        self.fields["missive_type"] = Missive._meta.get_field("missive_type").formfield(
+        self.fields["missive_type"] = model_formfield(
+            Missive,
+            "missive_type",
             required=True,
             label=_("Missive type"),
         )
@@ -27,10 +32,7 @@ class GenerateWebhookSecretForm(forms.Form):
         self.fields["secret"] = forms.CharField(
             required=False,
             label=_("Webhook secret"),
-            help_text=_(
-                "Copy into WEBHOOK_SECRET for this provider, then re-create "
-                "the webhook."
-            ),
+            help_text=_("Copy into WEBHOOK_SECRET for this provider, then re-create the webhook."),
         )
         self.fields["webhook_url"] = forms.CharField(
             required=False,
@@ -40,9 +42,7 @@ class GenerateWebhookSecretForm(forms.Form):
         self.fields["webhook_url_token"] = forms.CharField(
             required=False,
             label=_("Webhook URL with token"),
-            help_text=_(
-                "For providers that cannot set headers (Scaleway, SMS Partner)."
-            ),
+            help_text=_("For providers that cannot set headers (Scaleway, SMS Partner)."),
         )
         self.order_fields(
             [

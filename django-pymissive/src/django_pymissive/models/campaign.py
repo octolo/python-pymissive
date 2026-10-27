@@ -28,13 +28,46 @@ from ..models.choices import (
 from django_geoaddress.fields import GeoaddressField
 from namedid import NamedIDField
 from phonenumber_field.modelfields import PhoneNumberField
-from ..fields import RichTextField
+from ..fields import JSONField, RichTextField
 from ..utils import (
     CAMPAIGN_SENDER_NAME_FIELDS,
     SENDER_CONTACT_FIELDS,
     apply_default_sender_fields,
     serialize_model_for_context,
+    validate_import_paths,
 )
+
+
+def _progress_counts(rows, labels):
+    by_type = {}
+    totals = {"total": 0, "sent": 0, "error": 0}
+    for row in rows:
+        missive_type = row["missive_type"]
+        total = row["total"]
+        sent = row["sent"]
+        error = row["error"]
+        totals["total"] += total
+        totals["sent"] += sent
+        totals["error"] += error
+        by_type[missive_type] = {
+            "label": labels.get(missive_type, missive_type),
+            "total": total,
+            "sent": sent,
+            "error": error,
+            "progress": round(sent / total * 100) if total else 0,
+        }
+    return totals, by_type
+
+
+def _campaign_run_payload(run):
+    return {
+        "id": run.id,
+        "scheduled_send_date": run.scheduled_send_date.isoformat() if run.scheduled_send_date else None,
+        "send_date": run.send_date.isoformat() if run.send_date else None,
+        "ended_at": run.ended_at.isoformat() if run.ended_at else None,
+        "status": run.run_status,
+        "url": run.get_progress_path(),
+    }
 
 
 class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
@@ -47,6 +80,7 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     campaign acts as the "parent" tier in the missive cascade — see
     :meth:`Missive._parent_processors`.
     """
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -215,6 +249,18 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         verbose_name=_("First Document"),
         help_text=_("First document content (HTML, converted to PDF for postal letters)"),
     )
+    build_target_processors = JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("Build target processors"),
+        help_text=_(
+            "Default chain that builds a target's missive. A scheduled run "
+            "with an empty chain copies this list when it is saved. A target "
+            "or a run with its own chain replaces it. Each entry may be a "
+            "dotted path, a [path, kwargs] pair, or a "
+            '{"processor": path, "kwargs": {...}} dict.'
+        ),
+    )
 
     objects = MissiveCampaignManager()
     # Same queryset (so ``delete()`` is protected) but no default annotations —
@@ -233,8 +279,8 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """JSON-serializable copy of this campaign's configuration.
 
         Used by a scheduled run to freeze the campaign at send start, so later
-        edits do not rewrite the history of that run. The live ``processing``
-        metadata flag is omitted: it is a lock, not configuration.
+        edits do not rewrite the history of that run. The legacy ``processing``
+        metadata key is omitted because run state belongs to the scheduler.
         """
         data = serialize_model_for_context(self)
         metadata = dict(data.get("metadata") or {})
@@ -249,21 +295,34 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             fields[attr] = key
         apply_default_sender_fields(self, fields)
 
+    def clean(self):
+        super().clean()
+        validate_import_paths(
+            self,
+            "body_processors",
+            "first_document_processors",
+            "attachment_processors",
+            "build_target_processors",
+        )
+
     def save(self, *args, **kwargs):
         self._ensure_default_sender()
         super().save(*args, **kwargs)
 
-    def get_browser_preview_path(self, *, preview_kind: str = "email") -> str:
+    def get_browser_preview_path(self, *, preview_kind: str = "email", brand: str = "") -> str:
         """Relative URL for the preview of this campaign (unauthenticated, see ``PreviewView``).
 
         ``preview_kind`` selects which template will be rendered server-side
-        (email, sms, postal). Returns ``""`` for an unsaved campaign.
+        (email, sms, postal, branded). ``brand`` (discord, slack, teams) picks
+        the branded template. Returns ``""`` for an unsaved campaign.
         """
         if not self.pk:
             return ""
-        return (
-            reverse("django_pymissive:preview", args=["campaign", self.pk])
-            + f"?type={preview_kind}"
+        from ..views.preview import campaign_preview_query
+
+        return reverse("django_pymissive:preview", args=["campaign", self.pk]) + campaign_preview_query(
+            kind=preview_kind,
+            brand=brand,
         )
 
     @property
@@ -309,6 +368,7 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """Campaign-level attachments (ATTACHMENT + VIRTUAL_ATTACHMENT)."""
         from .choices import MissiveAttachmentType
         from django.db.models import Q
+
         return self.to_campaigndocument.filter(
             Q(attachment_type=MissiveAttachmentType.ATTACHMENT)
             | Q(attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT),
@@ -338,14 +398,9 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             return self.__dict__[name] or 0
         cache = self.__dict__.get("_counts_cache")
         if cache is None:
-            annotated = (
-                type(self)._default_manager.with_counts().filter(pk=self.pk).first()
-            )
+            annotated = type(self)._default_manager.with_counts().filter(pk=self.pk).first()
             fields = self._count_fields()
-            cache = {
-                field: (getattr(annotated, field, 0) or 0) if annotated else 0
-                for field in fields
-            }
+            cache = {field: (getattr(annotated, field, 0) or 0) if annotated else 0 for field in fields}
             self.__dict__["_counts_cache"] = cache
         return cache.get(name, 0)
 
@@ -361,38 +416,37 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         # few (``get_absolute_url``, dunders), which have no business building the
         # annotation set.
         if not name.startswith(("count_", "pct_")) or name not in self._count_fields():
-            raise AttributeError(
-                f"{type(self).__name__!r} object has no attribute {name!r}"
-            )
+            raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
         return self._count(name)
 
     @property
-    def is_processing(self) -> bool:
-        """True while a send is under way.
-
-        Either ``start_campaign`` flagged the campaign, or a scheduled run has
-        not ended yet. Reads the ``has_open_run`` annotation or the prefetch
-        cache of ``to_missivecampaignsend`` when either is available, so
-        iterating a list of campaigns costs no query per row.
-
-        The fallback ``EXISTS`` is memoised under the annotation name, so reading
-        the property twice on an instance that carries neither — a campaign
-        reached through ``select_related("campaign")`` from a missive — queries
-        once, not twice. Like the annotation itself, it is a snapshot: reload the
-        campaign after starting a send.
-        """
-        if (self.metadata or {}).get("processing"):
-            return True
-        annotated = getattr(self, "has_open_run", None)
-        if annotated is not None:
-            return bool(annotated)
+    def current_scheduler_id(self):
+        """Primary key of the open scheduler, or ``None`` when idle."""
+        if "open_scheduler_id" in self.__dict__:
+            return self.__dict__["open_scheduler_id"]
         cache = getattr(self, "_prefetched_objects_cache", None) or {}
         runs = cache.get("to_missivecampaignsend")
         if runs is not None:
-            return any(run.ended_at is None for run in runs)
-        open_run = self.to_missivecampaignsend.filter(ended_at__isnull=True).exists()
-        self.__dict__["has_open_run"] = open_run
-        return open_run
+            current = next((run.pk for run in runs if run.ended_at is None), None)
+        else:
+            current = (
+                self.to_missivecampaignsend.filter(ended_at__isnull=True)
+                .order_by("-created_at", "-pk")
+                .values_list("pk", flat=True)
+                .first()
+            )
+        self.__dict__["open_scheduler_id"] = current
+        return current
+
+    @property
+    def has_open_run(self) -> bool:
+        """Whether a scheduler has not reached ``ended_at`` yet."""
+        return self.current_scheduler_id is not None
+
+    @property
+    def is_processing(self) -> bool:
+        """True while a scheduler has not reached ``ended_at`` yet."""
+        return self.current_scheduler_id is not None
 
     @property
     def can_remove(self) -> bool:
@@ -407,22 +461,32 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         annotated = getattr(self, "has_sent_missives", None)
         if annotated is None:
             annotated = self.to_missive.filter(
-                sent_missive_q(), thread_type=MissiveThreadType.MISSIVE,
+                sent_missive_q(),
+                thread_type=MissiveThreadType.MISSIVE,
             ).exists()
             self.__dict__["has_sent_missives"] = annotated
         return not annotated
 
     def delete(self, using=None, keep_parents=False):
         if not self.can_remove:
-            protected = set(
+            protected: set[models.Model] = set(
                 self.to_missive.filter(
-                    sent_missive_q(), thread_type=MissiveThreadType.MISSIVE,
+                    sent_missive_q(),
+                    thread_type=MissiveThreadType.MISSIVE,
                 )
             )
+            if not protected:
+                protected.add(self)
             raise ProtectedError(
-                _("Cannot delete a campaign that has missives which left the draft state."),
-                protected or {self},
+                str(_("Cannot delete a campaign that has missives which left the draft state.")),
+                protected,
             )
+        # The cascade deletes runs without calling their own delete().
+        sending = self.to_missivecampaignsend.sending()
+        if sending:
+            from .scheduler import SENDING_RUN_DELETE_MESSAGE
+
+            raise ProtectedError(str(SENDING_RUN_DELETE_MESSAGE), set(sending))
         return super().delete(using=using, keep_parents=keep_parents)
 
     def pending_send_queryset(self):
@@ -461,8 +525,7 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         claims exactly what a run created here would.
         """
         return self.pending_send_queryset().filter(
-            models.Q(scheduler__isnull=True)
-            | models.Q(scheduler__ended_at__isnull=False),
+            models.Q(scheduler__isnull=True) | models.Q(scheduler__ended_at__isnull=False),
         )
 
     def send_preview_payload(self) -> dict:
@@ -522,8 +585,7 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         # only drops the column — so each Count would group multiplied rows and
         # inflate the progress by recipients x events.
         rows = (
-            Missive._base_manager
-            .filter(campaign=self, thread_type=MissiveThreadType.MISSIVE)
+            Missive._base_manager.filter(campaign=self, thread_type=MissiveThreadType.MISSIVE)
             .values("missive_type")
             .annotate(
                 total=Count("id"),
@@ -532,24 +594,10 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             )
         )
 
-        by_type: dict = {}
-        total_count = sent_count = error_count = 0
-
-        for row in rows:
-            mtype = row["missive_type"]
-            total = row["total"]
-            sent = row["sent"]
-            error = row["error"]
-            total_count += total
-            sent_count += sent
-            error_count += error
-            by_type[mtype] = {
-                "label": MISSIVE_TYPES.get(mtype, mtype),
-                "total": total,
-                "sent": sent,
-                "error": error,
-                "progress": round(sent / total * 100) if total else 0,
-            }
+        totals, by_type = _progress_counts(rows, MISSIVE_TYPES)
+        total_count = totals["total"]
+        sent_count = totals["sent"]
+        error_count = totals["error"]
 
         progress = round(sent_count / total_count * 100) if total_count else 0
         is_processing = self.is_processing
@@ -561,18 +609,7 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         else:
             status = "pending"
 
-        runs = []
-        for run in self.to_missivecampaignsend.order_by("-created_at")[:10]:
-            runs.append({
-                "id": run.id,
-                "scheduled_send_date": (
-                    run.scheduled_send_date.isoformat() if run.scheduled_send_date else None
-                ),
-                "send_date": run.send_date.isoformat() if run.send_date else None,
-                "ended_at": run.ended_at.isoformat() if run.ended_at else None,
-                "status": run.run_status,
-                "url": run.get_progress_path(),
-            })
+        runs = [_campaign_run_payload(run) for run in self.to_missivecampaignsend.order_by("-created_at")[:10]]
 
         return {
             "id": str(self.pk),
@@ -591,41 +628,46 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """End crashed runs and reopen their unsent ``PROCESSING`` missives.
 
         ``ended_at`` is only written in ``run_with_tracking``'s ``finally``.
-        A SIGKILL leaves ``is_running`` true and ``metadata['processing']``
-        set, so the next ``start_campaign`` would raise forever. After the
-        heartbeat timeout those runs are finalized and leftover flags cleared.
+        A SIGKILL leaves ``is_running`` true, so after the heartbeat timeout
+        the run is finalized and no longer blocks a new scheduler.
         """
         from .missive import Missive
 
         for run in self.to_missivecampaignsend.filter(ended_at__isnull=True):
             if run.is_stale:
-                run._finalize_run(
-                    str(_("Stale run: timed out waiting for a heartbeat."))
-                )
+                run._finalize_run(str(_("Stale run: timed out waiting for a heartbeat.")))
         Missive.reclaim_stale_processing(campaign=self)
-        still_open = self.to_missivecampaignsend.filter(ended_at__isnull=True).exists()
-        if still_open:
-            return
-        if (self.metadata or {}).get("processing"):
-            metadata = dict(self.metadata or {})
-            metadata.pop("processing", None)
-            self.metadata = metadata
-            self.save(update_fields=["metadata"])
 
     def start_campaign(self):
-        """Start the campaign."""
+        """Start the campaign.
+
+        Pending selection rows are built into missives by this run before it
+        sends, on every channel that still has one. A campaign with no pending
+        target only sends the drafts it already has.
+        """
+        from .campaign_target import CampaignTarget
+        from .scheduler import SELECTION_TASK
+
         with transaction.atomic():
             campaign = MissiveCampaign.objects_plain.select_for_update().get(pk=self.pk)
             campaign.release_stale_processing()
-            if campaign.metadata.get("processing"):
+            if campaign.is_processing:
                 raise ValidationError(_("Campaign is already being processed."))
-            campaign.metadata = {**dict(campaign.metadata), "processing": True}
-            campaign.save(update_fields=["metadata"])
+            channels = list(
+                CampaignTarget.objects.filter(campaign=campaign)
+                .filter(CampaignTarget.active_q())
+                .order_by()
+                .values_list("missive_type", flat=True)
+                .distinct()
+            )
             scheduled = campaign.to_missivecampaignsend.create(
                 campaign=campaign,
-                scheduled_send_date=timezone.now()
+                scheduled_send_date=timezone.now(),
+                external_task_backend=SELECTION_TASK if channels else "",
+                additional_config={"missive_types": channels} if channels else {},
             )
             # Attach pending missives to this scheduler in bulk so the
             # live annotations (with_counts) can be derived from the FK.
             campaign.claimable_send_queryset().update(scheduler=scheduled)
             scheduled.start_scheduled_campaign()
+            return scheduled

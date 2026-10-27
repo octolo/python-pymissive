@@ -38,9 +38,7 @@ class MissiveAttachmentDownloadView(DetailView):
             return attachment.name.split("/")[-1] or "unnamed_attachment"
         if isinstance(attachment, dict):
             return attachment.get("name") or "unnamed_attachment"
-        return (getattr(attachment_obj, "metadata", None) or {}).get(
-            "name", "unnamed_attachment"
-        )
+        return (getattr(attachment_obj, "metadata", None) or {}).get("name", "unnamed_attachment")
 
     def _processed_content(self, attachment_obj, attachment) -> bytes | None:
         """Read the attachment bytes and run them through the processor chain.
@@ -65,7 +63,7 @@ class MissiveAttachmentDownloadView(DetailView):
             try:
                 attachment.close()
             except Exception:
-                pass
+                logger.debug("Unable to close attachment after download", exc_info=True)
         if not content_bytes:
             return content_bytes
         try:
@@ -84,26 +82,27 @@ class MissiveAttachmentDownloadView(DetailView):
         user = getattr(request, "user", None)
         return bool(user is not None and user.is_staff)
 
-    def get(self, request, *args, **kwargs):
-        attachment_obj = self.get_object()
-        if not self._can_download(request, attachment_obj):
-            raise Http404
-        attachment = attachment_obj.get_attachment()
-        skip_processors = request.GET.get("raw") in {"1", "true", "yes"}
+    def _processed_response(self, request, attachment_obj, attachment):
+        if request.GET.get("raw") in {"1", "true", "yes"}:
+            return None
+        content = self._processed_content(attachment_obj, attachment)
+        if content is None:
+            return None
+        name = self._content_disposition(attachment_obj, attachment)
+        content_type = getattr(attachment_obj, "mime_type", "") or "application/octet-stream"
+        response = HttpResponse(content, content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{name}"'
+        return response
 
-        if not skip_processors:
-            content = self._processed_content(attachment_obj, attachment)
-            if content is not None:
-                name = self._content_disposition(attachment_obj, attachment)
-                ctype = getattr(attachment_obj, "mime_type", "") or "application/octet-stream"
-                response = HttpResponse(content, content_type=ctype)
-                response["Content-Disposition"] = f'attachment; filename="{name}"'
-                return response
+    def _file_response(self, attachment):
+        if not (hasattr(attachment, "read") and hasattr(attachment, "name")):
+            return None
+        self._rewind_attachment(attachment)
+        name = (attachment.name and attachment.name.split("/")[-1]) or "unnamed_attachment"
+        return FileResponse(attachment, as_attachment=True, filename=name)
 
+    def _rewind_attachment(self, attachment):
         if hasattr(attachment, "read") and hasattr(attachment, "name"):
-            # Django FieldFile exposes open(); plain file handles (returned
-            # by virtual attachment helpers) don't — they're already open
-            # and only need a rewind via seek(0).
             if hasattr(attachment, "open") and callable(getattr(attachment, "open")):
                 try:
                     attachment.open("rb")
@@ -114,8 +113,8 @@ class MissiveAttachmentDownloadView(DetailView):
                     attachment.seek(0)
                 except (OSError, ValueError):
                     pass
-            name = (attachment.name and attachment.name.split("/")[-1]) or "unnamed_attachment"
-            return FileResponse(attachment, as_attachment=True, filename=name)
+
+    def _fallback_response(self, attachment_obj, attachment):
         if isinstance(attachment, dict) and "url" in attachment:
             return redirect(attachment["url"])
         if isinstance(attachment, dict) and "content" in attachment:
@@ -123,9 +122,17 @@ class MissiveAttachmentDownloadView(DetailView):
             name = attachment.get("name", "unnamed_attachment")
         else:
             content = attachment
-            name = (getattr(attachment_obj, "metadata", None) or {}).get(
-                "name", "unnamed_attachment"
-            )
+            name = (getattr(attachment_obj, "metadata", None) or {}).get("name", "unnamed_attachment")
         response = HttpResponse(content, content_type="application/octet-stream")
         response["Content-Disposition"] = f'attachment; filename="{name}"'
         return response
+
+    def get(self, request, *args, **kwargs):
+        attachment_obj = self.get_object()
+        if not self._can_download(request, attachment_obj):
+            raise Http404
+        attachment = attachment_obj.get_attachment()
+        response = self._processed_response(request, attachment_obj, attachment)
+        if response is not None:
+            return response
+        return self._file_response(attachment) or self._fallback_response(attachment_obj, attachment)

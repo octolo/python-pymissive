@@ -69,14 +69,10 @@ def verify_inbound_webhook(
     secret = get_webhook_secret(provider)
     if not secret:
         return True
-    return authorization_matches(
-        secret, authorization=authorization, url_token=url_token
-    )
+    return authorization_matches(secret, authorization=authorization, url_token=url_token)
 
 
-def maileva_subscription_authentication(
-    secret: str, login: str = WEBHOOK_BASIC_LOGIN
-) -> dict:
+def maileva_subscription_authentication(secret: str, login: str = WEBHOOK_BASIC_LOGIN) -> dict:
     """Body fragment for Maileva ``POST/PATCH /subscriptions``.
 
     See notification_center v2 ``authentication.basic``

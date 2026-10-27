@@ -28,10 +28,7 @@ def _provider(**values):
     return _Configured()
 
 
-_OK = (
-    "https://sns.mnq.fr-par.scaleway.com/"
-    "?Action=ConfirmSubscription&TopicArn=arn:scw:sns:fr-par:x:t&Token=abc"
-)
+_OK = "https://sns.mnq.fr-par.scaleway.com/?Action=ConfirmSubscription&TopicArn=arn:scw:sns:fr-par:x:t&Token=abc"
 
 
 @pytest.mark.parametrize(
@@ -74,10 +71,36 @@ def test_confirm_does_not_fetch_a_forged_subscribe_url():
     provider = _provider()
     with patch("pymissive.providers.scaleway.requests.get") as get:
         with pytest.raises(ValueError, match="SubscribeURL"):
-            provider._handle_webhook_email_confirm(
-                {"SubscribeURL": "https://evil.test/?Action=ConfirmSubscription"}
-            )
+            provider._handle_webhook_email_confirm({"SubscribeURL": "https://evil.test/?Action=ConfirmSubscription"})
     get.assert_not_called()
+
+
+def test_insert_type_and_url_webhooks_uses_first_subscription():
+    provider = _provider()
+    webhooks = [{"name": "missive-webhook-email", "sns_arn": "topic"}]
+    subscriptions = iter([{"Endpoint": "https://example.test/webhook"}])
+
+    with patch.object(provider, "get_subscriptions", return_value=subscriptions):
+        result = provider.insert_type_and_url_webhooks(object(), webhooks)
+
+    assert result == [
+        {
+            "name": "missive-webhook-email",
+            "sns_arn": "topic",
+            "type": "email",
+            "url": "https://example.test/webhook",
+        }
+    ]
+
+
+def test_insert_type_and_url_webhooks_handles_missing_subscription():
+    provider = _provider()
+    webhooks = [{"name": "missive-webhook-email", "sns_arn": "topic"}]
+
+    with patch.object(provider, "get_subscriptions", return_value=iter([])):
+        result = provider.insert_type_and_url_webhooks(object(), webhooks)
+
+    assert result[0]["url"] is None
 
 
 def test_log_sns_credentials_prints_by_default(capsys):

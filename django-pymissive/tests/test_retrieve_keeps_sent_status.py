@@ -28,9 +28,7 @@ def _missive(**kwargs) -> Missive:
 def test_set_status_does_not_regress_sent_missive_to_draft():
     """The send SUBMITTED used to be recipient-less → counts (0,0,0,0) → DRAFT."""
     missive = _missive()
-    MissiveEvent.objects.create(
-        missive=missive, event=MissiveEventType.SUBMITTED, client_initiated=True
-    )
+    MissiveEvent.objects.create(missive=missive, event=MissiveEventType.SUBMITTED, client_initiated=True)
     missive.set_status()
     missive.refresh_from_db()
     assert missive.status == MissiveStatus.PROCESSING
@@ -40,34 +38,23 @@ def test_send_fans_submitted_out_to_recipients_so_retrieve_stays_processing(sett
     settings.PYMISSIVE_DRY_RUN = False
     settings.PYMISSIVE_DISABLE_SEND = False
     missive = _missive(status=MissiveStatus.DRAFT, external_id=None)
-    recipients = [
-        MissiveRecipientEmail.objects.create(missive=missive, email=f"r{i}@ex.com")
-        for i in range(2)
-    ]
+    recipients = [MissiveRecipientEmail.objects.create(missive=missive, email=f"r{i}@ex.com") for i in range(2)]
 
     with (
         patch.object(Missive, "can_send", return_value=True),
         patch.object(Missive, "get_serialized_data", return_value={}),
         patch.object(Missive, "set_locally_ifnull"),
-        patch.object(
-            Missive, "call_provider_service", return_value={"external_id": "prov-1"}
-        ),
+        patch.object(Missive, "call_provider_service", return_value={"external_id": "prov-1"}),
     ):
         missive.send_missive()
 
     assert (
-        MissiveEvent.objects.filter(
-            missive=missive, event=MissiveEventType.SUBMITTED, recipient__isnull=False
-        ).count()
+        MissiveEvent.objects.filter(missive=missive, event=MissiveEventType.SUBMITTED, recipient__isnull=False).count()
         == 2
     )
-    assert not MissiveEvent.objects.filter(
-        missive=missive, recipient__isnull=True
-    ).exists()
+    assert not MissiveEvent.objects.filter(missive=missive, recipient__isnull=True).exists()
 
-    with patch.object(
-        Missive, "call_provider_service", return_value={}
-    ):
+    with patch.object(Missive, "call_provider_service", return_value={}):
         missive.retrieve_missive()
 
     missive.refresh_from_db()

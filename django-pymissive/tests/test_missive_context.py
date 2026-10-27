@@ -32,12 +32,8 @@ def _make_email_missive(**overrides) -> Missive:
 
 def _attach_related(missive_or_campaign, doc: PdfDocument):
     if isinstance(missive_or_campaign, Missive):
-        return MissiveRelatedObject.objects.create(
-            missive=missive_or_campaign, content_object=doc
-        )
-    return CampaignRelatedObject.objects.create(
-        campaign=missive_or_campaign, content_object=doc
-    )
+        return MissiveRelatedObject.objects.create(missive=missive_or_campaign, content_object=doc)
+    return CampaignRelatedObject.objects.create(campaign=missive_or_campaign, content_object=doc)
 
 
 # ---------------------------------------------------------------------------

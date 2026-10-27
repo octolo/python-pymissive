@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from django.conf import settings
-from django.utils.module_loading import import_string
+from ...utils import import_allowed_string
 
 
 # ---------------------------------------------------------------------------
@@ -25,6 +25,7 @@ DEFAULT_PDF_PROCESSORS: list[str] = [
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
+
 
 def get_default_pdf_processors() -> list:
     """Return the active default PDF-processor chain.
@@ -42,6 +43,7 @@ def get_default_pdf_processors() -> list:
 # ---------------------------------------------------------------------------
 # Base class
 # ---------------------------------------------------------------------------
+
 
 class MissivePdfProcessor:
     """Base class for class-based PDF processors.
@@ -67,6 +69,7 @@ class MissivePdfProcessor:
 # Internal resolution / invocation
 # ---------------------------------------------------------------------------
 
+
 def _resolve_processor(processor: Any) -> tuple[Any, dict]:
     """Resolve an entry to ``(callable, extra_kwargs)``."""
     extra_kwargs: dict = {}
@@ -79,7 +82,7 @@ def _resolve_processor(processor: Any) -> tuple[Any, dict]:
         processor, extra_kwargs = processor[0], dict(processor[1] or {})
 
     if isinstance(processor, str):
-        processor = import_string(processor)
+        processor = import_allowed_string(processor)
 
     if isinstance(processor, type):
         processor = processor()
@@ -113,9 +116,7 @@ def _call_processor(
             context=context,
             **kwargs,
         )
-    raise TypeError(
-        f"PDF processor {processor!r} is not callable and has no .process() method"
-    )
+    raise TypeError(f"PDF processor {processor!r} is not callable and has no .process() method")
 
 
 def apply_pdf_processors(

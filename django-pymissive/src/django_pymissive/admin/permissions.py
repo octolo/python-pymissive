@@ -8,7 +8,7 @@ from django.shortcuts import redirect
 from django.urls import reverse
 
 
-class ActionRightsMixin:
+class ActionRightsMixin(admin.ModelAdmin):
     """Make ``django_boosted`` actions respect the Django change permission.
 
     The library grants change permission to any admin declaring changeform
@@ -38,9 +38,7 @@ class ActionRightsMixin:
 
     def redirect_to_change(self, obj):
         opts = obj._meta
-        return redirect(
-            reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[obj.pk])
-        )
+        return redirect(reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[obj.pk]))
 
     def redirect_to_boost_view(self, request, object_id, view_name):
         """The three send/resend/delete handlers are only this redirect."""

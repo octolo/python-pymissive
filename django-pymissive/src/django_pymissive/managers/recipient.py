@@ -16,6 +16,20 @@ SUPPORT_VALUE_FIELD = {
 }
 
 
+def _target_fields(support):
+    if not support:
+        return "", SUPPORT_VALUE_FIELD
+    normalized = normalize_support(support)
+    if not normalized:
+        raise ValueError(f"Unknown missive support: {support!r}")
+    return normalized, {normalized: SUPPORT_VALUE_FIELD[normalized]}
+
+
+def _target_from_row(row, fields):
+    field = fields.get(row["recipient_support"])
+    return (row.get(field) if field else None) or row["name"]
+
+
 class MissiveRecipientManager(models.Manager):
     """Manager for the MissiveRecipient model."""
 
@@ -52,10 +66,7 @@ class MissiveRecipientManager(models.Manager):
         missive_ids = [mid for mid in (missive_ids or []) if mid]
         if not missive_ids:
             return {}
-        fields = SUPPORT_VALUE_FIELD
-        normalized = normalize_support(support) if support else ""
-        if support and not normalized:
-            raise ValueError(f"Unknown missive support: {support!r}")
+        normalized, fields = _target_fields(support)
         # _base_manager rather than self: get_queryset() annotates count_event,
         # and its LEFT JOIN on the events survives .values() — which only drops
         # the column — leaving the rows to group multiplied by the events. Fifty
@@ -69,64 +80,59 @@ class MissiveRecipientManager(models.Manager):
         by_missive: dict[str, list] = {}
         columns = ("missive_id", "recipient_support", "name", *fields.values())
         for row in qs.order_by("name", "id").values(*columns):
-            value = next(
-                (
-                    row[field]
-                    for support_key, field in fields.items()
-                    if support_key == row["recipient_support"] and row.get(field)
-                ),
-                None,
-            ) or row["name"]
-            if not value:
-                continue
-            by_missive.setdefault(str(row["missive_id"]), []).append(value)
+            value = _target_from_row(row, fields)
+            if value:
+                by_missive.setdefault(str(row["missive_id"]), []).append(value)
         return by_missive
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        qs = qs.select_related("missive")
-        qs = qs.prefetch_related("to_recipientevent")
-        qs = qs.annotate(
-            count_event=models.Count(
-                "to_recipientevent",
-            ),
-            last_event=self.last_event_subquery(field="event"),
-            last_event_reason=self.last_event_subquery(field="reason"),
-            last_event_date=Coalesce(
-                Max("to_recipientevent__occurred_at"), F("created_at")
-            ),
+        return (
+            super()
+            .get_queryset()
+            .select_related("missive")
+            .prefetch_related("to_recipientevent")
+            .annotate(
+                count_event=models.Count(
+                    "to_recipientevent",
+                ),
+                last_event=self.last_event_subquery(field="event"),
+                last_event_reason=self.last_event_subquery(field="reason"),
+                last_event_date=Coalesce(Max("to_recipientevent__occurred_at"), F("created_at")),
+            )
         )
-        return qs
 
 
-class MissiveRecipientEmailManager(models.Manager):
+class MissiveRecipientEmailManager(MissiveRecipientManager):
     """Manager for the MissiveRecipientEmail model."""
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = models.Manager.get_queryset(self)
         qs = qs.filter(recipient_support=MissiveSupport.EMAIL)
         return qs
 
-class MissiveRecipientPhoneManager(models.Manager):
+
+class MissiveRecipientPhoneManager(MissiveRecipientManager):
     """Manager for the MissiveRecipientPhone model."""
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = models.Manager.get_queryset(self)
         qs = qs.filter(recipient_support=MissiveSupport.PHONE)
         return qs
 
-class MissiveRecipientAddressManager(models.Manager):
+
+class MissiveRecipientAddressManager(MissiveRecipientManager):
     """Manager for the MissiveRecipientAddress model."""
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = models.Manager.get_queryset(self)
         qs = qs.filter(recipient_support=MissiveSupport.ADDRESS)
         return qs
 
-class MissiveRecipientApplicationManager(models.Manager):
+
+class MissiveRecipientApplicationManager(MissiveRecipientManager):
     """Manager for the MissiveRecipientApplication model."""
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = models.Manager.get_queryset(self)
         qs = qs.filter(recipient_support=MissiveSupport.APPLICATION)
         return qs

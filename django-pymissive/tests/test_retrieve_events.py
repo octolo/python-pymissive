@@ -18,9 +18,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_form_requires_dates():
-    form = RetrieveEventsForm(
-        data={"provider": "brevo", "missive_type": MissiveType.EMAIL}
-    )
+    form = RetrieveEventsForm(data={"provider": "brevo", "missive_type": MissiveType.EMAIL})
     assert form.is_valid() is False
 
 
@@ -56,9 +54,10 @@ def test_retrieve_events_calls_provider_and_handles():
     provider = MagicMock()
     provider._provider = MagicMock()
     provider._provider.call_service.return_value = [{"event": "delivered"}]
-    with patch(
-        "django_pymissive.models.provider.MissiveProviderModel"
-    ) as ProviderModel, patch("django_pymissive.events.handle_events") as handle:
+    with (
+        patch("django_pymissive.models.provider.MissiveProviderModel") as ProviderModel,
+        patch("django_pymissive.events.handle_events") as handle,
+    ):
         ProviderModel.objects.get.return_value = provider
         retrieve_events(
             provider="brevo",
@@ -108,9 +107,7 @@ def test_delay_retrieve_events_uses_thread_backend(settings):
 
 
 def test_admin_retrieve_events_get_renders_form():
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missiveevent_retrieve_events")
@@ -120,9 +117,7 @@ def test_admin_retrieve_events_get_renders_form():
 
 
 def test_admin_retrieve_events_post_sync():
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missiveevent_retrieve_events")
@@ -142,9 +137,7 @@ def test_admin_retrieve_events_post_sync():
 
 
 def test_admin_retrieve_events_post_as_task():
-    user = get_user_model().objects.create_superuser(
-        username="admin", email="admin@example.com", password="x"
-    )
+    user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     client = Client()
     client.force_login(user)
     url = reverse("admin:django_pymissive_missiveevent_retrieve_events")

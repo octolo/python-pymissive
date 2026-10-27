@@ -125,8 +125,7 @@ def watermark_processor(
         from reportlab.pdfgen import canvas
     except ImportError as exc:  # pragma: no cover - exercised at runtime
         raise ImportError(
-            "watermark_processor requires pypdf and reportlab. "
-            "Install them with: pip install django-pymissive[pdf]"
+            "watermark_processor requires pypdf and reportlab. Install them with: pip install django-pymissive[pdf]"
         ) from exc
 
     if text is None:
@@ -149,9 +148,7 @@ def watermark_processor(
         )
         line_height = effective_size * line_spacing
         total_height = len(lines) * line_height
-        line_offsets = [
-            total_height / 2 - (i + 0.5) * line_height for i in range(len(lines))
-        ]
+        line_offsets = [total_height / 2 - (i + 0.5) * line_height for i in range(len(lines))]
 
         buf = BytesIO()
         c = canvas.Canvas(buf, pagesize=(width, height))

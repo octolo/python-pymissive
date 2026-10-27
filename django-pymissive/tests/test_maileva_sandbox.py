@@ -139,9 +139,7 @@ def test_letter_has_delete_recipient_services():
 
 def test_letter_payload_ignores_acknowledgement():
     provider = _PostalProvider()
-    data = provider.get_letter_data(
-        subject="Letter", acknowledgement="acknowledgement_of_receipt"
-    )
+    data = provider.get_letter_data(subject="Letter", acknowledgement="acknowledgement_of_receipt")
     assert "acknowledgement_of_receipt" not in data
     assert "notification_types" not in data
     assert data.get("postage_type") == "FAST"
@@ -157,9 +155,7 @@ def test_letter_webhook_resource_types_include_mail_v3():
 
 def test_registered_letter_basic_delivery_disables_ar():
     provider = _PostalProvider()
-    data = provider.get_registered_letter_data(
-        subject="registered letter", acknowledgement="basic_delivery"
-    )
+    data = provider.get_registered_letter_data(subject="registered letter", acknowledgement="basic_delivery")
     assert data.get("acknowledgement_of_receipt") is False
     assert "acknowledgement_of_receipt_scanning" not in data
     assert "postage_type" not in data
@@ -211,9 +207,7 @@ def test_registered_letter_payload_sends_printing_flags_as_bools():
 
 def test_registered_letter_keeps_notification_types_when_email_is_set():
     provider = _PostalProvider()
-    data = provider.get_registered_letter_data(
-        subject="registered letter", notification_email="ops@example.com"
-    )
+    data = provider.get_registered_letter_data(subject="registered letter", notification_email="ops@example.com")
     assert data["notification_email"] == "ops@example.com"
     assert data["notification_types"] == ["ALL_MAILEVA", "ALL_LAPOSTE"]
 
@@ -272,9 +266,7 @@ def test_letter_proofs_omit_acknowledgement_of_receipt():
             ]
 
     letter_urls = [doc["url"] for doc in _P().retrieve_proofs_letter(external_id="s")]
-    registered_urls = [
-        doc["url"] for doc in _P().retrieve_proofs_registered_letter(external_id="s")
-    ]
+    registered_urls = [doc["url"] for doc in _P().retrieve_proofs_registered_letter(external_id="s")]
     assert letter_urls == ["/d"]
     assert registered_urls == ["/d", "/ar"]
 

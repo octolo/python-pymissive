@@ -33,7 +33,6 @@ _ARG_CONFIG = {
 }
 
 
-
 def _parse_json(value: str):
     val = (value or "").strip() if value is not None else ""
     if not val:
@@ -62,274 +61,313 @@ def _get_provider(parsed: dict) -> tuple | None:
     return provider_name, providers[0]
 
 
+def _supports(provider, service: str) -> bool:
+    if hasattr(provider, service):
+        return True
+    print(f"Error: Provider does not support {service}", file=sys.stderr)
+    return False
+
+
+def _print_json_result(title: str, result) -> None:
+    print_separator()
+    print_header(title)
+    print_separator()
+    print(json.dumps(result, indent=2, default=str))
+
+
+def _single_recipient(parsed: dict) -> list[dict] | None:
+    name = (parsed.get("recipient_name") or "").strip()
+    fields = (
+        ("email", (parsed.get("recipient_email") or "").strip()),
+        ("phone", (parsed.get("recipient_phone") or "").strip()),
+    )
+    for field, value in fields:
+        if value:
+            return [{field: value, "name": name}]
+    address_raw = (parsed.get("recipient_address") or "").strip()
+    address = _parse_json(address_raw) if address_raw else None
+    if address:
+        return [{"address": address, "name": name}]
+    return None
+
+
+def _recipients(parsed: dict) -> list | None:
+    recipients_raw = parsed.get("recipients") or ""
+    recipients = _parse_json(recipients_raw) if recipients_raw else None
+    if recipients is not None and not isinstance(recipients, list):
+        print("Error: --recipients must be a JSON array", file=sys.stderr)
+        return None
+    recipients = recipients or _single_recipient(parsed)
+    if not recipients:
+        print(
+            "Error: --recipients (JSON array) or one of --recipient-email/phone/address required",
+            file=sys.stderr,
+        )
+    return recipients
+
+
+def _text_arg(parsed: dict, name: str) -> str:
+    return (parsed.get(name) or "").strip()
+
+
+def _optional_json_arg(parsed: dict, name: str):
+    raw = _text_arg(parsed, name)
+    return _parse_json(raw) if raw else None
+
+
+def _sender_payload(parsed: dict) -> tuple[dict, str, str]:
+    sender_email = _text_arg(parsed, "sender_email")
+    sender_name = _text_arg(parsed, "sender_name")
+    sender = {
+        "email": sender_email,
+        "name": sender_name,
+        "phone": _text_arg(parsed, "sender_phone"),
+    }
+    sender = {key: value for key, value in sender.items() if value}
+    sender_address = _optional_json_arg(parsed, "sender_address")
+    if sender_address is not None:
+        sender["address"] = sender_address
+    return sender, sender_email, sender_name
+
+
+def _send_payload(parsed: dict, recipients: list) -> dict:
+    sender, sender_email, sender_name = _sender_payload(parsed)
+    body_text = parsed.get("body_text") or parsed.get("body") or ""
+    payload = {
+        "subject": parsed.get("subject", ""),
+        "body_rich": parsed.get("body_rich", ""),
+        "body_text": body_text,
+        "recipients": recipients,
+        "sender": sender,
+        "sender_email": sender_email,
+        "sender_name": sender_name,
+    }
+    return {key: value for key, value in payload.items() if value}
+
+
+def _send(parsed, provider_name, provider, missive_type, resource) -> bool:
+    if not missive_type:
+        print("Error: --missive-type required (e.g. email, sms, registered_letter)", file=sys.stderr)
+        return False
+    recipients = _recipients(parsed)
+    if not recipients:
+        return False
+    service = provider_service_name("send", missive_type)
+    if not _supports(provider, service):
+        return False
+    try:
+        provider.call_service(service, **_send_payload(parsed, recipients))
+        print_separator()
+        print_header(f"{provider_name} - {missive_type}")
+        print_separator()
+        print(provider.response(service, parsed.get("raw") or False, output_format=parsed.get("format") or "terminal"))
+        return True
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return False
+
+
+def _webhook_data(parsed, provider_name, missive_type, webhook_id="") -> dict:
+    scheme = parsed.get("scheme", "https")
+    domain = parsed.get("domain", "localhost:8080")
+    url = f"{scheme}://{domain.rstrip('/')}/webhook/{provider_name}/{missive_type}/"
+    return {"id": webhook_id, "type": missive_type, "url": url}
+
+
+def _create(parsed, provider_name, provider, missive_type, resource) -> bool:
+    if resource not in ("", "webhook"):
+        print(f"Error: Unknown resource '{resource}'. Use: webhook", file=sys.stderr)
+        return False
+    if not missive_type:
+        print("Error: --type required for webhook (e.g. email, sms)", file=sys.stderr)
+        return False
+    service = provider_service_name("create_webhook", missive_type)
+    if not _supports(provider, service):
+        return False
+    result_id = provider.call_service(
+        service,
+        webhook_data=_webhook_data(parsed, provider_name, missive_type),
+    )
+    print_separator()
+    print_header(f"{provider_name} - created webhook")
+    print_separator()
+    print(f"webhook_id={result_id}")
+    return True
+
+
+def _update(parsed, provider_name, provider, missive_type, resource) -> bool:
+    if resource not in ("", "webhook"):
+        print(f"Error: Unknown resource '{resource}'. Use: webhook", file=sys.stderr)
+        return False
+    webhook_id = parsed.get("webhook_id", "")
+    if not webhook_id or not missive_type:
+        print("Error: --webhook-id and --type required for webhook update", file=sys.stderr)
+        return False
+    service = provider_service_name("update_webhook", missive_type)
+    if not _supports(provider, service):
+        return False
+    provider.call_service(
+        service,
+        webhook_data=_webhook_data(parsed, provider_name, missive_type, webhook_id),
+    )
+    print("Webhook updated.")
+    return True
+
+
+def _delete_sending(parsed, provider_name, provider, missive_type) -> bool:
+    external_id = parsed.get("external_id", "")
+    if not external_id:
+        print("Error: --external-id required for delete missive", file=sys.stderr)
+        return False
+    missive_type = missive_type or "registered_letter"
+    service = provider_service_name("delete", missive_type)
+    if not _supports(provider, service):
+        return False
+    try:
+        result = provider.call_service(service, external_id=external_id)
+        _print_json_result(f"{provider_name} - deleted {missive_type} sending", result)
+        return True
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return False
+
+
+def _delete_webhook(parsed, provider, missive_type) -> bool:
+    webhook_id = parsed.get("webhook_id", "")
+    if not webhook_id or not missive_type:
+        print("Error: --webhook-id and --type required for webhook delete", file=sys.stderr)
+        return False
+    service = provider_service_name("delete_webhook", missive_type)
+    if not _supports(provider, service):
+        return False
+    provider.call_service(service, webhook_data={"id": webhook_id, "type": missive_type})
+    print("Webhook deleted.")
+    return True
+
+
+def _delete(parsed, provider_name, provider, missive_type, resource) -> bool:
+    if resource in ("missive", "sending"):
+        return _delete_sending(parsed, provider_name, provider, missive_type)
+    if resource in ("", "webhook"):
+        return _delete_webhook(parsed, provider, missive_type)
+    print(f"Error: Unknown resource '{resource}'. Use: webhook, missive", file=sys.stderr)
+    return False
+
+
+def _retrieve_service(provider, service, **kwargs):
+    if not _supports(provider, service):
+        return False, None
+    provider.call_service(service, **kwargs)
+    return True, provider.get_service_normalize(service)
+
+
+def _retrieve_period(parsed, provider, missive_type, kind):
+    if not missive_type:
+        examples = "email, sms, registered_letter" if kind == "events" else "registered_letter, email"
+        print(f"Error: --type required for retrieve {kind} (e.g. {examples})", file=sys.stderr)
+        return False, None
+    start_date = parsed.get("start_date") or ""
+    end_date = parsed.get("end_date") or ""
+    if not start_date or not end_date:
+        print(f"Error: --start-date and --end-date required for retrieve {kind}", file=sys.stderr)
+        return False, None
+    service = provider_service_name(f"retrieve_{kind}", missive_type)
+    return _retrieve_service(provider, service, start_date=start_date, end_date=end_date)
+
+
+def _retrieve_tracking(parsed, provider, missive_type):
+    if not missive_type:
+        print("Error: --type required for retrieve tracking_number (e.g. registered_letter)", file=sys.stderr)
+        return False, None
+    external_id = parsed.get("external_id", "")
+    if not external_id:
+        print("Error: --external-id required for retrieve tracking_number", file=sys.stderr)
+        return False, None
+    service = provider_service_name("tracking_number", missive_type)
+    return _retrieve_service(provider, service, external_id=external_id)
+
+
+def _retrieve_data(parsed, provider, missive_type, resource):
+    simple_services = {
+        "webhooks": "retrieve_webhooks",
+        "email": "retrieve_email",
+        "sms": "retrieve_sms",
+    }
+    if resource in simple_services:
+        return _retrieve_service(provider, simple_services[resource])
+    if resource in ("registered_letter", "letter"):
+        return _retrieve_service(provider, provider_service_name("retrieve", resource))
+    if resource == "events":
+        return _retrieve_period(parsed, provider, missive_type, "events")
+    if resource in ("billings", "billing"):
+        return _retrieve_period(parsed, provider, missive_type, "billings")
+    if resource == "tracking_number":
+        return _retrieve_tracking(parsed, provider, missive_type)
+    print(
+        "Error: Use webhooks, email, registered_letter, letter, sms, events, billings, tracking_number "
+        "(e.g. missive retrieve webhooks --provider X)",
+        file=sys.stderr,
+    )
+    return False, None
+
+
+def _retrieve(parsed, provider_name, provider, missive_type, resource) -> bool:
+    resource = resource or "webhooks"
+    success, data = _retrieve_data(parsed, provider, missive_type, resource)
+    if not success:
+        return False
+    _print_json_result(f"{provider_name} - {resource}", data)
+    return True
+
+
+def _cancel(parsed, provider_name, provider, missive_type, resource) -> bool:
+    external_id = parsed.get("external_id", "")
+    if not external_id:
+        print("Error: --external-id required for cancel", file=sys.stderr)
+        return False
+    missive_type = missive_type or "registered_letter"
+    service = provider_service_name("cancel", missive_type)
+    if not _supports(provider, service):
+        return False
+    try:
+        result = provider.call_service(service, external_id=external_id)
+        _print_json_result(f"{provider_name} - cancelled {missive_type}", result)
+        return True
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return False
+
+
+_SUBCOMMANDS = {
+    "create": _create,
+    "retrieve": _retrieve,
+    "send": _send,
+    "update": _update,
+    "delete": _delete,
+    "cancel": _cancel,
+}
+
+
 def _missive_command(args: list[str]) -> bool:
+    args = [f"--{arg[2:].replace('-', '_')}" if arg.startswith("--") else arg for arg in args]
     parsed = parse_args_from_config(args, _ARG_CONFIG, prog="missive")
     if parsed.get("help"):
         from .help import print_command_help
+
         return print_command_help("missive")
     cmd_args = parsed.get("args") or []
     subcommand = cmd_args[0] if cmd_args else ""
-    resource = cmd_args[1] if len(cmd_args) > 1 else ""
-
-    if subcommand not in ("create", "retrieve", "send", "update", "delete", "cancel"):
+    handler = _SUBCOMMANDS.get(subcommand)
+    if handler is None:
         print("Error: Use create, retrieve, send, update, delete, cancel", file=sys.stderr)
         return False
-
-    result = _get_provider(parsed)
-    if not result:
+    provider_result = _get_provider(parsed)
+    if not provider_result:
         return False
-    provider_name, provider = result
+    provider_name, provider = provider_result
     missive_type = parsed.get("type") or parsed.get("missive_type", "")
-
-    if subcommand == "send":
-        if not missive_type:
-            print("Error: --missive-type required (e.g. email, sms, registered_letter)", file=sys.stderr)
-            return False
-        recipients_raw = parsed.get("recipients") or ""
-        recipients = _parse_json(recipients_raw) if recipients_raw else None
-        if recipients is not None and not isinstance(recipients, list):
-            print("Error: --recipients must be a JSON array", file=sys.stderr)
-            return False
-        if not recipients:
-            rec_email = (parsed.get("recipient_email") or "").strip()
-            rec_phone = (parsed.get("recipient_phone") or "").strip()
-            rec_address_raw = (parsed.get("recipient_address") or "").strip()
-            rec_address = _parse_json(rec_address_raw) if rec_address_raw else None
-            rec_name = (parsed.get("recipient_name") or "").strip()
-            if rec_email:
-                recipients = [{"email": rec_email, "name": rec_name or ""}]
-            elif rec_phone:
-                recipients = [{"phone": rec_phone, "name": rec_name or ""}]
-            elif rec_address:
-                recipients = [{"address": rec_address, "name": rec_name or ""}]
-            else:
-                print("Error: --recipients (JSON array) or one of --recipient-email/phone/address required", file=sys.stderr)
-                return False
-        sender_email = (parsed.get("sender_email") or "").strip()
-        sender_name = (parsed.get("sender_name") or "").strip()
-        sender_phone = (parsed.get("sender_phone") or "").strip()
-        sender_address_raw = (parsed.get("sender_address") or "").strip()
-        sender_address = _parse_json(sender_address_raw) if sender_address_raw else None
-        sender = {
-            "email": sender_email or None,
-            "name": sender_name or None,
-            "phone": sender_phone or None,
-            "address": sender_address,
-        }
-        sender = {k: v for k, v in sender.items() if v is not None}
-        body_text = (parsed.get("body_text") or "") or (parsed.get("body") or "")
-        payload = {
-            "subject": parsed.get("subject", ""),
-            "body_rich": parsed.get("body_rich", ""),
-            "body_text": body_text,
-            "recipients": recipients,
-            "sender": sender,
-            "sender_email": sender_email,
-            "sender_name": sender_name,
-        }
-        payload = {k: v for k, v in payload.items() if v}
-        service = provider_service_name("send", missive_type)
-        if not hasattr(provider, service):
-            print(f"Error: Provider does not support {service}", file=sys.stderr)
-            return False
-        try:
-            provider.call_service(service, **payload)
-            print_separator()
-            print_header(f"{provider_name} - {missive_type}")
-            print_separator()
-            print(provider.response(service, parsed.get("raw") or False, output_format=parsed.get("format") or "terminal"))
-        except Exception as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return False
-
-    elif subcommand == "create":
-        if resource == "webhook" or not resource:
-            if not missive_type:
-                print("Error: --type required for webhook (e.g. email, sms)", file=sys.stderr)
-                return False
-            scheme = parsed.get("scheme", "https")
-            domain = parsed.get("domain", "localhost:8080")
-            path = f"/webhook/{provider_name}/{missive_type}/"
-            url = f"{scheme}://{domain.rstrip('/')}{path}"
-            webhook_data = {"id": "", "type": missive_type, "url": url}
-            service = provider_service_name("create_webhook", missive_type)
-            if not hasattr(provider, service):
-                print(f"Error: Provider does not support {service}", file=sys.stderr)
-                return False
-            result_id = provider.call_service(service, webhook_data=webhook_data)
-            print_separator()
-            print_header(f"{provider_name} - created webhook")
-            print_separator()
-            print(f"webhook_id={result_id}")
-        else:
-            print(f"Error: Unknown resource '{resource}'. Use: webhook", file=sys.stderr)
-            return False
-
-    elif subcommand == "update":
-        if resource == "webhook" or not resource:
-            webhook_id = parsed.get("webhook_id", "")
-            if not webhook_id or not missive_type:
-                print("Error: --webhook-id and --type required for webhook update", file=sys.stderr)
-                return False
-            scheme = parsed.get("scheme", "https")
-            domain = parsed.get("domain", "localhost:8080")
-            path = f"/webhook/{provider_name}/{missive_type}/"
-            url = f"{scheme}://{domain.rstrip('/')}{path}"
-            webhook_data = {"id": webhook_id, "type": missive_type, "url": url}
-            service = provider_service_name("update_webhook", missive_type)
-            if not hasattr(provider, service):
-                print(f"Error: Provider does not support {service}", file=sys.stderr)
-                return False
-            provider.call_service(service, webhook_data=webhook_data)
-            print("Webhook updated.")
-        else:
-            print(f"Error: Unknown resource '{resource}'. Use: webhook", file=sys.stderr)
-            return False
-
-    elif subcommand == "delete":
-        if resource in ("missive", "sending"):
-            external_id = parsed.get("external_id", "")
-            if not external_id:
-                print(
-                    "Error: --external-id required for delete missive",
-                    file=sys.stderr,
-                )
-                return False
-            if not missive_type:
-                missive_type = "registered_letter"
-            service = provider_service_name("delete", missive_type)
-            if not hasattr(provider, service):
-                print(f"Error: Provider does not support {service}", file=sys.stderr)
-                return False
-            try:
-                result = provider.call_service(service, external_id=external_id)
-                print_separator()
-                print_header(f"{provider_name} - deleted {missive_type} sending")
-                print_separator()
-                print(json.dumps(result, indent=2, default=str))
-            except Exception as e:
-                print(f"Error: {e}", file=sys.stderr)
-                return False
-        elif resource == "webhook" or not resource:
-            webhook_id = parsed.get("webhook_id", "")
-            if not webhook_id or not missive_type:
-                print("Error: --webhook-id and --type required for webhook delete", file=sys.stderr)
-                return False
-            webhook_data = {"id": webhook_id, "type": missive_type}
-            service = provider_service_name("delete_webhook", missive_type)
-            if not hasattr(provider, service):
-                print(f"Error: Provider does not support {service}", file=sys.stderr)
-                return False
-            provider.call_service(service, webhook_data=webhook_data)
-            print("Webhook deleted.")
-        else:
-            print(
-                f"Error: Unknown resource '{resource}'. Use: webhook, missive",
-                file=sys.stderr,
-            )
-            return False
-
-    elif subcommand == "retrieve":
-        retrieve_resource = resource or "webhooks"
-        if retrieve_resource == "webhooks":
-            if not hasattr(provider, "retrieve_webhooks"):
-                print("Error: Provider does not support retrieve_webhooks", file=sys.stderr)
-                return False
-            provider.call_service("retrieve_webhooks")
-            data = provider.get_service_normalize("retrieve_webhooks")
-        elif retrieve_resource == "email":
-            if not hasattr(provider, "retrieve_email"):
-                print("Error: Provider does not support retrieve_email", file=sys.stderr)
-                return False
-            provider.call_service("retrieve_email")
-            data = provider.get_service_normalize("retrieve_email")
-        elif retrieve_resource in ("registered_letter", "letter"):
-            service = provider_service_name("retrieve", retrieve_resource)
-            if not hasattr(provider, service):
-                print(f"Error: Provider does not support {service}", file=sys.stderr)
-                return False
-            provider.call_service(service)
-            data = provider.get_service_normalize(service)
-        elif retrieve_resource == "sms":
-            if not hasattr(provider, "retrieve_sms"):
-                print("Error: Provider does not support retrieve_sms", file=sys.stderr)
-                return False
-            provider.call_service("retrieve_sms")
-            data = provider.get_service_normalize("retrieve_sms")
-        elif retrieve_resource == "events":
-            if not missive_type:
-                print("Error: --type required for retrieve events (e.g. email, sms, registered_letter)", file=sys.stderr)
-                return False
-            start_date = parsed.get("start_date") or ""
-            end_date = parsed.get("end_date") or ""
-            if not start_date or not end_date:
-                print("Error: --start-date and --end-date required for retrieve events", file=sys.stderr)
-                return False
-            service = provider_service_name("retrieve_events", missive_type)
-            if not hasattr(provider, service):
-                print(f"Error: Provider does not support {service}", file=sys.stderr)
-                return False
-            provider.call_service(service, start_date=start_date, end_date=end_date)
-            data = provider.get_service_normalize(service)
-        elif retrieve_resource in ("billings", "billing"):
-            if not missive_type:
-                print("Error: --type required for retrieve billings (e.g. registered_letter, email)", file=sys.stderr)
-                return False
-            start_date = parsed.get("start_date") or ""
-            end_date = parsed.get("end_date") or ""
-            if not start_date or not end_date:
-                print("Error: --start-date and --end-date required for retrieve billings", file=sys.stderr)
-                return False
-            service = provider_service_name("retrieve_billings", missive_type)
-            if not hasattr(provider, service):
-                print(f"Error: Provider does not support {service}", file=sys.stderr)
-                return False
-            provider.call_service(service, start_date=start_date, end_date=end_date)
-            data = provider.get_service_normalize(service)
-        elif retrieve_resource == "tracking_number":
-            if not missive_type:
-                print("Error: --type required for retrieve tracking_number (e.g. registered_letter)", file=sys.stderr)
-                return False
-            external_id = parsed.get("external_id", "")
-            if not external_id:
-                print("Error: --external-id required for retrieve tracking_number", file=sys.stderr)
-                return False
-            service = provider_service_name("tracking_number", missive_type)
-            if not hasattr(provider, service):
-                print(f"Error: Provider does not support {service}", file=sys.stderr)
-                return False
-            provider.call_service(service, external_id=external_id)
-            data = provider.get_service_normalize(service)
-        else:
-            print("Error: Use webhooks, email, registered_letter, letter, sms, events, billings, tracking_number (e.g. missive retrieve webhooks --provider X)", file=sys.stderr)
-            return False
-        print_separator()
-        print_header(f"{provider_name} - {retrieve_resource}")
-        print_separator()
-        print(json.dumps(data, indent=2, default=str))
-
-    elif subcommand == "cancel":
-        external_id = parsed.get("external_id", "")
-        if not external_id:
-            print("Error: --external-id required for cancel", file=sys.stderr)
-            return False
-        if not missive_type:
-            missive_type = "registered_letter"
-        service = provider_service_name("cancel", missive_type)
-        if not hasattr(provider, service):
-            print(f"Error: Provider does not support {service}", file=sys.stderr)
-            return False
-        try:
-            result = provider.call_service(service, external_id=external_id)
-            print_separator()
-            print_header(f"{provider_name} - cancelled {missive_type}")
-            print_separator()
-            print(json.dumps(result, indent=2, default=str))
-        except Exception as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return False
-
-    return True
+    resource = cmd_args[1] if len(cmd_args) > 1 else ""
+    return handler(parsed, provider_name, provider, missive_type, resource)
 
 
 missive_command = Command(

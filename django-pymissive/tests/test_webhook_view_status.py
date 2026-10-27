@@ -103,9 +103,7 @@ def test_an_unreadable_payload_answers_400():
 def test_a_failing_event_asks_for_a_retry():
     _missive()
 
-    with patch(
-        "django_pymissive.events._process_event", side_effect=RuntimeError("boom")
-    ):
+    with patch("django_pymissive.events._process_event", side_effect=RuntimeError("boom")):
         response = _post(_provider([_event()]))
 
     assert response.status_code == 503

@@ -36,6 +36,4 @@ def django_template_processor(
     if not content:
         return content
     autoescape = field_name in HTML_TEMPLATE_FIELDS
-    return Template(str(content)).render(
-        Context(context or {}, autoescape=autoescape)
-    )
+    return Template(str(content)).render(Context(context or {}, autoescape=autoescape))

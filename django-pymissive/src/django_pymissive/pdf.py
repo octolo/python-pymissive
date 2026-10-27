@@ -33,11 +33,13 @@ HTML_WRAPPER = """<!DOCTYPE html>
 </html>"""
 
 # Missive types that use the postal letter layout (header + body) in preview and PDF.
-_POSTAL_LETTER_TYPES = frozenset({
-    "letter",
-    "registered_letter",
-    "hand_delivery",
-})
+_POSTAL_LETTER_TYPES = frozenset(
+    {
+        "letter",
+        "registered_letter",
+        "hand_delivery",
+    }
+)
 
 _DEFAULT_PDF_CSS = """
 @page {{
@@ -135,8 +137,7 @@ def body_to_pdf(missive, **kwargs: Any) -> bytes:
         from weasyprint import HTML  # type: ignore[import-untyped]
     except ImportError as exc:
         raise ImportError(
-            "weasyprint is required for PDF generation. "
-            "Install it with: pip install django-pymissive[pdf]"
+            "weasyprint is required for PDF generation. Install it with: pip install django-pymissive[pdf]"
         ) from exc
 
     pr_pk = kwargs.get("postal_recipient_pk")

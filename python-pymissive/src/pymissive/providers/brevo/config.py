@@ -1,0 +1,61 @@
+"""Static ProviderKit metadata for the Brevo provider."""
+
+FIELDS_ASSOCIATIONS = {
+    "webhook_id": "id",
+    "id": "id",
+    "url": "url",
+    "type": "type",
+    "created_at": "createdAt",
+    "updated_at": "updatedAt",
+    "occurred_at": ["occurred_at", "_date", "date", "trace._date"],
+    "event": ["event", "trace.event"],
+    "external_id": ["message_id", "messageId", "_message_id", "message-id"],
+    "email": ["email", "trace.email"],
+    "sender_email": ["_from", "trace._from", "sender_email"],
+}
+
+EVENTS_ASSOCIATION = {
+    "request": "request",
+    "requests": "request",
+    "sent": "sent",
+    "accepted": "accepted",
+    "hardBounce": "hard_bounce",
+    "softBounce": "soft_bounce",
+    "hardBounces": "hard_bounce",
+    "softBounces": "soft_bounce",
+    "bounces": "hard_bounce",
+    "hard_bounce": "hard_bounce",
+    "soft_bounce": "soft_bounce",
+    "blocked": "blocked",
+    "spam": "spam",
+    "delivered": "delivered",
+    "click": "clicked",
+    "clicks": "clicked",
+    "invalid": "invalid",
+    "deferred": "deferred",
+    "opened": "opened",
+    "loadedByProxy": "proxy",
+    "proxy_open": "proxy",
+    "error": "error",
+    "unsubscribed": "unsubscribe",
+    "unsubscription": "unsubscribe",
+    "rejected": "rejected",
+    "skipped": "dropped",
+}
+
+# Brevo's create-webhook API only accepts these transactional email events.
+WEBHOOK_EMAIL_EVENTS = [
+    "request",
+    "sent",
+    "delivered",
+    "hardBounce",
+    "softBounce",
+    "blocked",
+    "spam",
+    "invalid",
+    "deferred",
+    "click",
+    "opened",
+    "uniqueOpened",
+    "unsubscribed",
+]

@@ -9,6 +9,7 @@ from pymissive.utils import HTTP_TIMEOUT
 
 from .base import MissiveProviderBase
 
+
 class SlackProvider(MissiveProviderBase):
     """Slack provider for branded messages in channels."""
 
@@ -40,7 +41,7 @@ class SlackProvider(MissiveProviderBase):
 
         raise ValueError("Slack channel_id is required (kwargs, recipients, or SLACK_CHANNEL_ID)")
 
-    def send_branded(self, **kwargs: Any) -> dict[str, Any]:
+    def send_branded(self, brand_name: str | None = None, **kwargs: Any) -> dict[str, Any]:
         """Send a branded message to a Slack channel."""
         channel_id = self._resolve_channel_id(**kwargs)
         text = kwargs.get("body_text") or kwargs.get("body_rich") or kwargs.get("subject") or ""
@@ -59,7 +60,7 @@ class SlackProvider(MissiveProviderBase):
         )
 
         try:
-            with urlopen(request, timeout=HTTP_TIMEOUT) as response:
+            with urlopen(request, timeout=HTTP_TIMEOUT) as response:  # nosec B310
                 data = json.loads(response.read().decode("utf-8"))
                 if not data.get("ok"):
                     raise RuntimeError(f"Slack API error: {data.get('error', 'unknown_error')}")

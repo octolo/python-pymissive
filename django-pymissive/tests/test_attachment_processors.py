@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from io import BytesIO
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pytest
 from django.test import override_settings
@@ -55,12 +54,8 @@ def test_get_default_attachment_processors_falls_back_to_default():
 
 
 def test_get_default_attachment_processors_honors_override():
-    with override_settings(
-        PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS=["tests.test_attachment_processors._appender"]
-    ):
-        assert get_default_attachment_processors() == [
-            "tests.test_attachment_processors._appender"
-        ]
+    with override_settings(PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS=["tests.test_attachment_processors._appender"]):
+        assert get_default_attachment_processors() == ["tests.test_attachment_processors._appender"]
 
 
 def test_get_default_attachment_processors_supports_empty_list():
@@ -177,9 +172,9 @@ def test_watermark_pdf_attachments_processes_pdf():
     from pypdf import PdfReader
 
     reader = PdfReader(BytesIO(out))
-    assert any(
-        "WATERMARK_SENTINEL" in (p.extract_text() or "") for p in reader.pages
-    ), "Watermark text should be visible in the watermarked PDF"
+    assert any("WATERMARK_SENTINEL" in (p.extract_text() or "") for p in reader.pages), (
+        "Watermark text should be visible in the watermarked PDF"
+    )
 
 
 def test_watermark_pdf_attachments_handles_missing_is_pdf_attribute():
