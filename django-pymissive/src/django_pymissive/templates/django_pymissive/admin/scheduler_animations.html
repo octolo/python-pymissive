@@ -182,10 +182,6 @@
     <p class="muted">{% translate "To mix several send types or pick another receiver, pass a list and the receiver option:" %} <code>PymissiveAnimation.mountCard("frame-id", ["sms", "postal"], { receiver: "globe" })</code>. {% translate "IDs and mount calls stay in your own HTML or JavaScript." %}</p>
   </section>
 </main>
-{% endblock %}
-
-{% block extrabody %}
-{{ block.super }}
 {% pymissive_animations_labels %}
 {% pymissive_animations_js %}
 <script>
