@@ -124,7 +124,7 @@ def _format_setting(value: object) -> str:
 class MissiveSettingManager(VirtualManager):
     """One row per setting, built in memory."""
 
-    def get_data(self) -> list[dict[str, object]]:
+    def get_data(self) -> list[dict[str, str]]:
         known = _known_settings()
         rows = []
         for name in sorted(known):

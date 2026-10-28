@@ -171,6 +171,7 @@ def build_target_processor(
     fallback_name = _target_name(target, build_target_fields().get("name", ()))
     first_type, first_value = ordered[0]
     first_name, first_contact = _split_contact(first_value, support, fallback_name)
+    recipient: dict[str, Any] = {_RECIPIENT_FIELD[support]: first_contact}
     missive = build_draft(
         campaign,
         target,
@@ -178,7 +179,7 @@ def build_target_processor(
         name=first_name,
         recipient_type=first_type,
         extra_missive_fields=extra_missive_fields,
-        **{_RECIPIENT_FIELD[support]: first_contact},
+        **recipient,
     )
     if missive is None:
         return None

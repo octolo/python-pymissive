@@ -457,7 +457,7 @@ def _expand_allowed(value) -> list:
     """Allow-list entries: contacts, or a processor that returns contacts."""
     value = _call_if_processor(value)
     if isinstance(value, (list, tuple, set)):
-        items = []
+        items: list = []
         for item in value:
             resolved = _call_if_processor(item)
             if isinstance(resolved, (list, tuple, set)):
