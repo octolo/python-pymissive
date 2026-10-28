@@ -37,14 +37,6 @@
   {% endfor %}
 </div>
 {{ frames|json_script:"send-animation-frames" }}
-{% else %}
-<p>{% translate "Nothing to send on this run." %}</p>
-{% endif %}
-{% endblock %}
-
-{% block extrabody %}
-{{ block.super }}
-{% if frames %}
 {% pymissive_animations_labels %}
 {% pymissive_animations_js %}
 <script>
@@ -110,5 +102,7 @@
   }
   setTimeout(refresh, pollMs);
 </script>
+{% else %}
+<p>{% translate "Nothing to send on this run." %}</p>
 {% endif %}
 {% endblock %}
