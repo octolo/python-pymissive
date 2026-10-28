@@ -8,8 +8,9 @@ is read in this order:
 - ``SLEEP_SECONDS`` on this provider (``PROVIDERKIT_PROVIDERS_CONFIG["fake"]``)
 - ``10``
 
-Sends are refused unless ``PYMISSIVE_ALLOW_FAKE_PROVIDER`` is true, so a
-misconfigured production never marks missives as sent without sending them.
+Sends are refused unless ``PYMISSIVE_ALLOW_FAKE_PROVIDER`` or
+``PYMISSIVE_FORCE_FAKE_PROVIDER`` is true, so a misconfigured production
+never marks missives as sent without sending them.
 
 ``handle_webhook_*`` reads a JSON body already shaped like a normalized event
 (``external_id``, ``event``, ``occurred_at``, ``recipient``, ``reason``).
@@ -24,7 +25,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from pymissive.config import ALL_EVENTS, MISSIVE_TYPES
-from pymissive.utils import is_disable_send, is_fake_provider_allowed
+from pymissive.utils import is_disable_send, is_fake_provider_allowed, is_force_fake_provider
 
 from .base import MissiveProviderBase
 
@@ -54,8 +55,10 @@ class FakeProvider(MissiveProviderBase):
         return seconds if seconds > 0 else 0
 
     def _send(self, missive_type: str, **kwargs: Any) -> dict[str, Any]:
-        if not is_fake_provider_allowed():
-            raise RuntimeError("Fake provider is disabled: set PYMISSIVE_ALLOW_FAKE_PROVIDER to use it.")
+        if not is_fake_provider_allowed() and not is_force_fake_provider():
+            raise RuntimeError(
+                "Fake provider is disabled: set PYMISSIVE_ALLOW_FAKE_PROVIDER or PYMISSIVE_FORCE_FAKE_PROVIDER to use it."
+            )
         external_id = kwargs.get("external_id") or f"fake-{missive_type}-{uuid.uuid4()}"
         if is_disable_send():
             return self._disabled_send_response(f"send_{missive_type}", external_id=external_id)

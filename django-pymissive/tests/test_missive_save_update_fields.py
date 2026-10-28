@@ -68,6 +68,17 @@ def test_a_string_setting_is_the_provider_for_every_type(settings):
     assert letter.provider == "fake"
 
 
+def test_force_fake_provider_overrides_every_type(settings):
+    settings.PYMISSIVE_FORCE_FAKE_PROVIDER = True
+    settings.PYMISSIVE_DEFAULT_PROVIDER = "brevo"
+    MissiveConfig.objects.create(missive_type=MissiveType.EMAIL, default_provider="brevo")
+    MissiveConfig.objects.create(missive_type=MissiveType.SMS, default_provider="smspartner")
+    email = _missive(provider="sendgrid")
+    sms = _missive(missive_type=MissiveType.SMS, subject="Ping")
+    assert email.provider == "fake"
+    assert sms.provider == "fake"
+
+
 def test_missive_config_wins_over_the_settings_default(settings):
     settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
     MissiveConfig.objects.create(

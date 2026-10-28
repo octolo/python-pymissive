@@ -355,6 +355,63 @@ def test_claim_for_send_retries_from_error():
     assert missive.status == MissiveStatus.PROCESSING
 
 
+def test_force_fake_provider_replaces_the_stored_provider(settings, caplog):
+    settings.PYMISSIVE_DRY_RUN = False
+    settings.PYMISSIVE_FORCE_FAKE_PROVIDER = True
+    missive = _email_missive()
+    Missive.objects.filter(pk=missive.pk).update(provider="brevo")
+    missive.refresh_from_db()
+
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "call_provider_service", return_value={"external_id": "fake-email-1"}) as call,
+        caplog.at_level("WARNING", "django_pymissive.models.missive"),
+    ):
+        missive.send_missive()
+
+    call.assert_called_once()
+    missive.refresh_from_db()
+    assert missive.provider == "fake"
+    assert any("brevo" in record.getMessage() and "fake" in record.getMessage() for record in caplog.records)
+
+
+def test_force_fake_provider_does_not_modify_history_during_reads(settings):
+    settings.PYMISSIVE_FORCE_FAKE_PROVIDER = True
+    missive = _email_missive()
+    Missive.objects.filter(pk=missive.pk).update(
+        provider="brevo",
+        status=MissiveStatus.SUCCESS,
+        external_id="brevo-email-1",
+    )
+    missive.refresh_from_db()
+
+    assert missive.has_service("send") is True
+    missive.get_serialized_data(attachments=False)
+
+    assert missive.provider == "brevo"
+    missive.refresh_from_db()
+    assert missive.provider == "brevo"
+
+
+def test_dry_run_still_skips_the_provider_when_fake_is_forced(settings):
+    settings.PYMISSIVE_DRY_RUN = True
+    settings.PYMISSIVE_FORCE_FAKE_PROVIDER = True
+    missive = _email_missive()
+    Missive.objects.filter(pk=missive.pk).update(provider="brevo")
+    missive.refresh_from_db()
+
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "call_provider_service") as call,
+    ):
+        missive.send_missive()
+
+    call.assert_not_called()
+    missive.refresh_from_db()
+    assert missive.provider == "fake"
+    assert missive.external_id == f"dry-run:{missive.thread_id}"
+
+
 def test_send_missive_second_caller_does_not_hit_provider(settings):
     settings.PYMISSIVE_DRY_RUN = False
     settings.PYMISSIVE_DISABLE_SEND = False

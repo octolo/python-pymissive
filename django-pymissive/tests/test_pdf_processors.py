@@ -5,7 +5,7 @@ Covers:
 - chain runner semantics (empty / passthrough / order / kwargs);
 - :func:`watermark_processor` requires pypdf+reportlab and produces valid PDFs;
 - :func:`weasyprint_renderer` forwards runtime + entry kwargs to the underlying
-  generator (mocked via ``MISSIVEPDF_GENERATOR``);
+  generator (mocked via ``PYMISSIVE_PDF_GENERATOR``);
 - ``PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS`` override.
 """
 
@@ -504,7 +504,7 @@ def test_watermark_font_size_kwarg_is_a_ceiling_not_a_pin():
 
 
 def _record_call(missive, **kwargs):
-    """Capture-everything generator stub used as MISSIVEPDF_GENERATOR."""
+    """Capture-everything generator stub used as PYMISSIVE_PDF_GENERATOR."""
     _record_call.calls.append({"missive": missive, **kwargs})
     return b"%PDF-RECORDED"
 
@@ -514,7 +514,7 @@ _record_call.calls = []  # type: ignore[attr-defined]
 
 def test_weasyprint_renderer_forwards_runtime_kwargs(settings):
     _record_call.calls.clear()
-    settings.MISSIVEPDF_GENERATOR = "tests.test_pdf_processors._record_call"
+    settings.PYMISSIVE_PDF_GENERATOR = "tests.test_pdf_processors._record_call"
 
     out = weasyprint_renderer(
         Mock(name="missive"),
@@ -528,7 +528,7 @@ def test_weasyprint_renderer_forwards_runtime_kwargs(settings):
 
 def test_weasyprint_renderer_entry_kwargs_take_precedence(settings):
     _record_call.calls.clear()
-    settings.MISSIVEPDF_GENERATOR = "tests.test_pdf_processors._record_call"
+    settings.PYMISSIVE_PDF_GENERATOR = "tests.test_pdf_processors._record_call"
 
     weasyprint_renderer(
         Mock(name="missive"),
@@ -542,7 +542,7 @@ def test_weasyprint_renderer_entry_kwargs_take_precedence(settings):
 def test_weasyprint_renderer_ignores_previous_pdf_bytes(settings):
     """The default renderer always re-renders, never composes on previous bytes."""
     _record_call.calls.clear()
-    settings.MISSIVEPDF_GENERATOR = "tests.test_pdf_processors._record_call"
+    settings.PYMISSIVE_PDF_GENERATOR = "tests.test_pdf_processors._record_call"
 
     out = weasyprint_renderer(Mock(name="missive"), b"existing-bytes")
     assert out == b"%PDF-RECORDED"  # NOT b"existing-bytes" + anything

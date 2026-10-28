@@ -4,7 +4,7 @@ Compiles the missive body template and converts it to PDF using weasyprint.
 Postal first-page layout CSS lives in ``static/django_pymissive/css/letter_page.css``;
 WeasyPrint loads that file via staticfiles and appends PDF-specific ``@page`` / sheet resets.
 
-Override by setting MISSIVEPDF_GENERATOR in your Django settings.
+Override by setting PYMISSIVE_PDF_GENERATOR in your Django settings.
 """
 
 from __future__ import annotations

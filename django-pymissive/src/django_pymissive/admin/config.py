@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.contrib import messages
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.utils.html import format_html
 from django.utils.text import format_lazy
 from django.utils.translation import gettext_lazy as _
 from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
@@ -15,6 +16,7 @@ from ..models.config import (
     typed_default_provider_changes,
     typed_default_providers,
 )
+from ..models.setting import MissiveSetting
 from .permissions import ActionRightsMixin
 
 
@@ -34,6 +36,7 @@ def _describe_change(missive_type, current, provider):
 @admin.register(MissiveConfig)
 class MissiveConfigAdmin(ActionRightsMixin, AdminBoostModel):
     list_display = ["missive_type", "default_provider"]
+    list_display_links = ["missive_type"]
     list_editable = ["default_provider"]
     ordering = ["missive_type"]
 
@@ -127,3 +130,25 @@ class MissiveConfigAdmin(ActionRightsMixin, AdminBoostModel):
             ),
         )
         return redirect(reverse("admin:django_pymissive_missiveconfig_changelist"))
+
+    @admin.display(description=_("Setting"))
+    def setting_name(self, obj):
+        return format_html("<strong>{}</strong>", obj.name)
+
+    @admin.display(description=_("Default"))
+    def setting_default(self, obj):
+        return format_html('<span style="color: var(--secondary)">{}</span>', obj.default_value)
+
+    @admin.display(description=_("Configured"))
+    def setting_configured(self, obj):
+        if not obj.configured_value:
+            return ""
+        return format_html('<span style="color: #fff">{}</span>', obj.configured_value)
+
+    @admin_boost_view("list", _("Settings"), requires_object=False)
+    def show_settings(self, request):
+        """Read-only list of every setting this package reads."""
+        return {
+            "queryset": MissiveSetting.objects.all(),
+            "list_display": ["setting_name", "setting_default", "setting_configured"],
+        }

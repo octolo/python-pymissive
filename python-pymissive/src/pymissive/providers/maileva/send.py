@@ -111,30 +111,6 @@ class MailevaSendMixin(MailevaMixinTypingBase):
         self._raise_for_response(response, f"Maileva create sending failed ({url})")
         return response.json()
 
-    def _create_postal(self, *, product: str, **kwargs: Any) -> dict[str, Any]:
-        response = self._create_sending_postal(product=product, **kwargs)
-        external_id = cast(str, response.get("id"))
-        recipients = cast(list[dict[str, Any]], kwargs.get("recipients"))
-        response["recipients"] = self._add_recipients_postal(recipients, external_id, product=product)
-        return response
-
-    def create_letter(self, **kwargs: Any) -> dict[str, Any]:
-        return self._create_postal(product="letter", **kwargs)
-
-    def create_registered_letter(self, **kwargs: Any) -> dict[str, Any]:
-        """Create sending and add recipients on the provider (used by prepare_missive)."""
-        return self._create_postal(product="registered_letter", **kwargs)
-
-    def prepare_registered_letter(self, **kwargs: Any) -> dict[str, Any]:
-        """Alias for create_registered_letter (deprecated, use create_registered_letter)."""
-        return self.create_registered_letter(**kwargs)
-
-    def update_letter(self, **kwargs: Any) -> dict[str, Any]:
-        return self._create_postal(product="letter", **kwargs)
-
-    def update_registered_letter(self, **kwargs: Any) -> dict[str, Any]:
-        return self._create_postal(product="registered_letter", **kwargs)
-
     def _delete_postal(self, *, product: str, **kwargs: Any) -> dict[str, Any]:
         url = self.get_endpoint("sendings", product=product) + "/" + cast(str, kwargs.get("external_id"))
         response = self._request("DELETE", url)

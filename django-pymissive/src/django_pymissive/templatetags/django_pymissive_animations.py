@@ -64,6 +64,8 @@ def animation_labels() -> dict:
         "counter.errorMany": _("errors"),
         "counter.summaryTitle": _("{sent} sent, {errors} errors out of {total}"),
         "counter.totalTitle": _("{total} sends in total"),
+        "end.sent": _("Sent"),
+        "end.cancelled": _("Cancelled"),
     }
 
 

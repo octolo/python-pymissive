@@ -1,5 +1,7 @@
 """Utility functions for django_pymissive."""
 
+import json
+import logging
 import os
 from datetime import timedelta
 from urllib.parse import urlparse
@@ -13,6 +15,8 @@ from django.utils.translation import gettext_lazy as _
 
 from .models.choices import MissiveRecipientType
 from .models.recipient import MissiveRecipient
+
+logger = logging.getLogger(__name__)
 
 
 def serialize_model_for_context(obj) -> dict:
@@ -69,7 +73,7 @@ def get_default_domain():
     """Return default domain (host) from settings or localhost:8000.
     If setting is a full URL, extracts the netloc for use in webhook domain field.
     """
-    domain = getattr(settings, "MISSIVE_DOMAIN", None) or getattr(settings, "DOMAIN", None) or "localhost:8000"
+    domain = getattr(settings, "PYMISSIVE_DOMAIN", None) or getattr(settings, "DOMAIN", None) or "localhost:8000"
     domain = str(domain).strip().rstrip("/")
     if domain.startswith(("http://", "https://")):
         parsed = urlparse(domain)
@@ -78,13 +82,13 @@ def get_default_domain():
 
 
 def get_default_scheme():
-    """Return default scheme from settings (MISSIVE_SCHEME, SCHEME) or http.
+    """Return default scheme from settings (PYMISSIVE_SCHEME, SCHEME) or http.
     If domain setting is a full URL, extracts scheme from it.
     """
-    scheme = getattr(settings, "MISSIVE_SCHEME", None) or getattr(settings, "SCHEME", None)
+    scheme = getattr(settings, "PYMISSIVE_SCHEME", None) or getattr(settings, "SCHEME", None)
     if scheme:
         return str(scheme).replace("://", "")
-    domain = getattr(settings, "MISSIVE_DOMAIN", None) or getattr(settings, "DOMAIN", None)
+    domain = getattr(settings, "PYMISSIVE_DOMAIN", None) or getattr(settings, "DOMAIN", None)
     if domain and str(domain).strip().lower().startswith("https://"):
         return "https"
     return "http"
@@ -426,6 +430,208 @@ CAMPAIGN_SENDER_NAME_FIELDS = (
 )
 
 
+_RECIPIENT_GROUPS = ("recipients", "cc", "bcc", "notification")
+_CONTACT_FIELD = {
+    "email": "email",
+    "phone": "phone",
+    "address": "address",
+    "application": "notification_id",
+}
+_ABSENT = object()
+
+
+def _is_processor_path(value) -> bool:
+    return isinstance(value, str) and "." in value and "@" not in value and " " not in value
+
+
+def _call_if_processor(value):
+    """Call a dotted path or callable. Emails and plain contacts stay as they are."""
+    if callable(value):
+        return value()
+    if _is_processor_path(value):
+        return import_allowed_string(value)()
+    return value
+
+
+def _expand_allowed(value) -> list:
+    """Allow-list entries: contacts, or a processor that returns contacts."""
+    value = _call_if_processor(value)
+    if isinstance(value, (list, tuple, set)):
+        items = []
+        for item in value:
+            resolved = _call_if_processor(item)
+            if isinstance(resolved, (list, tuple, set)):
+                items.extend(resolved)
+            else:
+                items.append(resolved)
+        return items
+    return [value]
+
+
+def _channel_setting(name: str, missive_type: str):
+    """Value for this missive type, or ``_ABSENT`` when the channel is not configured.
+
+    A missive-type key (``sms``, ``letter``) wins over the support key
+    (``phone``, ``address``). ``PYMISSIVE_RECIPIENT_ALLOWED`` may be a dotted
+    path or a callable: a dict is read like the setting, a list is the email
+    allow-list.
+    """
+    from pymissive.config import missive_support_for_type, normalize_missive_type
+
+    canonical = normalize_missive_type(missive_type) or str(missive_type or "").strip().lower()
+    support = missive_support_for_type(canonical)
+    field = _CONTACT_FIELD.get(support)
+    if not field:
+        return None, _ABSENT
+    raw = getattr(settings, name, None)
+    if name == "PYMISSIVE_RECIPIENT_ALLOWED":
+        raw = _call_if_processor(raw)
+        if isinstance(raw, (list, tuple, set)):
+            if field == "email":
+                return field, list(raw)
+            return field, _ABSENT
+    if not isinstance(raw, dict):
+        return field, _ABSENT
+    if canonical in raw:
+        return field, raw[canonical]
+    if support in raw:
+        return field, raw[support]
+    return field, _ABSENT
+
+
+def _blank_override(value) -> bool:
+    if value is None or value == "" or value == [] or value == {}:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    return isinstance(value, (list, tuple))
+
+
+def _contact_key(value, field: str) -> str:
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
+    text = str(value or "").strip()
+    if field == "email":
+        return text.casefold()
+    if field == "phone":
+        return "".join(ch for ch in text if ch.isdigit() or ch == "+")
+    return text
+
+
+def apply_send_recipients(payload: dict, missive_type: str, *, log: bool = True) -> dict:
+    """Rewrite recipients for this send only. Stored rows are left untouched.
+
+    ``PYMISSIVE_RECIPIENT_ALLOWED`` lists the contacts that may keep their
+    real address. A channel value, or the whole setting, may be a dotted path
+    or a callable that returns that list. Anyone else is replaced by
+    ``PYMISSIVE_OVERRIDE_RECIPIENT`` for the same missive type (or its
+    support). When that override is empty, the send is refused.
+    """
+    field, override = _channel_setting("PYMISSIVE_OVERRIDE_RECIPIENT", missive_type)
+    allowed_field, allowed = _channel_setting("PYMISSIVE_RECIPIENT_ALLOWED", missive_type)
+    if field is None or (override is _ABSENT and allowed is _ABSENT):
+        return payload
+    contact_field = field or allowed_field
+    allowed_keys = None
+    if allowed is not _ABSENT:
+        allowed_keys = {
+            _contact_key(item, contact_field) for item in _expand_allowed(allowed) if not _blank_override(item)
+        }
+    override_value = None if override is _ABSENT or _blank_override(override) else override
+    refused = []
+    replaced = []
+    rewritten = dict(payload)
+    for group in _RECIPIENT_GROUPS:
+        rows = rewritten.get(group)
+        if not isinstance(rows, list) or not rows:
+            continue
+        updated = []
+        for row in rows:
+            if not isinstance(row, dict):
+                updated.append(row)
+                continue
+            current = row.get(contact_field)
+            if allowed_keys is not None and _contact_key(current, contact_field) in allowed_keys:
+                updated.append(row)
+                continue
+            if override_value is not None:
+                updated.append({**row, contact_field: override_value})
+                replaced.append(f"{group} {current} -> {override_value}")
+                continue
+            if allowed_keys is not None:
+                refused.append(str(current or ""))
+                continue
+            updated.append(row)
+        rewritten[group] = updated
+    if log and replaced:
+        logger.warning(
+            "PYMISSIVE_OVERRIDE_RECIPIENT replaced %s recipient(s) for %s: %s",
+            len(replaced),
+            missive_type,
+            "; ".join(replaced),
+        )
+    if refused:
+        raise ValidationError(
+            _("Recipient %(contacts)s is not allowed for %(missive_type)s and PYMISSIVE_OVERRIDE_RECIPIENT is empty.")
+            % {"contacts": ", ".join(refused), "missive_type": missive_type}
+        )
+    return rewritten
+
+
+def _dry_run_setting():
+    raw = getattr(settings, "PYMISSIVE_DRY_RUN", False)
+    if isinstance(raw, str):
+        return raw.strip().lower()
+    return raw
+
+
+def disallowed_recipients(groups: dict, missive_type: str) -> list[str]:
+    """Contacts that must not leave the process for this missive type.
+
+    An empty list means every contact is on ``PYMISSIVE_RECIPIENT_ALLOWED``.
+    Without an allow-list for the channel, the result is ``["no allow-list"]``.
+    """
+    field, allowed = _channel_setting("PYMISSIVE_RECIPIENT_ALLOWED", missive_type)
+    if field is None or allowed is _ABSENT:
+        return ["no allow-list"]
+    allowed_keys = {_contact_key(item, field) for item in _expand_allowed(allowed) if not _blank_override(item)}
+    blocked = []
+    for group in _RECIPIENT_GROUPS:
+        rows = groups.get(group) or []
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                blocked.append(str(row))
+                continue
+            current = row.get(field)
+            if _contact_key(current, field) not in allowed_keys:
+                blocked.append(str(current or ""))
+    return blocked
+
+
+def dry_run_block(groups: dict, missive_type: str) -> list[str] | None:
+    """Contacts forcing a dry-run, or ``None`` when the provider may be called.
+
+    ``PYMISSIVE_DRY_RUN`` True → ``[]``. ``"allowed"`` → the contacts outside
+    ``PYMISSIVE_RECIPIENT_ALLOWED`` (or ``["no allow-list"]``). Any other value
+    → ``None``.
+    """
+    if is_dry_run():
+        return []
+    if _dry_run_setting() != "allowed":
+        return None
+    blocked = disallowed_recipients(groups, missive_type)
+    if not blocked:
+        return None
+    logger.warning(
+        "PYMISSIVE_DRY_RUN=allowed skipped the provider for %s: %s",
+        missive_type,
+        ", ".join(blocked),
+    )
+    return blocked
+
+
 def get_default_sender() -> dict:
     """Return ``settings.PYMISSIVE_DEFAULT_SENDER`` (name / email / phone / address)."""
     raw = getattr(settings, "PYMISSIVE_DEFAULT_SENDER", None)
@@ -480,20 +686,37 @@ def stale_processing_cutoff():
 
 
 def is_dry_run() -> bool:
-    """Return True when dry-run mode is enabled (test/staging).
+    """Return True when every send stays local (test/staging).
 
-    Controlled by ``settings.PYMISSIVE_DRY_RUN``. Defaults to False (real sends).
+    ``settings.PYMISSIVE_DRY_RUN``:
 
-    When enabled, ``Missive.send_missive`` and ``Missive.prepare_missive``:
+    - ``True`` — skip the provider for every missive;
+    - ``False`` — call the provider;
+    - ``"allowed"`` — call the provider only when every recipient is on
+      ``PYMISSIVE_RECIPIENT_ALLOWED``. One contact outside that list keeps
+      the whole missive local. That case is not reported here; send uses
+      :func:`dry_run_block`.
 
-    - run the full local pipeline (campaign inheritance, body processors,
-      first_document PDF generation, ``get_serialized_data``);
-    - skip the provider call entirely;
-    - persist a synthetic ``external_id`` prefixed with ``dry-run:``;
-    - record a ``SUBMITTED`` event with ``trace={"dry_run": True, ...}`` so
-      tests can assert the missive went through the pipeline.
+    A full dry-run still runs the local pipeline, stores a ``dry-run:``
+    ``external_id``, and records ``trace={"dry_run": True, ...}``.
     """
-    return bool(getattr(settings, "PYMISSIVE_DRY_RUN", False))
+    raw = _dry_run_setting()
+    if raw == "allowed":
+        return False
+    return bool(raw)
+
+
+def is_force_fake_provider() -> bool:
+    """Return True when every missive must use the local ``fake`` provider.
+
+    ``settings.PYMISSIVE_FORCE_FAKE_PROVIDER`` (or the same environment
+    variable). Unlike dry-run, the provider is still called: it is ``fake``,
+    so nothing leaves the process. A provider already stored on the missive,
+    and the per-type default, are replaced. Dry-run still skips that call.
+    """
+    from pymissive.utils import is_force_fake_provider as _is_force_fake_provider
+
+    return _is_force_fake_provider()
 
 
 def is_disable_send() -> bool:

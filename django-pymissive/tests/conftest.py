@@ -40,6 +40,7 @@ def _disable_dry_run(settings):
     """Make sure tests never enter the dry-run / disable-send branches implicitly."""
     settings.PYMISSIVE_DRY_RUN = False
     settings.PYMISSIVE_DISABLE_SEND = False
+    settings.PYMISSIVE_FORCE_FAKE_PROVIDER = False
 
 
 @pytest.fixture(autouse=True)

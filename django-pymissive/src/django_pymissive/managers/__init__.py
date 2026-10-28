@@ -1,6 +1,7 @@
 """Managers for django_pymissive."""
 
 from .provider import ProviderManager
+from .setting import MissiveSettingManager
 from .missive import (
     MissiveManager,
     MissiveMessageManager,
@@ -31,6 +32,7 @@ from .recipient import (
 
 __all__ = [
     "ProviderManager",
+    "MissiveSettingManager",
     "MissiveManager",
     "MissiveMessageManager",
     "MissiveHistoryManager",

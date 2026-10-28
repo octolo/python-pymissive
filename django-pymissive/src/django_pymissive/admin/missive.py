@@ -572,18 +572,6 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         # has_<action>_permission gating.
         return admin.ModelAdmin.has_change_permission(self, request, obj)
 
-    def has_prepare_missive_permission(self, request, obj=None):
-        return (
-            self.has_action_rights(request, obj)
-            and self.is_draft(obj)
-            and self.provider_has_service(obj, "create")
-            and not obj.external_id
-        )
-
-    @admin_boost_action("prepare_missive", _("Prepare"))
-    def handle_prepare_missive(self, request, object_id):
-        self.call_object_method(request, object_id, "prepare_missive", _("Missive prepared successfully."))
-
     def has_resend_missive_permission(self, request, obj=None):
         return (
             self.has_action_rights(request, obj)

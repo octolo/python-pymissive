@@ -58,7 +58,9 @@
     'counter.errorOne': 'error',
     'counter.errorMany': 'errors',
     'counter.summaryTitle': '{sent} sent, {errors} errors out of {total}',
-    'counter.totalTitle': '{total} sends in total'
+    'counter.totalTitle': '{total} sends in total',
+    'end.sent': 'Sent',
+    'end.cancelled': 'Cancelled'
   };
 
   // One entry per send type. The animation cycle lives in the CSS variable, read at mount time;
@@ -578,15 +580,6 @@
       part.querySelectorAll(selector).forEach(callback);
     });
   }
-  // A receiver that does not belong to the send type stays still, in its finished state.
-  function freezeReceiver(parts) {
-    eachMatch(parts, '.call-wave', el => { el.style.animation = 'none'; });
-    eachMatch(parts, REACTIONS, el => {
-      el.style.animation = 'none';
-      el.style.opacity = '1';
-      el.style.transform = 'none';
-    });
-  }
   // Times the receiver reactions so they fire as items arrive, whatever the count and speed.
   function syncReceiver(parts, duration, count) {
     const step = duration / count;
@@ -628,7 +621,7 @@
     sceneContent.className = 'lab-scene-content';
     sceneContent.insertAdjacentHTML('beforeend', CLOUDS);
     const receiverNodes = receiverParts(receiver);
-    if (!native) freezeReceiver(receiverNodes);
+    receiverNodes[0].classList.add('lab-receiver');
     let messages = messagesFrom(options);
     function showReceivedMessage() {
       const incoming = receiverNodes[0].querySelector('.bubble.received');
@@ -660,7 +653,9 @@
     }
     function animate() {
       staggerAnimations(items, cycle, speed);
-      if (native) syncReceiver(receiverNodes, cycle / speedFactor(speed), items.length);
+      if (receiver.preset) {
+        syncReceiver(receiverNodes, cycle / speedFactor(speed), items.length);
+      }
     }
     function buildItems(desiredCount) {
       items.forEach(node => node.remove());
@@ -683,10 +678,60 @@
 
     const caption = addCaption(stage, { caption: options.showCaption === false ? '' : options.caption }, shell);
     const counter = addCounter(stage, { ...options, counter: options.showCounter === false ? false : options.counter });
+    const finale = document.createElement('div');
+    finale.className = 'lab-finale';
+    finale.hidden = true;
+    finale.innerHTML = '<span class="lab-finale-mark" aria-hidden="true"></span><strong class="lab-finale-label"></strong>';
+    stage.appendChild(finale);
+    let finishTimer = 0;
+
+    function finish(result = {}) {
+      if (shell.destroyed || stage.classList.contains('is-finishing') || stage.classList.contains('is-finished')) return;
+      const status = result.status === 'cancelled' ? 'cancelled' : 'completed';
+      const errors = integer(result.errors, counter ? counter.getState().errors : 0);
+      const hasErrors = status === 'completed' && errors > 0;
+      const reducedMotion = global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const mark = finale.querySelector('.lab-finale-mark');
+      const label = finale.querySelector('.lab-finale-label');
+      const stateClass = status === 'cancelled' ? 'is-cancelled' : hasErrors ? 'has-errors' : 'is-completed';
+
+      stage.classList.remove('is-cancelled', 'has-errors', 'is-completed');
+      stage.classList.add('is-finishing', stateClass);
+      mark.textContent = status === 'cancelled' ? '×' : hasErrors ? '!' : '✓';
+      label.textContent = status === 'cancelled'
+        ? t('end.cancelled')
+        : t('end.sent') + (hasErrors ? ' — ' + formatNumber(errors) + ' ' + t(errors > 1 ? 'counter.errorMany' : 'counter.errorOne') : '');
+      finale.hidden = false;
+
+      if (status === 'completed' && !reducedMotion) {
+        const finalSender = sourceScene(first).querySelector(PRESETS[first].selector).cloneNode(true);
+        finalSender.classList.add('lab-sender', 'lab-final-sender');
+        if (finalSender.classList.contains('sms-message') && messages.length) {
+          finalSender.textContent = messages[Math.floor(Math.random() * messages.length)];
+        }
+        sceneContent.appendChild(finalSender);
+        finalSender.style.setProperty('--lab-item-half', (finalSender.offsetWidth / 2) + 'px');
+        finalSender.style.setProperty('--lab-item-half-y', (finalSender.offsetHeight / 2) + 'px');
+      }
+
+      const complete = () => {
+        stage.querySelector('.lab-final-sender')?.remove();
+        stage.classList.remove('is-finishing');
+        stage.classList.add('is-finished');
+        if (counter) counter.setSummary(true);
+      };
+      if (reducedMotion) complete();
+      else {
+        finishTimer = global.setTimeout(complete, status === 'cancelled' ? 450 : 1300);
+        shell.cleanups.push(() => global.clearTimeout(finishTimer));
+      }
+    }
+
     return attachApi(shell, counter, {
       types: senderTypes.slice(),
       receiver: receiverType,
       caption,
+      finish,
       setSpeed(value) {
         if (shell.destroyed) return;
         speed = value;

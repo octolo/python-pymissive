@@ -33,7 +33,7 @@ def _text_choices(name: str, members: Mapping[str, ChoiceMember]) -> Any:
 
 
 def is_enable_setting(setting: str) -> bool:
-    return getattr(settings, f"MISSIVE_{setting}".upper(), True)
+    return getattr(settings, f"PYMISSIVE_{setting}".upper(), True)
 
 
 # Python UPPERCASE, DB lowercase (config key), label capitalize

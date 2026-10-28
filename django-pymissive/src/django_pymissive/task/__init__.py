@@ -2,8 +2,8 @@ from django.conf import settings
 
 
 def get_task_backend():
-    """Return the backend selected by ``CAMPAIGN_TASK_BACKEND``."""
-    backend = getattr(settings, "CAMPAIGN_TASK_BACKEND", "sync")
+    """Return the backend selected by ``PYMISSIVE_CAMPAIGN_TASK_BACKEND``."""
+    backend = getattr(settings, "PYMISSIVE_CAMPAIGN_TASK_BACKEND", "sync")
 
     if backend == "celery":
         from .celery import CeleryBackend

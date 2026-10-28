@@ -27,7 +27,7 @@
 
 {% block content %}
 {% if frames %}
-<div id="send-animations" class="send-animations" data-progress-url="{{ progress_url }}" data-poll-ms="2000">
+<div id="send-animations" class="send-animations" data-progress-url="{{ progress_url }}" data-poll-ms="2000" data-run-status="{{ run_status }}">
   {% for frame in frames %}
     {% if frame.preset %}
     <div id="frame-{{ frame.missive_type }}"></div>
@@ -52,11 +52,15 @@
   const frames = JSON.parse(document.getElementById("send-animation-frames").textContent);
   const widgets = {};
 
-  function apply(frame, finished) {
+  function apply(frame, status) {
     const widget = widgets[frame.missive_type];
     if (widget) {
       widget.counter.update(frame.remaining, frame.total, frame.errors);
-      widget.counter.setSummary(finished && frame.total > 0);
+      if ((status === "completed" || status === "cancelled") && frame.total > 0) {
+        widget.finish({ status, errors: frame.errors });
+      } else {
+        widget.counter.setSummary(false);
+      }
       return;
     }
     const plain = document.getElementById("plain-" + frame.missive_type);
@@ -65,7 +69,7 @@
 
   frames.forEach(frame => {
     if (!frame.preset) {
-      apply(frame, false);
+      apply(frame, root.dataset.runStatus);
       return;
     }
     widgets[frame.missive_type] = PymissiveAnimation.mountCard(
@@ -77,9 +81,10 @@
         remaining: frame.remaining,
         errors: frame.errors,
         counter: true,
-        summary: frame.remaining === 0 && frame.total > 0,
+        summary: false,
       }
     );
+    apply(frame, root.dataset.runStatus);
   });
 
   const pollMs = Number(root.dataset.pollMs || 2000);
@@ -99,7 +104,7 @@
       frame.total = counts.total;
       frame.remaining = Math.max(0, counts.total - counts.sent - counts.error);
       frame.errors = counts.error;
-      apply(frame, finished);
+      apply(frame, data.status);
     });
     if (!finished) setTimeout(refresh, pollMs);
   }

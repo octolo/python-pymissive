@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.6.0 — 2026-10-28
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.6.0,<2`.
+- Apply migration `0033_missivesetting_campaignrecipienttarget`.
+- The `create` and `update` provider actions are gone. Hand delivery and
+  Maileva no longer expose `create_*`, `update_*`, or
+  `prepare_registered_letter`. Sending still goes through `send`.
+
+### Changes
+
+- A campaign target can store the checked contacts for each role (recipient,
+  cc, bcc, notification) on `CampaignRecipientTarget`. Drafts use those
+  lists. With no row for a role, the channel's own contacts stay recipients.
+- `PYMISSIVE_RECIPIENT_ALLOWED` lists the contacts that keep their real
+  address. Anyone else is rewritten with `PYMISSIVE_OVERRIDE_RECIPIENT`, or
+  the send is refused when that override is empty. The list may be a dotted
+  path, including `staff_emails`, `admin_emails`, and `admin_staff_emails`.
+- `PYMISSIVE_DRY_RUN="allowed"` calls the provider only when every recipient
+  is on that allow-list. `True` still keeps every send local.
+- `PYMISSIVE_FORCE_FAKE_PROVIDER` routes every missive to the local fake
+  provider, which accepts the send even when `PYMISSIVE_ALLOW_FAKE_PROVIDER`
+  is off.
+- The configuration admin lists every setting this package reads, with its
+  default and the value currently configured.
+- Scheduler progress animations cover more of the send flow.
+
 ## 1.5.0 — 2026-10-26
 
 ### Compatibility

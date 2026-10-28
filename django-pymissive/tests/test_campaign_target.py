@@ -48,6 +48,22 @@ def build_marked(campaign, target, missive_type):
     return missive
 
 
+def test_build_processor_passes_row_through_kwargs():
+    from django_pymissive.processors.build_target import build_from_processors
+
+    row = object()
+    received = {}
+
+    def processor(campaign, target, missive_type, **kwargs):
+        received.update(kwargs)
+        return "built"
+
+    build = build_from_processors([processor], row=row)
+
+    assert build(None, None, "email") == "built"
+    assert received["row"] is row
+
+
 def _campaign():
     return MissiveCampaign.objects.create(
         subject="Assemblée générale",
@@ -548,6 +564,7 @@ def test_a_missive_claimed_but_not_yet_sent_is_neither_reused_nor_duplicated():
 def test_campaign_links_to_its_targets_filtered_by_state():
     from django.test import Client
     from django.urls import reverse
+    from django.utils.html import escape
 
     campaign = _campaign()
     other = _campaign()
@@ -566,14 +583,40 @@ def test_campaign_links_to_its_targets_filtered_by_state():
     def listed(state):
         response = client.get(changelist, {"campaign__id__exact": campaign.pk, "state": state})
         assert response.status_code == 200
-        return {row.pk for row in response.context["cl"].result_list}
+        return response, {row.pk for row in response.context["cl"].result_list}
 
     pending = set(
         CampaignTarget.objects.filter(campaign=campaign).exclude(pk=abandoned.pk).values_list("pk", flat=True)
     )
-    assert listed("pending") == pending
-    assert listed("abandoned") == {abandoned.pk}
-    assert listed("with_missive") == set()
+    pending_page, pending_ids = listed("pending")
+    _, abandoned_ids = listed("abandoned")
+    _, with_missive_ids = listed("with_missive")
+    assert pending_ids == pending
+    assert abandoned_ids == {abandoned.pk}
+    assert with_missive_ids == set()
+    pending_row = CampaignTarget.objects.get(pk=next(iter(pending_ids)))
+    change_url = reverse("admin:django_pymissive_campaigntarget_change", args=[pending_row.pk])
+    body = pending_page.content.decode()
+    assert f'href="{change_url}' in body
+    assert f">{escape(pending_row.object_str)}</a>" in body
+    assert "content_type" not in {getattr(spec, "field_path", None) for spec in pending_page.context["cl"].filter_specs}
+
+
+@pytest.mark.django_db
+def test_campaign_target_change_shows_the_recipient_list():
+    from django.test import Client
+    from django.urls import reverse
+
+    campaign = _campaign()
+    select(campaign, "email", _contact("ada@example.com"))
+    row = CampaignTarget.objects.get(campaign=campaign)
+    client = Client()
+    client.force_login(_superuser("target-admin-recipients"))
+
+    response = client.get(reverse("admin:django_pymissive_campaigntarget_change", args=[row.pk]))
+
+    assert response.status_code == 200
+    assert "<li>ada@example.com</li>" in response.content.decode()
 
 
 @pytest.mark.django_db
@@ -932,6 +975,338 @@ def test_build_target_reads_only_the_configured_fields(settings):
     assert list(only_mail.to_missiverecipient.values_list("email", flat=True)) == [
         "ada@example.com",
     ]
+
+
+@pytest.mark.django_db
+def test_targets_lists_the_contacts_that_stay_checked(settings):
+    from django_pymissive.models import CampaignRecipientTarget
+    from django_pymissive.models.choices import MissiveRecipientType
+    from django_pymissive.processors.build_target import build_target_processor
+
+    emails = [
+        "ada@example.com",
+        "ada.work@example.com",
+        "ada.home@example.com",
+        "ada.other@example.com",
+    ]
+    campaign = _campaign()
+    ada = create_campaign_contact("Ada", "Lovelace", emails=emails)
+    select(campaign, "email", ada)
+    row = CampaignTarget.objects.get(campaign=campaign)
+
+    settings.PYMISSIVE_BUILD_TARGET_FULL = False
+    assert row.targets == ["ada@example.com"]
+
+    settings.PYMISSIVE_BUILD_TARGET_FULL = True
+    assert isinstance(row.targets, list)
+    assert row.targets == emails
+
+    kept = emails[:3]
+    CampaignRecipientTarget.objects.create(
+        target=row,
+        recipient_type=MissiveRecipientType.RECIPIENT,
+        values=kept,
+    )
+    CampaignRecipientTarget.objects.create(
+        target=row,
+        recipient_type=MissiveRecipientType.CC,
+        values=["copy@example.com"],
+    )
+    assert row.targets == [*kept, "copy@example.com"]
+
+    missive = build_target_processor(campaign, ada, "email")
+    recipients = missive.to_missiverecipient.order_by("pk")
+    assert [(recipient.email, recipient.recipient_type) for recipient in recipients] == [
+        ("ada@example.com", MissiveRecipientType.RECIPIENT),
+        ("ada.work@example.com", MissiveRecipientType.RECIPIENT),
+        ("ada.home@example.com", MissiveRecipientType.RECIPIENT),
+        ("copy@example.com", MissiveRecipientType.CC),
+    ]
+
+
+@pytest.mark.django_db
+def test_materialize_selection_refuses_cc_without_a_primary_recipient():
+    from django_pymissive.models import CampaignRecipientTarget
+    from django_pymissive.models.choices import MissiveRecipientType
+
+    campaign = _campaign()
+    ada = create_campaign_contact("Ada", "Lovelace", emails=["ada@example.com"])
+    select(campaign, "email", ada)
+    row = CampaignTarget.objects.get(campaign=campaign)
+    row.build_target_processors = [
+        "django_pymissive.processors.build_target.build_target_processor",
+    ]
+    row.save(update_fields=["build_target_processors"])
+    CampaignRecipientTarget.objects.create(
+        target=row,
+        recipient_type=MissiveRecipientType.RECIPIENT,
+        values=[],
+    )
+    CampaignRecipientTarget.objects.create(
+        target=row,
+        recipient_type=MissiveRecipientType.CC,
+        values=["copy@example.com"],
+    )
+
+    assert materialize_selection(campaign, ["email"]) == 0
+    assert not Missive.objects.filter(campaign=campaign).exists()
+    row.refresh_from_db()
+    assert row.missive_id is None
+    assert row.abandon_reason == "No reachable recipient"
+
+
+@pytest.mark.django_db
+def test_materialize_selection_skips_malformed_contacts_before_a_valid_one():
+    from django_pymissive.models import CampaignRecipientTarget
+    from django_pymissive.models.choices import MissiveRecipientType
+
+    campaign = _campaign()
+    ada = create_campaign_contact("Ada", "Lovelace", emails=["object@example.com"])
+    select(campaign, "email", ada)
+    row = CampaignTarget.objects.get(campaign=campaign)
+    row.build_target_processors = [
+        "django_pymissive.processors.build_target.build_target_processor",
+    ]
+    row.save(update_fields=["build_target_processors"])
+    CampaignRecipientTarget.objects.create(
+        target=row,
+        recipient_type=MissiveRecipientType.RECIPIENT,
+        values=[
+            {"email": ""},
+            {"phone": "+33600000000"},
+            "valid@example.com",
+        ],
+    )
+
+    assert row.targets == ["valid@example.com"]
+    assert materialize_selection(campaign, ["email"]) == 1
+    missive = Missive.objects.get(campaign=campaign)
+    assert list(missive.to_missiverecipient.values_list("email", flat=True)) == [
+        "valid@example.com",
+    ]
+
+
+@pytest.mark.django_db
+def test_iter_targets_loads_subtargets_once_for_the_chunk():
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from django_pymissive.managers.related_object import object_id_value
+    from django_pymissive.models import CampaignRecipientTarget
+    from django_pymissive.models.choices import MissiveRecipientType
+    from django_pymissive.services.targets import iter_targets
+
+    campaign = _campaign()
+    ada = create_campaign_contact("Ada", "Lovelace", emails=["ada@example.com", "ada.work@example.com"])
+    grace = create_campaign_contact("Grace", "Hopper", emails=["grace@example.com"])
+    select(campaign, "email", [ada, grace])
+    CampaignRecipientTarget.objects.create(
+        target=CampaignTarget.objects.get(object_id=object_id_value(grace.pk)),
+        recipient_type=MissiveRecipientType.CC,
+        values=["copy@example.com"],
+    )
+
+    with CaptureQueriesContext(connection) as captured:
+        rows = list(iter_targets(campaign, "email", active_only=True))
+    assert len(rows) == 2
+    assert sum("campaignrecipienttarget" in query["sql"].lower() for query in captured.captured_queries) == 1
+
+    with CaptureQueriesContext(connection) as again:
+        listed = [row.targets for row in rows]
+    assert not any("campaignrecipienttarget" in query["sql"].lower() for query in again.captured_queries)
+    assert any("copy@example.com" in values for values in listed)
+
+
+@pytest.mark.django_db
+def test_materialize_selection_reloads_recipient_targets_after_locking():
+    from django_pymissive.models import CampaignRecipientTarget
+    from django_pymissive.models.choices import MissiveRecipientType
+    from django_pymissive.services.targets import iter_targets
+
+    campaign = _campaign()
+    ada = create_campaign_contact("Ada", "Lovelace", emails=["object@example.com"])
+    select(campaign, "email", ada)
+    row = CampaignTarget.objects.get(campaign=campaign)
+    row.build_target_processors = [
+        "django_pymissive.processors.build_target.build_target_processor",
+    ]
+    row.save(update_fields=["build_target_processors"])
+    recipient_target = CampaignRecipientTarget.objects.create(
+        target=row,
+        recipient_type=MissiveRecipientType.RECIPIENT,
+        values=["old@example.com"],
+    )
+    stale_row = next(iter_targets(campaign, "email", active_only=True))
+    CampaignRecipientTarget.objects.filter(pk=recipient_target.pk).update(
+        values=["new@example.com"],
+    )
+
+    with patch(
+        "django_pymissive.services.send.target_services.iter_targets",
+        return_value=iter([stale_row]),
+    ):
+        assert materialize_selection(campaign, ["email"]) == 1
+
+    missive = Missive.objects.get(campaign=campaign)
+    assert list(missive.to_missiverecipient.values_list("email", flat=True)) == [
+        "new@example.com",
+    ]
+
+
+@pytest.mark.django_db
+def test_sync_reads_the_singular_or_the_plural_and_add_recipient_appends():
+    from django_pymissive.models.choices import MissiveRecipientType
+    from django_pymissive.processors.build_target import build_target_processor
+
+    emails = ["ada@example.com", "ada.work@example.com", "ada.home@example.com"]
+    ada = create_campaign_contact(
+        "Ada",
+        "Lovelace",
+        emails=emails,
+        phones=["+33611111111", "+33622222222"],
+    )
+    campaign = _campaign()
+    select(campaign, "email", ada)
+    row = CampaignTarget.objects.get(missive_type="email")
+
+    assert row.sync_recipients(first=True) == [emails[0]]
+    assert row.sync_recipients(first=False) == emails
+    added = row.add_recipient(
+        [{"name": "Copy", "email": "copy@example.com", "phone": "+33600000000"}],
+        recipient_type=MissiveRecipientType.CC,
+    )
+    assert added == [{"name": "Copy", "email": "copy@example.com", "phone": "+33600000000"}]
+    assert (
+        row.add_recipient(
+            [{"name": "Again", "email": "copy@example.com"}],
+            recipient_type=MissiveRecipientType.CC,
+        )
+        == added
+    )
+
+    row.sync_recipients(first=False)
+    assert row.to_campaignrecipienttarget.get(recipient_type=MissiveRecipientType.CC).values == added
+
+    missive = build_target_processor(campaign, ada, "email", row=row)
+    copy = missive.to_missiverecipient.get(email="copy@example.com")
+    assert copy.name == "Copy"
+    assert copy.recipient_type == MissiveRecipientType.CC
+    assert set(
+        missive.to_missiverecipient.filter(recipient_type=MissiveRecipientType.RECIPIENT).values_list(
+            "email", flat=True
+        )
+    ) == set(emails)
+
+    select(campaign, "sms", ada)
+    sms = CampaignTarget.objects.get(missive_type="sms")
+    assert sms.sync_recipients(first=True) == ["+33611111111"]
+    assert sms.sync_recipients(first=False) == ["+33611111111", "+33622222222"]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("mode", "emails", "expected"),
+    [
+        (
+            "all",
+            ["ada@example.com", "ada.work@example.com", "ada.home@example.com"],
+            ["ada@example.com", "ada.work@example.com", "ada.home@example.com"],
+        ),
+        (
+            "first",
+            ["ada@example.com", "ada.work@example.com", "ada.home@example.com"],
+            ["ada@example.com"],
+        ),
+        (
+            "partial",
+            ["ada@example.com", "ada.work@example.com", "ada.home@example.com"],
+            ["ada@example.com", "ada.work@example.com"],
+        ),
+        (
+            "partial",
+            ["ada@example.com", "ada.work@example.com"],
+            ["ada@example.com", "ada.work@example.com"],
+        ),
+    ],
+)
+def test_test_app_select_form_stores_the_chosen_contacts(mode, emails, expected):
+    from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+    from django.test import Client
+    from django.urls import reverse
+
+    campaign = _campaign()
+    ada = create_campaign_contact("Ada", "Lovelace", emails=emails)
+    client = Client()
+    client.force_login(_superuser(f"fill-contacts-{mode}-{len(emails)}"))
+
+    started = client.post(
+        reverse("admin:fakeapp_campaigncontact_changelist"),
+        {
+            "action": "select_for_campaign",
+            ACTION_CHECKBOX_NAME: [str(ada.pk)],
+        },
+    )
+    assert started.status_code == 302
+    form_url = started["Location"]
+
+    page = client.get(form_url)
+    assert page.status_code == 200
+    body = page.content.decode()
+    assert 'id="campaigncontact_form"' in body
+    assert 'name="contacts"' in body
+    assert 'value="all"' in body
+    assert 'value="first"' in body
+    assert 'value="partial"' in body
+
+    response = client.post(
+        form_url,
+        {
+            "campaign": campaign.pk,
+            "missive_type": "email",
+            "contacts": mode,
+        },
+    )
+
+    assert response.status_code == 302
+    stored = CampaignTarget.objects.get().to_campaignrecipienttarget.get()
+    assert stored.values == expected
+
+
+@pytest.mark.django_db
+def test_test_app_unselect_form_drops_the_checked_target():
+    from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+    from django.test import Client
+    from django.urls import reverse
+
+    campaign = _campaign()
+    ada = create_campaign_contact("Ada", "Lovelace", emails=["ada@example.com"])
+    select(campaign, "email", ada)
+    client = Client()
+    client.force_login(_superuser("unselect-contacts"))
+
+    started = client.post(
+        reverse("admin:fakeapp_campaigncontact_changelist"),
+        {"action": "unselect_from_campaign", ACTION_CHECKBOX_NAME: [str(ada.pk)]},
+    )
+    page = client.get(started["Location"])
+    assert page.status_code == 200
+    assert 'name="contacts"' not in page.content.decode()
+
+    response = client.post(
+        started["Location"],
+        {"campaign": campaign.pk, "missive_type": "email"},
+    )
+    assert response.status_code == 302
+    assert not CampaignTarget.objects.exists()
+
+
+def test_subtarget_rejects_a_value_that_is_not_a_list():
+    from django_pymissive.models.campaign_target import CampaignRecipientTarget
+
+    row = CampaignRecipientTarget(recipient_type="cc", values="ada@example.com")
+    with pytest.raises(ValidationError) as exc:
+        row.clean()
+    assert "values" in exc.value.message_dict
 
 
 def _target_admin_request(user):

@@ -12,7 +12,7 @@ from django.utils.translation import ngettext
 from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
 from django_boosted.decorators import admin_boost_action, admin_boost_view  # type: ignore[import-untyped]
 
-from ..models.campaign_target import CampaignTarget
+from ..models.campaign_target import CampaignRecipientTarget, CampaignTarget
 from .permissions import ActionRightsMixin
 from .related_object import BaseRelatedObjectAdmin
 
@@ -21,6 +21,19 @@ def _change_link(obj, label):
     opts = obj._meta
     url = reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[obj.pk])
     return format_html('<a href="{}">{}</a>', url, label)
+
+
+def _recipient_text(value):
+    if not isinstance(value, dict):
+        return value
+    name = value.get("name") or ""
+    contact = next(
+        (value[key] for key in ("email", "phone", "notification_id", "address") if value.get(key)),
+        "",
+    )
+    if name and contact:
+        return f"{name} — {contact}"
+    return name or contact or str(value)
 
 
 TARGET_STATES = {
@@ -50,11 +63,22 @@ class AbandonTargetForm(forms.Form):
     )
 
 
+class CampaignRecipientTargetInline(admin.TabularInline):
+    """Optional contact lists, one row per recipient type."""
+
+    model = CampaignRecipientTarget
+    extra = 0
+    fields = ["recipient_type", "values"]
+
+
 @admin.register(CampaignTarget)
 class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectAdmin):
     """Admin for a campaign selection row."""
 
+    inlines = [CampaignRecipientTargetInline]
+
     list_display = [
+        "object_str",
         "campaign",
         "missive_type",
         "object_url_link_display",
@@ -62,10 +86,10 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
         "missive",
         "created_at",
     ]
+    list_display_links = ["object_str"]
     list_filter = [
         TargetStateFilter,
         "missive_type",
-        "content_type",
         "created_at",
     ]
     list_select_related = ("campaign", "content_type", "missive")
@@ -77,6 +101,7 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
     readonly_fields = [
         "object_str",
         "object_url_link_display",
+        "targets_display",
         "abandoned_at",
         "abandon_reason",
         "history_display",
@@ -97,6 +122,7 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
                 "content_type",
                 "object_id",
                 "object_url_link_display",
+                "targets_display",
                 "missive",
                 "build_target_processors",
                 "abandoned_at",
@@ -110,6 +136,18 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
         self.add_to_fieldset(
             _("Timestamps"),
             ["created_at", "updated_at"],
+        )
+
+    @admin.display(description=_("Recipients"))
+    def targets_display(self, obj):
+        if not obj or not obj.pk:
+            return "-"
+        values = obj.targets
+        if not values:
+            return "-"
+        return format_html(
+            "<ul>{}</ul>",
+            format_html_join("", "<li>{}</li>", ((_recipient_text(value),) for value in values)),
         )
 
     @admin.display(description=_("State"))

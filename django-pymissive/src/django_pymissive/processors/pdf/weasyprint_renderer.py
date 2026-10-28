@@ -25,9 +25,9 @@ def weasyprint_renderer(
     context: dict | None = None,
     **kwargs: Any,
 ) -> bytes:
-    """Render the missive HTML body to PDF via WeasyPrint (or ``MISSIVEPDF_GENERATOR``).
+    """Render the missive HTML body to PDF via WeasyPrint (or ``PYMISSIVE_PDF_GENERATOR``).
 
-    Delegates to the callable configured by ``settings.MISSIVEPDF_GENERATOR``
+    Delegates to the callable configured by ``settings.PYMISSIVE_PDF_GENERATOR``
     (default: :func:`django_pymissive.pdf.body_to_pdf`).  The incoming
     ``pdf_bytes`` argument (previous chain output) is ignored: this processor
     always produces a fresh PDF from ``missive.first_document_compiled``.
@@ -37,7 +37,7 @@ def weasyprint_renderer(
     underlying generator. Per-entry config kwargs (``**kwargs``) take
     precedence and are forwarded as well.
     """
-    pdf_generator_path = getattr(settings, "MISSIVEPDF_GENERATOR", "django_pymissive.pdf.body_to_pdf")
+    pdf_generator_path = getattr(settings, "PYMISSIVE_PDF_GENERATOR", "django_pymissive.pdf.body_to_pdf")
     pdf_generator = import_string(pdf_generator_path)
     runtime_kwargs = dict(context or {})
     runtime_kwargs.update(kwargs)

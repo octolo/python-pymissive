@@ -422,7 +422,8 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
     def send_animations(self, request, obj):
         """One animation per missive type this run still has something to send for."""
         frames = []
-        for missive_type, counts in obj.progress_payload()["by_type"].items():
+        progress = obj.progress_payload()
+        for missive_type, counts in progress["by_type"].items():
             total = counts["total"]
             frames.append(
                 {
@@ -436,6 +437,7 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
             )
         return {
             "frames": frames,
+            "run_status": progress["status"],
             "progress_url": reverse(
                 "admin:django_pymissive_missivescheduledcampaign_progress",
                 args=[obj.pk],

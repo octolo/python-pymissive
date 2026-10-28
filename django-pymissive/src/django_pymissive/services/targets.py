@@ -174,15 +174,22 @@ def iter_targets(
 
 
 def iter_chunks(qs, *, chunk_size: int = CHUNK_SIZE):
-    """Walk *qs* by primary key and prefetch ``target`` on each chunk."""
+    """Walk *qs* by primary key and prefetch contacts on each chunk.
+
+    The generic object and the sub-targets are loaded once per chunk, not
+    once per row.
+    """
     last_pk = 0
     ordered = qs.order_by("pk")
+    if hasattr(ordered, "with_contacts"):
+        ordered = ordered.with_contacts()
+    else:
+        ordered = ordered.prefetch_related("target", "to_campaignrecipienttarget")
     while True:
         chunk = list(ordered.filter(pk__gt=last_pk)[:chunk_size])
         if not chunk:
             break
         last_pk = chunk[-1].pk
-        models.prefetch_related_objects(chunk, "target")
         yield from chunk
 
 

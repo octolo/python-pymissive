@@ -81,6 +81,8 @@ def test_progress_json_and_send_animations_follow_the_missive_types():
     assert "frame-sms" in html
     assert "frame-notification" in html
     assert payload.request["PATH_INFO"] in html
+    assert 'data-run-status="pending"' in html
+    assert "widget.finish({ status, errors: frame.errors })" in html
 
 
 def test_send_animations_view_says_when_the_run_has_nothing_to_send():
@@ -116,6 +118,10 @@ def test_animations_view_renders_the_examples_in_the_admin_page():
     assert "django_pymissive/css/animations.css" in html
     assert "django_pymissive/js/animation.js" in html
     assert 'id="pymissive-animation-labels"' in html
+    assert 'data-finale-status="completed"' in html
+    assert 'data-finale-status="errors"' in html
+    assert 'data-finale-status="cancelled"' in html
+    assert "customWidget.finish" in html
     assert html.index('id="pymissive-animation-labels"') < html.index("django_pymissive/js/animation.js")
     assert "<iframe" not in html.lower()
 
@@ -127,6 +133,8 @@ def test_animation_labels_follow_the_active_language():
         html = Template("{% load django_pymissive_animations %}{% pymissive_animations_labels %}").render(Context({}))
     assert '"postal.title": "Courrier postal"' in html
     assert '"counter.sentMany": "envoy\\u00e9s"' in html
+    assert '"end.sent": "Envoy\\u00e9"' in html
+    assert '"end.cancelled": "Annul\\u00e9"' in html
 
 
 def test_cancel_run_view_cancels_a_running_send_with_a_reason():

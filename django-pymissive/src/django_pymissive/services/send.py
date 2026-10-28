@@ -105,6 +105,10 @@ def _materialize_target(row, campaign, channel, *, build=None, scheduler=None) -
             locked = type(row)._base_manager.select_for_update().get(pk=row.pk)
             if not locked.is_active():
                 return 0
+            recipient_targets = list(locked.to_campaignrecipienttarget.select_for_update())
+            locked._prefetched_objects_cache = {
+                "to_campaignrecipienttarget": recipient_targets,
+            }
             target = locked.target
             if target is None:
                 _abandon(locked, TARGET_DELETED)
@@ -333,7 +337,7 @@ def selection_build(row, *, build=None, scheduler=None, campaign=None):
         raise ValidationError(
             _("No build processor is configured for this target."),
         )
-    return build_from_processors(processors)
+    return build_from_processors(processors, row=row)
 
 
 def _load_callable(path: str, label: str):

@@ -93,8 +93,17 @@ def test_zero_and_invalid_durations_do_not_sleep():
     sleep.assert_not_called()
 
 
+def test_force_fake_provider_allows_the_send(monkeypatch):
+    monkeypatch.delenv("PYMISSIVE_ALLOW_FAKE_PROVIDER")
+    monkeypatch.setenv("PYMISSIVE_FORCE_FAKE_PROVIDER", "1")
+    provider = FakeProvider(config={"SLEEP_SECONDS": 0})
+    result = provider.send_sms()
+    assert result["external_id"].startswith("fake-sms-")
+
+
 def test_send_is_refused_unless_explicitly_allowed(monkeypatch):
     monkeypatch.delenv("PYMISSIVE_ALLOW_FAKE_PROVIDER")
+    monkeypatch.delenv("PYMISSIVE_FORCE_FAKE_PROVIDER", raising=False)
     provider = FakeProvider()
     with patch("pymissive.providers.fake.time.sleep") as sleep:
         with pytest.raises(RuntimeError, match="PYMISSIVE_ALLOW_FAKE_PROVIDER"):

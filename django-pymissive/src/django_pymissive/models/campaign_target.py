@@ -17,14 +17,17 @@ from __future__ import annotations
 
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from pymissive.config import normalize_missive_type
 
 from ..fields import JSONField
+from ..managers.campaign_target import CampaignTargetManager
 from ..managers.related_object import object_id_value
 from ..utils import validate_import_paths
-from .choices import MissiveStatus, MissiveType
+from .choices import MissiveRecipientType, MissiveStatus, MissiveType
 
 
 def _target_slot(row):
@@ -89,6 +92,11 @@ class CampaignTarget(models.Model):
     The unique constraint covers only rows whose missive is still null.
     Once a send attaches a missive, a later selection can insert a new row
     for the same object and channel.
+
+    Optional :class:`CampaignRecipientTarget` rows are the checked contacts.
+    With none, every contact of the channel is used. :attr:`targets` is
+    that choice as a plain list, so another project can match its own
+    emails or phones against it.
     """
 
     campaign = models.ForeignKey(
@@ -164,6 +172,8 @@ class CampaignTarget(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, editable=False)
     updated_at = models.DateTimeField(auto_now=True, editable=False)
 
+    objects = CampaignTargetManager()
+
     class Meta:
         verbose_name = _("Campaign target")
         verbose_name_plural = _("Campaign targets")
@@ -237,6 +247,78 @@ class CampaignTarget(models.Model):
         """True while this row is the live checkbox (no missive yet, not abandoned)."""
         return not self.missive_id and not self.abandoned_at
 
+    @property
+    def targets(self) -> list:
+        """Contacts this row will use, as a list.
+
+        No sub-target: the contacts of the channel on the linked object.
+        All of them when full targets is on, so four emails stay checked
+        until one is left out of a sub-target list. A sub-target replaces
+        its recipient type; the other types are appended.
+        """
+        from ..processors.build_target import contacts_of_target
+
+        return contacts_of_target(self)
+
+    def add_recipient(self, recipients, recipient_type=None) -> list:
+        """Append chosen contacts to one recipient role.
+
+        *recipients* is a contact or a list of them. A contact is the channel
+        value itself (an email, a phone, an address) or a dict with ``name``
+        and ``email``, ``phone``, ``address``, ``notification_id``. The same
+        contact is not stored twice. Returns the role's list.
+        """
+        from ..processors.build_target import contact_identity
+
+        if self.pk is None:
+            raise ValueError("Save the campaign target before adding recipients.")
+        if recipient_type is None:
+            recipient_type = MissiveRecipientType.RECIPIENT
+        if isinstance(recipients, (str, dict)) or not isinstance(recipients, (list, tuple)):
+            recipients = [recipients]
+        row = self._recipient_row(recipient_type)
+        values = list(row.values)
+        seen = {contact_identity(item, self.missive_type) for item in values}
+        for item in recipients:
+            if item in (None, "", {}, []):
+                continue
+            key = contact_identity(item, self.missive_type)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            values.append(item)
+        row.values = values
+        row.save(update_fields=["values"])
+        return values
+
+    def sync_recipients(self, *, first: bool = False) -> list:
+        """Replace the default role with the contacts read on the linked object.
+
+        ``first=True`` reads the singular attribute (``email``, ``phone``,
+        ``address``, ``notification_id``). ``first=False`` reads the plural
+        (``emails``, ``phones``, ``addresses``, ``notification_ids``).
+        """
+        from ..processors.build_target import contacts_for_channel, default_recipient_type
+
+        if self.pk is None:
+            raise ValueError("Save the campaign target before syncing recipients.")
+        obj = _linked_business_object(self)
+        values = contacts_for_channel(obj, self.missive_type, first=first) if obj is not None else []
+        row = self._recipient_row(default_recipient_type(self.missive_type))
+        row.values = values
+        row.save(update_fields=["values"])
+        return values
+
+    def _recipient_row(self, recipient_type):
+        row, _created = CampaignRecipientTarget.objects.get_or_create(
+            target=self,
+            recipient_type=recipient_type,
+            defaults={"values": []},
+        )
+        if not isinstance(row.values, list):
+            row.values = []
+        return row
+
     def history(self):
         """Every row of this target on this campaign and channel, newest first.
 
@@ -273,6 +355,79 @@ class CampaignTarget(models.Model):
         return Missive.objects.filter(thread_id=thread_id).order_by("-created_at")
 
 
+class CampaignRecipientTarget(models.Model):
+    """Checked contacts of one recipient type. Optional.
+
+    ``values`` is the list an integration matches against: the emails,
+    phones, addresses or notification ids that stay checked for this role.
+    Leaving one out drops it. No row for a role means the channel's own
+    contacts fill the default recipient type.
+    """
+
+    target = models.ForeignKey(
+        CampaignTarget,
+        on_delete=models.CASCADE,
+        related_name="to_campaignrecipienttarget",
+        verbose_name=_("Campaign target"),
+    )
+    recipient_type = models.CharField(
+        max_length=20,
+        choices=MissiveRecipientType.choices,
+        default=MissiveRecipientType.RECIPIENT,
+        verbose_name=_("Recipient type"),
+        help_text=_("Role of every value in the list (recipient, cc, bcc, notification)."),
+    )
+    values = JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("Values"),
+        help_text=_(
+            "JSON list of contacts for this role: emails, phone numbers, "
+            "postal addresses or notification ids, depending on the channel."
+        ),
+    )
+
+    class Meta:
+        verbose_name = _("Campaign recipient target")
+        verbose_name_plural = _("Campaign recipient targets")
+        ordering = ["recipient_type", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["target", "recipient_type"],
+                name="uniq_campaignrecipienttarget_type",
+            ),
+        ]
+
+    def __str__(self):
+        count = len(self.values) if isinstance(self.values, list) else 0
+        return f"{self.get_recipient_type_display()} ({count})"
+
+    def clean(self):
+        super().clean()
+        if not isinstance(self.values, list):
+            raise ValidationError({"values": _("Enter a JSON list of contacts.")})
+
+
+def active_campaign_target(campaign, target, missive_type):
+    """The live selection row of this object on this channel, or ``None``."""
+    if campaign is None or target is None or getattr(target, "pk", None) is None:
+        return None
+    channel = normalize_missive_type(missive_type) or str(missive_type or "")
+    if not channel or getattr(campaign, "pk", None) is None:
+        return None
+    return (
+        CampaignTarget.objects.filter(
+            CampaignTarget.active_q(),
+            campaign_id=campaign.pk,
+            content_type=ContentType.objects.get_for_model(target),
+            object_id=object_id_value(target.pk),
+            missive_type=channel,
+        )
+        .prefetch_related("to_campaignrecipienttarget")
+        .first()
+    )
+
+
 def resolve_build_target_processors(row=None, *, scheduler=None, campaign=None) -> list:
     """The chain that builds a target's missive; *row* may be ``None`` (no selection row).
 
@@ -289,6 +444,15 @@ def resolve_build_target_processors(row=None, *, scheduler=None, campaign=None) 
         if processors:
             return list(processors)
     return get_default_build_target_processors()
+
+
+def _linked_business_object(row: CampaignTarget):
+    if not row.content_type_id or not row.object_id:
+        return None
+    try:
+        return row.target
+    except Exception:
+        return None
 
 
 def _label_from_target(row: CampaignTarget) -> str:

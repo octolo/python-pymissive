@@ -189,16 +189,6 @@ class HandDeliveryProvider(MissiveProviderBase):
     # hand_delivery - lifecycle (no external API)
     #########################################################
 
-    def create_hand_delivery(self, **kwargs: Any) -> dict[str, Any]:
-        """Allocate a deterministic external_id and return a draft response."""
-        return self._base_response("request", **kwargs)
-
-    def prepare_hand_delivery(self, **kwargs: Any) -> dict[str, Any]:
-        return self.create_hand_delivery(**kwargs)
-
-    def update_hand_delivery(self, **kwargs: Any) -> dict[str, Any]:
-        return self._base_response("request", **kwargs)
-
     def send_hand_delivery(self, **kwargs: Any) -> dict[str, Any]:
         """Mark the missive as handed over to the recipient(s)."""
         response = self._base_response("delivered", **kwargs)

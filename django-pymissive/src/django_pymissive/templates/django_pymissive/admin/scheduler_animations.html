@@ -39,6 +39,9 @@
   .demo-page .checks { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 0 0 16px; padding: 14px 0; border-top: 1px solid var(--hairline-color); border-bottom: 1px solid var(--hairline-color); }
   .demo-page .checks label { display: flex; align-items: center; gap: 7px; color: var(--body-medium-color); font-size: 13px; font-weight: 650; }
   .demo-page .checks input { accent-color: var(--primary); }
+  .demo-page .finale-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+  .demo-page .finale-actions button { padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--button-bg); color: var(--button-fg); cursor: pointer; font: inherit; }
+  .demo-page .finale-actions button:hover { background: var(--button-hover-bg); }
   .demo-page .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; align-items: start; }
   .demo-page .field input[type=number], .demo-page .field input[type=text], .demo-page .field select { min-height: 39px; }
   .demo-page .muted { color: var(--body-quiet-color); font-size: 13px; line-height: 1.5; }
@@ -90,6 +93,11 @@
       <label><input id="custom-counter" type="checkbox" checked> {% translate "Counter" %}</label>
       <label><input id="custom-counter-background" type="checkbox"> {% translate "White counter background" %}</label>
       <label><input id="custom-summary" type="checkbox"> {% translate "Summary when finished" %}</label>
+    </div>
+    <div class="finale-actions">
+      <button type="button" data-finale-status="completed">✓ {% translate "Sent" %}</button>
+      <button type="button" data-finale-status="errors">! {% translate "Errors" %}</button>
+      <button type="button" data-finale-status="cancelled">× {% translate "Cancelled" %}</button>
     </div>
     <div class="form-grid">
       <div class="field"><label for="custom-messages">{% translate "SMS messages (one message per line)" %}</label><textarea id="custom-messages" rows="4">{% translate "Hello! 👋" %}
@@ -324,6 +332,21 @@
     mountCustom();
   }
 
+  function previewFinale(status) {
+    const errors = status === 'errors' ? 2 : 0;
+    if (status !== 'cancelled') {
+      const total = document.getElementById('custom-total');
+      total.value = String(Math.max(errors, Number(total.value) || 0));
+      document.getElementById('custom-remaining').value = '0';
+      document.getElementById('custom-errors').value = String(errors);
+    }
+    mountCustom();
+    if (customWidget.counter && errors) {
+      customWidget.counter.update(0, Number(document.getElementById('custom-total').value), errors);
+    }
+    customWidget.finish({ status: status === 'cancelled' ? 'cancelled' : 'completed', errors });
+  }
+
   let applyTimer = null;
   function scheduleApply() {
     updateCustomControlLabels();
@@ -339,6 +362,9 @@
     document.getElementById(id).addEventListener('change', applyShared);
   });
   document.getElementById('custom-receiver').addEventListener('change', mountCustom);
+  document.querySelectorAll('[data-finale-status]').forEach(button => {
+    button.addEventListener('click', () => previewFinale(button.dataset.finaleStatus));
+  });
   document.getElementById('custom-senders').addEventListener('change', event => {
     // The engine needs at least one sender: refuse to uncheck the last box.
     if (!checkedSenders().length) event.target.checked = true;

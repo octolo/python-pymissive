@@ -74,7 +74,7 @@ def test_retrieve_events_calls_provider_and_handles():
 
 
 def test_delay_retrieve_events_uses_sync_backend(settings):
-    settings.CAMPAIGN_TASK_BACKEND = "sync"
+    settings.PYMISSIVE_CAMPAIGN_TASK_BACKEND = "sync"
     with patch("django_pymissive.events.retrieve_events") as retrieve:
         delay_retrieve_events(
             provider="brevo",
@@ -91,7 +91,7 @@ def test_delay_retrieve_events_uses_sync_backend(settings):
 
 
 def test_delay_retrieve_events_uses_thread_backend(settings):
-    settings.CAMPAIGN_TASK_BACKEND = "thread"
+    settings.PYMISSIVE_CAMPAIGN_TASK_BACKEND = "thread"
     with patch("django_pymissive.task.thread.Thread") as thread_cls:
         delay_retrieve_events(
             provider="brevo",

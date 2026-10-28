@@ -46,3 +46,12 @@ def is_disable_send() -> bool:
 def is_fake_provider_allowed() -> bool:
     """Return True when the ``fake`` provider may accept sends (``PYMISSIVE_ALLOW_FAKE_PROVIDER``)."""
     return _flag("PYMISSIVE_ALLOW_FAKE_PROVIDER")
+
+
+def is_force_fake_provider() -> bool:
+    """Return True when every missive must use the local ``fake`` provider.
+
+    ``PYMISSIVE_FORCE_FAKE_PROVIDER``. The fake provider then accepts the
+    send even if ``PYMISSIVE_ALLOW_FAKE_PROVIDER`` is off.
+    """
+    return _flag("PYMISSIVE_FORCE_FAKE_PROVIDER")

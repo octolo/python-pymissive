@@ -249,7 +249,7 @@ def test_sending_payload_contracts():
     assert registered["notification_types"] == ["ALL_MAILEVA"]
 
 
-def test_create_postal_reuses_existing_sending_and_adds_recipients():
+def test_stage_postal_reuses_existing_sending_and_adds_recipients():
     provider = _provider()
     detail = _response({"id": "sending-1", "name": "Existing"})
     recipients = [{"id": "contact-1", "name": "Ada", "address": _address()}]
@@ -257,12 +257,19 @@ def test_create_postal_reuses_existing_sending_and_adds_recipients():
     with (
         patch.object(provider, "_request", return_value=detail) as request,
         patch.object(provider, "_add_recipients_postal", return_value=[{"external_id": "recipient-1"}]) as add,
+        patch.object(provider, "_add_attachments_postal", return_value=[]),
     ):
-        result = provider.update_letter(external_id="sending-1", recipients=recipients)
+        external_id, staged_recipients, attachments = provider._stage_postal_before_submit(
+            product="letter",
+            external_id="sending-1",
+            recipients=recipients,
+        )
 
     request.assert_called_once_with("GET", "https://api.maileva.com/mail/v3/sendings/sending-1")
     add.assert_called_once_with(recipients, "sending-1", product="letter")
-    assert result["recipients"] == [{"external_id": "recipient-1"}]
+    assert external_id == "sending-1"
+    assert staged_recipients == [{"external_id": "recipient-1"}]
+    assert attachments == []
 
 
 def test_send_postal_stages_then_submits():

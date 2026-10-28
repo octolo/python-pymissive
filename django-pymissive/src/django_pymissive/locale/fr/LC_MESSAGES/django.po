@@ -1894,6 +1894,21 @@ msgstr "Configure ici la combinaison, la vitesse, le nombre d’éléments, le c
 msgid "Shared settings"
 msgstr "Réglages partagés"
 
+msgid "Setting"
+msgstr "Paramètre"
+
+msgid "Settings"
+msgstr "Paramètres"
+
+msgid "Value"
+msgstr "Valeur"
+
+msgid "Default"
+msgstr "Valeur par défaut"
+
+msgid "Configured"
+msgstr "Configuré"
+
 msgid "Simulate 90 remaining"
 msgstr "Simuler 90 restants"
 

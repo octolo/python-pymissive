@@ -208,6 +208,7 @@ def build_draft(
     phone: str | None = None,
     address=None,
     notification_id: str | None = None,
+    recipient_type: str | None = None,
     subject: str | None = None,
     body_rich: str | None = None,
     body_text: str | None = None,
@@ -251,6 +252,7 @@ def build_draft(
         campaign=campaign,
         provider=provider,
         extra_missive_fields=extra_missive_fields,
+        extra_recipient_fields={"recipient_type": recipient_type} if recipient_type else None,
         and_send=False,
     )
     if metadata:

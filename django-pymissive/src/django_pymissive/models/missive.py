@@ -1,5 +1,6 @@
 """Main Missive model for multi-channel sending."""
 
+import logging
 import traceback
 import uuid
 from typing import ClassVar
@@ -44,6 +45,8 @@ from ..dispatch_signals import (
 )
 from ..utils import (
     apply_default_sender_fields,
+    apply_send_recipients,
+    dry_run_block,
     build_webhook_url,
     get_base_url,
     webhook_url_token_for,
@@ -51,12 +54,15 @@ from ..utils import (
     get_default_scheme,
     is_dry_run,
     is_empty_sender_value,
+    is_force_fake_provider,
     serialize_model_for_context,
     SENDER_CONTACT_FIELDS,
     validate_import_paths,
 )
 from django.core import signing
 from django.core.files.base import ContentFile
+
+logger = logging.getLogger(__name__)
 
 
 class MissiveAlreadySending(ValidationError):
@@ -325,8 +331,27 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         recipient = self.first_recipient or _("Unknown")
         return f"{self.missive_type} - {recipient} ({self.status})"
 
+    def _apply_forced_fake_provider(self, *, persist=False):
+        """Use ``fake`` when forced, persisting it only for provider operations."""
+        if not is_force_fake_provider():
+            return
+        previous = str(self.provider or "")
+        self.provider = "fake"
+        if not persist or not self.is_persisted:
+            return
+        changed = type(self)._base_manager.filter(pk=self.pk).exclude(provider="fake").update(provider="fake")
+        if changed and previous:
+            logger.warning(
+                "PYMISSIVE_FORCE_FAKE_PROVIDER replaced provider %s with fake for %s",
+                previous,
+                self.missive_type,
+            )
+
     def _ensure_default_provider(self):
         """Set provider from MissiveConfig, then ``PYMISSIVE_DEFAULT_PROVIDER``."""
+        if is_force_fake_provider():
+            self._apply_forced_fake_provider()
+            return
         if self.provider or not self.missive_type:
             return
         from .config import MissiveConfig, default_provider_for_type
@@ -399,10 +424,18 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def has_service(self, service):
         from pymissive.config import provider_service_name
 
-        service_name = provider_service_name(service, self.missive_type)
-        if not self.provider:
-            return False
-        return hasattr(self.provider._provider, service_name)
+        previous = str(self.provider or "")
+        forced = is_force_fake_provider() and self.provider != "fake"
+        if forced:
+            self.provider = "fake"
+        try:
+            service_name = provider_service_name(service, self.missive_type)
+            if not self.provider:
+                return False
+            return hasattr(self.provider._provider, service_name)
+        finally:
+            if forced:
+                self.provider = previous
 
     def can_preview_missive(self):
         """True if the provider implements ``preview_<missive_type>`` (e.g. ``preview_registered_letter``)."""
@@ -834,6 +867,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """Call a provider service."""
         from pymissive.config import provider_service_name
 
+        self._apply_forced_fake_provider(persist=True)
         service_name = provider_service_name(service, self.missive_type)
         return self.provider.call_service(service_name, **kwargs)
 
@@ -1486,30 +1520,6 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             att.external_id = attachment.get("external_id")
             att.save(update_fields=["external_id"])
 
-    def prepare_missive(self):
-        """Prepare the missive for sending (calls provider create).
-
-        In dry-run mode (``PYMISSIVE_DRY_RUN``) the local pipeline still
-        runs (body processors, attachments, etc.) but the provider call
-        is skipped and a synthetic ``external_id`` is set.
-        """
-        serialized = self.get_serialized_data()
-        if is_dry_run():
-            self.external_id = f"dry-run:prepare:{self.thread_id}"
-            self.save(update_fields=["external_id"])
-            return
-        response = self.call_provider_service("create", **serialized)
-        response["client_initiated"] = True
-        self.external_id = response.get("external_id")
-        self.save(update_fields=["external_id"])
-        self._update_recipients(response.get("recipients", []))
-
-    def update_missive(self):
-        """Update the missive."""
-        response = self.call_provider_service("update", **self.get_serialized_data())
-        response["client_initiated"] = True
-        self._update_recipients(response.get("recipients", []))
-
     def _record_send_failure(
         self,
         exc=None,
@@ -1571,6 +1581,13 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         ``trace={"dry_run": True, ...}`` is recorded, and ``missive_post_send``
         is dispatched. Useful for Django tests asserting that campaigns and
         missives are generated correctly without hitting the provider.
+        ``"allowed"`` does the same only when a recipient is outside
+        ``PYMISSIVE_RECIPIENT_ALLOWED``; a missive whose every recipient is
+        on that list is sent.
+
+        When ``settings.PYMISSIVE_FORCE_FAKE_PROVIDER`` is True the provider
+        stored on the missive becomes ``fake`` for every type before the call.
+        Dry-run still skips that call.
 
         When ``settings.PYMISSIVE_DISABLE_SEND`` is True (and dry-run is off)
         the provider IS still called and runs every preparation/staging step
@@ -1578,15 +1595,21 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         network call is skipped provider-side. The provider returns a response
         flagged with ``disabled_send`` which is handled by ``_disabled_send``.
         """
-        self._claim_send()
+        blocked = dry_run_block(self._send_recipient_groups(), self.missive_type)
+        self._claim_send(enforce_recipient_policy=blocked is None)
+        self._apply_forced_fake_provider(persist=True)
         missive_pre_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
         self.set_locally_ifnull()
         occurred_at = timezone.now()
-        if is_dry_run():
-            self._dry_run_send(occurred_at=occurred_at, old_missive=old_missive)
+        if blocked is not None:
+            extra = {"dry_run": "allowed", "blocked_recipients": blocked} if blocked else None
+            self._dry_run_send(occurred_at=occurred_at, old_missive=old_missive, extra_trace=extra)
             return
         try:
-            response = self.call_provider_service("send", **self.get_serialized_data())
+            response = self.call_provider_service(
+                "send",
+                **apply_send_recipients(self.get_serialized_data(), self.missive_type),
+            )
         except Exception as exc:
             self._record_send_failure(exc, occurred_at=occurred_at)
             self._finish_send(old_missive)
@@ -1598,11 +1621,24 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         self._persist_send_response(response, occurred_at)
         self._finish_send(old_missive)
 
-    def _claim_send(self):
+    def _send_recipient_groups(self):
+        data = {"recipients": [recipient.get_serialized_data() for recipient in self.recipients]}
+        for recipient_type in ("cc", "bcc", "notification"):
+            recipients = getattr(self, recipient_type)
+            if recipients:
+                data[recipient_type] = [recipient.get_serialized_data() for recipient in recipients]
+        return data
+
+    def _claim_send(self, *, enforce_recipient_policy=True):
         if not self.can_send():
             if not self.provider:
                 raise ValidationError(_("Missive cannot be sent: no provider set"))
             raise ValidationError(_("Missive cannot be sent"))
+        # Refuse a disallowed recipient before the row is claimed.
+        # A dry-run, including ``PYMISSIVE_DRY_RUN="allowed"``, keeps the row
+        # and never reaches the provider, so the refusal does not apply.
+        if enforce_recipient_policy:
+            apply_send_recipients(self._send_recipient_groups(), self.missive_type, log=False)
         if not self.claim_for_send():
             raise MissiveAlreadySending(_("Missive cannot be sent"))
 
@@ -1630,7 +1666,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         self.refresh_from_db()
         missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
 
-    def _dry_run_send(self, *, occurred_at, old_missive=None):
+    def _dry_run_send(self, *, occurred_at, old_missive=None, extra_trace=None):
         """Run the local send pipeline without calling the provider.
 
         Triggered when ``settings.PYMISSIVE_DRY_RUN`` is True. Generates a
@@ -1643,7 +1679,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             self._record_send_failure(
                 exc,
                 occurred_at=occurred_at,
-                extra_trace={"dry_run": True},
+                extra_trace={"dry_run": True, **(extra_trace or {})},
             )
             self.refresh_from_db()
             missive_post_send.send(sender=self.__class__, missive=self, old_missive=old_missive)
@@ -1659,6 +1695,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                 "missive_type": self.missive_type,
                 "subject": self.subject_compiled,
                 "recipients": [str(r) for r in self.recipients],
+                **(extra_trace or {}),
             },
         )
         self.refresh_from_db()

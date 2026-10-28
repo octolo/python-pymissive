@@ -269,6 +269,46 @@
   96%{left:calc(var(--lab-end-x) - var(--lab-item-half,30px));top:calc(var(--lab-end-y) - var(--lab-item-half-y,20px));opacity:1;z-index:6;transform:scale(0)}
   100%{left:calc(var(--lab-end-x) - var(--lab-item-half,30px));top:calc(var(--lab-end-y) - var(--lab-item-half-y,20px));opacity:0;z-index:4;transform:scale(0)}
 }
+.pym-am-root .lab-receiver{transition:filter .3s ease}
+.pym-am-root .lab-stage.is-finishing .lab-sender:not(.lab-final-sender),
+.pym-am-root .lab-stage.is-finished .lab-sender{display:none}
+.pym-am-root .lab-final-sender{display:block!important;animation-name:labFinalTravel!important;animation-duration:1.05s!important;animation-delay:0s!important;animation-timing-function:ease-in-out!important;animation-iteration-count:1!important;animation-fill-mode:forwards!important}
+@keyframes labFinalTravel{
+  0%{left:-80px;top:112px;opacity:0;transform:rotate(-7deg) scale(.9)}
+  12%{opacity:1}
+  45%{top:78px;opacity:1;transform:rotate(3deg) scale(.85)}
+  78%{left:calc(var(--lab-end-x) - var(--lab-item-half,30px));top:calc(var(--lab-end-y) - var(--lab-item-half-y,20px));opacity:1;transform:scale(var(--lab-end-scale,.3))}
+  100%{left:calc(var(--lab-end-x) - var(--lab-item-half,30px));top:calc(var(--lab-end-y) - var(--lab-item-half-y,20px));opacity:0;transform:scale(0)}
+}
+.pym-am-root .lab-finale{position:absolute;inset:0;z-index:22;pointer-events:none}
+.pym-am-root .lab-finale[hidden]{display:none!important}
+.pym-am-root .lab-finale-mark{position:absolute;left:var(--lab-end-x);top:var(--lab-end-y);display:flex;width:44px;height:44px;align-items:center;justify-content:center;border:3px solid #249b6a;border-radius:50%;background:#fff;color:#249b6a;font-size:25px;font-weight:900;line-height:1;opacity:0;transform:translate(-50%,-50%) scale(.4)}
+.pym-am-root .lab-finale-label{position:absolute;left:50%;bottom:45px;max-width:80%;padding:8px 14px;border:1px solid color-mix(in srgb,#249b6a 28%,white);border-radius:999px;background:rgba(255,255,255,.94);box-shadow:0 5px 14px color-mix(in srgb,var(--pym-am-800) 10%,transparent);color:#18764f;font-size:13px;text-align:center;opacity:0;transform:translate(-50%,8px)}
+.pym-am-root .lab-stage.is-finishing.is-completed .lab-receiver,
+.pym-am-root .lab-stage.is-finishing.has-errors .lab-receiver{animation:labReceiverPulse .65s .7s ease-out both}
+.pym-am-root .lab-stage.is-finishing .lab-finale-mark{animation:labFinaleMark .5s .72s cubic-bezier(.2,.8,.2,1.25) forwards}
+.pym-am-root .lab-stage.is-finishing .lab-finale-label{animation:labFinaleLabel .35s .92s ease-out forwards}
+.pym-am-root .lab-stage.is-finished .lab-finale-mark{opacity:1;transform:translate(-50%,-50%) scale(1)}
+.pym-am-root .lab-stage.is-finished .lab-finale-label{opacity:1;transform:translate(-50%,0)}
+.pym-am-root .lab-stage.has-errors .lab-finale-mark{border-color:#d88a20;color:#b76c08}
+.pym-am-root .lab-stage.has-errors .lab-finale-label{border-color:#efc98f;color:#9a5a06}
+.pym-am-root .lab-stage.is-cancelled .lab-finale-mark{border-color:var(--pym-am-muted);color:var(--pym-am-muted)}
+.pym-am-root .lab-stage.is-cancelled .lab-finale-label{border-color:var(--pym-am-150);color:var(--pym-am-ink)}
+.pym-am-root .lab-stage.is-finishing.is-cancelled .lab-finale-mark{animation-delay:0s}
+.pym-am-root .lab-stage.is-finishing.is-cancelled .lab-finale-label{animation-delay:.12s}
+@keyframes labReceiverPulse{
+  0%{filter:drop-shadow(0 0 0 transparent)}
+  45%{filter:drop-shadow(0 0 13px color-mix(in srgb,#249b6a 62%,transparent))}
+  100%{filter:drop-shadow(0 0 0 transparent)}
+}
+@keyframes labFinaleMark{
+  from{opacity:0;transform:translate(-50%,-50%) scale(.4)}
+  to{opacity:1;transform:translate(-50%,-50%) scale(1)}
+}
+@keyframes labFinaleLabel{
+  from{opacity:0;transform:translate(-50%,8px)}
+  to{opacity:1;transform:translate(-50%,0)}
+}
 /* Globe: channel-neutral receiver. Its centre must match RECEIVERS.globe endX/endY in animation.js. */
 .pym-am-root .globe{position:absolute;z-index:5;right:calc(10% + 6px);top:55px;width:120px;height:120px;overflow:hidden;border-radius:50%;background:radial-gradient(circle at 38% 34%,var(--pym-am-400),var(--pym-am-brand) 45%,var(--pym-am-800));box-shadow:0 0 0 4px color-mix(in srgb,var(--pym-am-300) 30%,transparent),0 12px 24px color-mix(in srgb,var(--pym-am-800) 18%,transparent)}
 /* The canvas reads its land colour from `color`. */
@@ -330,6 +370,11 @@
 .pym-am-root .lab-result-sent-fill{height:100%;background:linear-gradient(90deg,#5cc99a,#249b6a);transition:width .35s ease}
 .pym-am-root .lab-result-errors-fill{height:100%;background:linear-gradient(90deg,#ef7b90,#d6455d);transition:width .35s ease}
 .pym-am-root .lab-progress-fill{height:100%;width:0%;border-radius:inherit;background:linear-gradient(90deg,var(--pym-am-400),var(--pym-am-600));transition:width .35s ease}
+@media (prefers-reduced-motion:reduce){
+.pym-am-root .lab-stage.is-finishing .lab-finale-mark,
+.pym-am-root .lab-stage.is-finishing .lab-finale-label,
+.pym-am-root .lab-stage.is-finishing .lab-receiver{animation:none!important}
+}
 @media (max-width:700px){
 .pym-am-root .lab-counter{top:7px;width:64%;min-width:min(190px,calc(100% - 14px));padding:6px 8px;border-radius:9px}
 .pym-am-root .lab-counter-config{gap:10px}

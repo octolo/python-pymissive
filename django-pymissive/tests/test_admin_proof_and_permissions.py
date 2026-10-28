@@ -167,7 +167,6 @@ def test_staff_with_change_permission_can_change_a_missive():
 # Every action that mutates data or spends provider credit. Navigation views
 # (history, conversation, preview) stay available with view permission only.
 MUTATING_HOOKS = [
-    "has_prepare_missive_permission",
     "has_resend_missive_permission",
     "has_send_missive_permission",
     "has_cancel_missive_permission",

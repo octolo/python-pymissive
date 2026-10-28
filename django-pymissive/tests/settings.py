@@ -121,8 +121,8 @@ if NGROK_PUBLIC_URL:
     from urllib.parse import urlparse
 
     url_data = urlparse(NGROK_PUBLIC_URL.rstrip("/"))
-    MISSIVE_DOMAIN = url_data.netloc
-    MISSIVE_SCHEME = url_data.scheme
+    PYMISSIVE_DOMAIN = url_data.netloc
+    PYMISSIVE_SCHEME = url_data.scheme
     if url_data.scheme and url_data.netloc:
         origin = f"{url_data.scheme}://{url_data.netloc}"
         if origin not in CSRF_TRUSTED_ORIGINS:
@@ -152,9 +152,9 @@ if find_spec("djrichtextfield") is not None:
     }
 
 
-MISSIVE_AUTHENTICATED_ACKNOWLEDGEMENT = False
-MISSIVE_SIGNED_ACKNOWLEDGEMENT = False
-MISSIVE_QUALIFIED_ACKNOWLEDGEMENT = False
+PYMISSIVE_AUTHENTICATED_ACKNOWLEDGEMENT = False
+PYMISSIVE_SIGNED_ACKNOWLEDGEMENT = False
+PYMISSIVE_QUALIFIED_ACKNOWLEDGEMENT = False
 
 # Applied on save when sender fields are empty. Campaigns get every key;
 # missives only the ones matching their type, and only if the campaign
@@ -317,3 +317,5 @@ PROVIDERKIT_PROVIDERS_CONFIG = {
         "SLEEP_SECONDS": float(os.getenv("FAKE_SLEEP_SECONDS", 10)),
     },
 }
+
+PYMISSIVE_FORCE_FAKE_PROVIDER = True
