@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.0 — 2026-10-29
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.8.0,<2`.
+- Apply migration `0034_missive_body_rich_snapshot_html_and_more`.
+
+### Changes
+
+- Applications can register target models for deletion cleanup. Pending rows
+  are removed immediately while rows linked to a missive remain as history;
+  a grouped helper handles large queryset deletions efficiently.
+
 ## 1.7.0 — 2026-10-29
 
 ### Compatibility

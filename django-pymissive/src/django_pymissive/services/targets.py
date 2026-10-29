@@ -7,9 +7,13 @@ missive is built at send time by
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from django.contrib.contenttypes.models import ContentType
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Count, Q
+from django.db.models.signals import pre_delete
 from pymissive.config import normalize_missive_type
 
 from ..managers.related_object import object_id_value
@@ -22,6 +26,8 @@ BATCH_SIZE = 1000
 #: Rows loaded at a time while streaming a selection. Generic foreign keys
 #: cannot be ``select_related``, so each chunk is prefetched on its own.
 CHUNK_SIZE = 500
+
+_suppress_target_cleanup = ContextVar("pymissive_suppress_target_cleanup", default=False)
 
 
 def require_missive_type(missive_type: str) -> str:
@@ -124,6 +130,82 @@ def unselect(campaign, missive_type: str, targets=None) -> int:
         qs = qs.filter(window)
     _total, per_model = qs.delete()
     return per_model.get(CampaignTarget._meta.label, 0)
+
+
+def delete_pending_targets(targets, *, using: str | None = None) -> int:
+    """Delete selections without a missive for the supplied business objects.
+
+    This grouped form is intended for bulk cleanup. Rows already linked to a
+    missive remain as history, with their saved ``object_str``.
+    """
+    grouped = group_targets(targets)
+    deleted = 0
+    manager = CampaignTarget._base_manager
+    if using:
+        manager = manager.using(using)
+    content_types = ContentType.objects.db_manager(using)
+    for model, pairs in grouped.items():
+        content_type = content_types.get_for_model(model)
+        object_ids = [object_id for object_id, _target in pairs]
+        for start in range(0, len(object_ids), BATCH_SIZE):
+            _total, per_model = manager.filter(
+                content_type=content_type,
+                object_id__in=object_ids[start : start + BATCH_SIZE],
+                missive__isnull=True,
+            ).delete()
+            deleted += per_model.get(CampaignTarget._meta.label, 0)
+    return deleted
+
+
+def delete_pending_targets_on_delete(sender, instance, using, **kwargs) -> None:
+    """``pre_delete`` handler for a model used as a campaign target."""
+    if _suppress_target_cleanup.get():
+        return
+    delete_pending_targets([instance], using=using)
+
+
+@contextmanager
+def suppress_target_cleanup():
+    """Skip the per-instance handler while grouped cleanup is in progress."""
+    token = _suppress_target_cleanup.set(True)
+    try:
+        yield
+    finally:
+        _suppress_target_cleanup.reset(token)
+
+
+def delete_target_objects(queryset):
+    """Delete a queryset and its pending selections with grouped queries.
+
+    Use this instead of ``queryset.delete()`` for a large deletion on a model
+    registered with :func:`connect_target_cleanup`.
+    """
+    using = queryset.db
+    with transaction.atomic(using=using):
+        targets = list(queryset)
+        delete_pending_targets(targets, using=using)
+        with suppress_target_cleanup():
+            return queryset.delete()
+
+
+def connect_target_cleanup(*models_to_connect) -> None:
+    """Delete pending selections when instances of these models are deleted."""
+    for model in models_to_connect:
+        pre_delete.connect(
+            delete_pending_targets_on_delete,
+            sender=model,
+            weak=False,
+            dispatch_uid=f"django_pymissive.target_cleanup.{model._meta.label_lower}",
+        )
+
+
+def disconnect_target_cleanup(*models_to_disconnect) -> None:
+    """Disconnect cleanup previously installed by :func:`connect_target_cleanup`."""
+    for model in models_to_disconnect:
+        pre_delete.disconnect(
+            sender=model,
+            dispatch_uid=f"django_pymissive.target_cleanup.{model._meta.label_lower}",
+        )
 
 
 def is_selected(campaign, target, missive_type: str) -> bool:

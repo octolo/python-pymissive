@@ -22,8 +22,11 @@ from django_pymissive.models.related_object import MissiveRelatedObject
 from django_pymissive.services import (
     CampaignAlreadySending,
     build_send_preview,
+    connect_target_cleanup,
     counts,
     delete_drafts,
+    delete_target_objects,
+    disconnect_target_cleanup,
     is_selected,
     materialize_missive,
     materialize_selection,
@@ -128,6 +131,68 @@ def test_unselect_keeps_rows_that_already_have_a_missive():
     assert unselect(campaign, "email") == 1
     row.refresh_from_db()
     assert row.missive_id == missive.pk
+
+
+@pytest.mark.django_db
+def test_target_cleanup_deletes_pending_rows_and_keeps_missive_history():
+    campaign = _campaign()
+    ada = _contact("ada@example.com")
+    select(campaign, "email", ada)
+    select(campaign, "sms", ada)
+    sent = CampaignTarget.objects.get(campaign=campaign, missive_type="email")
+    missive = Missive.objects.create(
+        campaign=campaign,
+        missive_type=MissiveType.EMAIL,
+        subject="Hi",
+        body_text="Hi",
+        status=MissiveStatus.SUCCESS,
+    )
+    sent.attach_missive(missive)
+
+    connect_target_cleanup(Contact)
+    try:
+        ada.delete()
+    finally:
+        disconnect_target_cleanup(Contact)
+
+    assert not CampaignTarget.objects.filter(campaign=campaign, missive_type="sms").exists()
+    sent.refresh_from_db()
+    assert sent.missive_id == missive.pk
+    assert sent.target is None
+    assert sent.object_str
+
+
+@pytest.mark.django_db
+def test_bulk_target_cleanup_deletes_pending_rows_in_groups():
+    campaign = _campaign()
+    contacts = [_contact(f"person-{index}@example.com") for index in range(3)]
+    select(campaign, "email", contacts)
+
+    connect_target_cleanup(Contact)
+    try:
+        deleted, _per_model = delete_target_objects(
+            Contact.objects.filter(pk__in=[contact.pk for contact in contacts]),
+        )
+    finally:
+        disconnect_target_cleanup(Contact)
+
+    assert deleted == 3
+    assert not CampaignTarget.objects.filter(campaign=campaign).exists()
+
+
+@pytest.mark.django_db
+def test_target_cleanup_handles_queryset_delete():
+    campaign = _campaign()
+    contacts = [_contact(f"bulk-{index}@example.com") for index in range(2)]
+    select(campaign, "email", contacts)
+
+    connect_target_cleanup(Contact)
+    try:
+        Contact.objects.filter(pk__in=[contact.pk for contact in contacts]).delete()
+    finally:
+        disconnect_target_cleanup(Contact)
+
+    assert not CampaignTarget.objects.filter(campaign=campaign).exists()
 
 
 @pytest.mark.django_db

@@ -199,6 +199,33 @@ draft = send_missive(
 A `send_<type>()` shortcut exists for every registered missive type, and each
 takes the same keyword arguments as `send_missive()` minus `missive_type`.
 
+### Clean up deleted campaign targets
+
+Register each business model that can be selected by a campaign in its app
+configuration. Deleting one of its instances then removes pending target rows;
+rows already linked to a missive remain as history.
+
+```python
+from django.apps import AppConfig
+from django_pymissive.services import connect_target_cleanup
+
+
+class MyAppConfig(AppConfig):
+    def ready(self):
+        from myapp.models import Contact
+
+        connect_target_cleanup(Contact)
+```
+
+Django emits the signal once per object during `QuerySet.delete()`. For a large
+deletion, use the grouped helper to avoid one target-cleanup query per object:
+
+```python
+from django_pymissive.services import delete_target_objects
+
+delete_target_objects(Contact.objects.filter(is_expired=True))
+```
+
 ### Several recipients
 
 ```python
