@@ -454,7 +454,15 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         )
         self.add_to_fieldset(
             _("Content"),
-            ["subject", "tags", "body_rich", "body_text", "duplex_printing", "color_printing"],
+            [
+                "subject",
+                "tags",
+                "body_rich",
+                "body_rich_snapshot_html",
+                "body_text",
+                "duplex_printing",
+                "color_printing",
+            ],
         )
         self.add_to_fieldset(
             _("Tracking"),

@@ -22,6 +22,12 @@ urlpatterns: List[URLPattern] = [
         name="preview",
     ),
     path(
+        "preview/target/<int:pk>/",
+        PreviewView.as_view(),
+        {"campaign_or_missive": "target"},
+        name="preview_target",
+    ),
+    path(
         "preview/<str:campaign_or_missive>/",
         PreviewFormView.as_view(),
         name="preview_form",

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.7.0 — 2026-10-29
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.7.0,<2`.
+- The new optional HTML snapshot fields need a migration.
+
+### Changes
+
+- Each rich-text field on a missive or a campaign has an optional HTML
+  snapshot. The matching read-more property keeps the opening HTML balanced.
+  `PYMISSIVE_SNAPSHOT_HTML_READ_MORE_LENGTH` sets its length and defaults to
+  500 characters.
+- A campaign target can be previewed before it has a missive. That page is
+  limited to staff with permission to view the target.
+
 ## 1.6.0 — 2026-10-28
 
 ### Compatibility

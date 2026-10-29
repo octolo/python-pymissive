@@ -19,6 +19,7 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from pymissive.config import normalize_missive_type
@@ -246,6 +247,19 @@ class CampaignTarget(models.Model):
     def is_active(self) -> bool:
         """True while this row is the live checkbox (no missive yet, not abandoned)."""
         return not self.missive_id and not self.abandoned_at
+
+    def get_browser_preview_path(self) -> str:
+        """Preview URL, the same one a missive exposes once this row has one.
+
+        Before that, the path is this row's own preview. Its pk is sequential,
+        so that page is staff-only (see ``PreviewView``). Returns ``""`` when
+        the row is not saved yet.
+        """
+        if self.missive_id:
+            return self.missive.get_browser_preview_path()
+        if not self.pk:
+            return ""
+        return reverse("django_pymissive:preview_target", args=[self.pk])
 
     @property
     def targets(self) -> list:

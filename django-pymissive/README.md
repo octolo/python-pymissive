@@ -130,6 +130,9 @@ DEFAULT_FROM_EMAIL = 'noreply@example.com'
 # PYMISSIVE_STALE_PROCESSING_SECONDS = 1800
 # Missives a campaign send loads into memory at a time. Default 500.
 # PYMISSIVE_SEND_CHUNK_SIZE = 500
+# Visible characters kept by the HTML-balanced snapshot excerpt properties.
+# Default 500.
+# PYMISSIVE_SNAPSHOT_HTML_READ_MORE_LENGTH = 500
 # Dotted-path prefixes allowed for every path imported from the database:
 # external_task_backend, progress_hook and the body, PDF, attachment and
 # build target processors. Paths read from settings must be listed too.

@@ -107,7 +107,13 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         (
             None,
             {
-                "fields": ("named_id", "subject", "description", "current_scheduler_display"),
+                "fields": (
+                    "named_id",
+                    "subject",
+                    "description",
+                    "description_snapshot_html",
+                    "current_scheduler_display",
+                ),
             },
         ),
     ]
@@ -124,6 +130,7 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
                 "reply_to_email",
                 "email_body_text",
                 "email_body_rich",
+                "email_body_rich_snapshot_html",
             ],
         )
         self.add_to_fieldset(
@@ -133,6 +140,7 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
                 "sender_phone",
                 "phone_body_text",
                 "phone_body_rich",
+                "phone_body_rich_snapshot_html",
             ],
         )
         self.add_to_fieldset(
@@ -150,6 +158,7 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
                 "duplex_printing_registered_letter",
                 "color_printing_registered_letter",
                 "first_document",
+                "first_document_snapshot_html",
             ],
         )
         self.add_to_fieldset(

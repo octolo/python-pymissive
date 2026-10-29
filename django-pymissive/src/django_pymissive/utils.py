@@ -11,12 +11,15 @@ from django.core.exceptions import FieldError, ValidationError
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.module_loading import import_string
+from django.utils.text import Truncator
 from django.utils.translation import gettext_lazy as _
 
 from .models.choices import MissiveRecipientType
 from .models.recipient import MissiveRecipient
 
 logger = logging.getLogger(__name__)
+
+SNAPSHOT_HTML_READ_MORE_LENGTH = 500
 
 
 def serialize_model_for_context(obj) -> dict:
@@ -25,6 +28,22 @@ def serialize_model_for_context(obj) -> dict:
     if callable(getattr(obj, "to_context_dict", None)):
         data.update(obj.to_context_dict())
     return data
+
+
+def snapshot_html_read_more(value: str | None) -> str:
+    """Return an HTML-balanced excerpt of a rich-text snapshot."""
+    if not value:
+        return ""
+    configured_length = getattr(
+        settings,
+        "PYMISSIVE_SNAPSHOT_HTML_READ_MORE_LENGTH",
+        SNAPSHOT_HTML_READ_MORE_LENGTH,
+    )
+    try:
+        length = max(1, int(configured_length))
+    except (TypeError, ValueError):
+        length = SNAPSHOT_HTML_READ_MORE_LENGTH
+    return Truncator(value).chars(length, html=True)
 
 
 def recalculate_attachment_priorities(missive_id=None, campaign_id=None):

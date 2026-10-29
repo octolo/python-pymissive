@@ -56,6 +56,7 @@ from ..utils import (
     is_empty_sender_value,
     is_force_fake_provider,
     serialize_model_for_context,
+    snapshot_html_read_more,
     SENDER_CONTACT_FIELDS,
     validate_import_paths,
 )
@@ -221,6 +222,12 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         verbose_name=_("Rich body"),
         help_text=_("Rich content body (HTML, RTF, …) — email, letter, registered letter, etc."),
     )
+    body_rich_snapshot_html = RichTextField(
+        blank=True,
+        null=True,
+        verbose_name=_("Rich body HTML snapshot"),
+        help_text=_("Optional rendered HTML snapshot of the rich body"),
+    )
     body_text = models.TextField(
         blank=True,
         null=True,
@@ -330,6 +337,10 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def __str__(self):
         recipient = self.first_recipient or _("Unknown")
         return f"{self.missive_type} - {recipient} ({self.status})"
+
+    @property
+    def body_rich_snapshot_html_read_more(self):
+        return snapshot_html_read_more(self.body_rich_snapshot_html)
 
     def _apply_forced_fake_provider(self, *, persist=False):
         """Use ``fake`` when forced, persisting it only for provider operations."""
@@ -526,6 +537,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "reply_to_name": "reply_to_email_name",
             "acknowledgement": "acknowledgement_email",
             "body_rich": "email_body_rich",
+            "body_rich_snapshot_html": "email_body_rich_snapshot_html",
             "body_text": "email_body_text",
         },
         "phone": {
@@ -536,6 +548,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "sender_name": "sender_phone_name",
             "body_text": "phone_body_text",
             "body_rich": "phone_body_rich",
+            "body_rich_snapshot_html": "phone_body_rich_snapshot_html",
         },
         "address": {
             "sender_name": "sender_address_name",
@@ -546,6 +559,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "duplex_printing": "duplex_printing_letter",
             "color_printing": "color_printing_letter",
             "body_rich": "first_document",
+            "body_rich_snapshot_html": "first_document_snapshot_html",
         },
         "letter": {
             "duplex_printing": "duplex_printing_letter",
@@ -561,6 +575,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         "email": [
             "subject",
             "body_rich",
+            "body_rich_snapshot_html",
             "body_text",
             "acknowledgement",
             "sender_name",
@@ -577,12 +592,14 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         "application": [
             "subject",
             "body_rich",
+            "body_rich_snapshot_html",
             "body_text",
             "sender_name",
         ],
         "address": [
             "subject",
             "body_rich",
+            "body_rich_snapshot_html",
             "body_text",
             "acknowledgement",
             "delivery_mode",
@@ -1095,6 +1112,10 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         grouped: dict[str, list] = {}
         seen: set[tuple[str, object]] = set()
         self._collect_related_objects(self.to_missiverelatedobject, into=grouped, seen=seen)
+        for obj in getattr(self, "_preview_related_objects", ()) or ():
+            model_name = getattr(getattr(obj, "_meta", None), "model_name", None)
+            if model_name:
+                self._remember_related_object(obj, content_type_name=model_name, into=grouped, seen=seen)
         if campaign is not None:
             self._collect_related_objects(campaign.to_campaignrelatedobject, into=grouped, seen=seen)
 
@@ -1113,6 +1134,17 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         return context
 
     @staticmethod
+    def _remember_related_object(obj, *, content_type_name: str, into: dict, seen: set) -> None:
+        """Keep the first object of each ``(content type, pk)`` for the template context."""
+        if obj is None:
+            return
+        key = (content_type_name, obj.pk)
+        if key in seen:
+            return
+        seen.add(key)
+        into.setdefault(content_type_name, []).append(serialize_model_for_context(obj))
+
+    @staticmethod
     def _collect_related_objects(
         manager,
         *,
@@ -1121,15 +1153,12 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     ) -> None:
         """Group by content type; skip deleted rows; dedup via ``seen``."""
         for ro in manager.select_related("content_type").prefetch_related("content_object"):
-            obj = ro.content_object
-            if obj is None:
-                continue
-            ct_name = ro.content_type.model
-            key = (ct_name, obj.pk)
-            if key in seen:
-                continue
-            seen.add(key)
-            into.setdefault(ct_name, []).append(serialize_model_for_context(obj))
+            Missive._remember_related_object(
+                ro.content_object,
+                content_type_name=ro.content_type.model,
+                into=into,
+                seen=seen,
+            )
 
     def get_provider_address_css(self) -> str:
         """CSS for ``.a4-address-provider`` from the provider address-offset dict."""

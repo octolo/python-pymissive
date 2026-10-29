@@ -1,10 +1,15 @@
-"""Preview views for Missive and MissiveCampaign models.
+"""Preview views for missives, campaigns and campaign targets.
 
-Campaign previews use an unsaved Missive with ``campaign`` (and ``campaign_id``) set,
+Campaign and target previews use an unsaved Missive with ``campaign`` set,
 so templates and compiled bodies use the same code paths as a real missive.
+A target preview also carries that target's object and contacts, and saves nothing.
 """
 
+from types import SimpleNamespace
+
 from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib.auth.views import redirect_to_login
+from django.core.exceptions import PermissionDenied
 from django.forms import modelform_factory
 from django.http import Http404, HttpResponse
 from django.shortcuts import redirect
@@ -14,6 +19,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views.generic import DetailView, View
 
 from ..models.campaign import MissiveCampaign
+from ..models.campaign_target import CampaignTarget
 from ..models.choices import (
     MissiveRecipientType,
     MissiveStatus,
@@ -53,7 +59,10 @@ def missive_is_postal_like(m: Missive) -> bool:
 _PREVIEW_MODEL = {
     "missive": Missive,
     "campaign": MissiveCampaign,
+    "target": CampaignTarget,
 }
+
+_PREVIEW_RECIPIENT_FIELDS = ("email", "phone", "address", "notification_id")
 
 
 def _normalize_brand(value) -> str:
@@ -109,6 +118,18 @@ def campaign_preview_query(*, kind: str, brand: str = "") -> str:
     return "?" + "&".join(params)
 
 
+def preview_kind_for_missive_type(missive_type: str) -> str:
+    """Map a missive type to the campaign preview kind (email/sms/postal/branded)."""
+    mt = (missive_type or "").lower()
+    if mt in POSTAL_PREVIEW_MISSIVE_TYPES:
+        return "postal"
+    if mt in ("sms", "rcs"):
+        return "sms"
+    if mt == "branded":
+        return "branded"
+    return "email"
+
+
 def _campaign_preview_kind_to_missive_type(kind: str) -> str:
     """Map campaign ?type= (email|sms|postal|branded) to a concrete MissiveType value."""
     k = (kind or "email").lower()
@@ -146,6 +167,64 @@ def missive_for_campaign_preview(
         missive.provider = brand
     missive._ensure_missive_defaults()
     return missive
+
+
+def _target_object(row: CampaignTarget):
+    if not row.content_type_id or not row.object_id:
+        return None
+    try:
+        return row.target
+    except Exception:
+        return None
+
+
+def _preview_recipient(recipient_type: str, name: str, field: str, contact):
+    values = {key: "" for key in _PREVIEW_RECIPIENT_FIELDS}
+    values["address"] = None
+    values[field] = contact
+    return SimpleNamespace(recipient_type=recipient_type, name=name or "", pk=None, **values)
+
+
+def missive_for_target_preview(row: CampaignTarget) -> Missive:
+    """Unsaved missive of this target: campaign content, its object, its contacts.
+
+    Nothing is written. The object is injected as a related object so templates
+    see ``{{ contact }}`` the way a generated missive would. Recipients stay on
+    the instance (``_preview_recipients``) because the row has no missive yet.
+    """
+    from pymissive.config import missive_support_for_type
+
+    from ..processors.build_target import _RECIPIENT_FIELD, ordered_target_contacts
+
+    kind = preview_kind_for_missive_type(row.missive_type)
+    missive = missive_for_campaign_preview(row.campaign, kind)
+    target = _target_object(row)
+    if target is not None:
+        missive._preview_related_objects = [target]
+    field = _RECIPIENT_FIELD.get(missive_support_for_type(row.missive_type))
+    missive._preview_recipients = (
+        [
+            _preview_recipient(recipient_type, name, field, contact)
+            for recipient_type, name, contact in ordered_target_contacts(row)
+        ]
+        if field
+        else []
+    )
+    return missive
+
+
+def _target_preview_denied(request):
+    """Staff with view permission, or a login redirect. ``None`` when allowed.
+
+    The target pk is an integer, unlike the unguessable missive UUID, so this
+    page cannot be public.
+    """
+    user = request.user
+    if not user.is_authenticated or not user.is_staff:
+        return redirect_to_login(request.get_full_path())
+    if not user.has_perm("django_pymissive.view_campaigntarget"):
+        raise PermissionDenied
+    return None
 
 
 def template_for_missive(missive: Missive) -> list[str]:
@@ -341,6 +420,13 @@ def _address_value(instance, value, fallback_attribute):
 
 
 def _postal_recipients(instance):
+    preview = getattr(instance, "_preview_recipients", None)
+    if preview is not None:
+        return [
+            {"pk": recipient.pk, "name": recipient.name or "", "address": recipient.address}
+            for recipient in preview
+            if recipient.recipient_type == MissiveRecipientType.RECIPIENT
+        ]
     recipient_manager = getattr(instance, "to_missiverecipient", None)
     if recipient_manager is None or not getattr(instance, "is_persisted", False):
         return []
@@ -386,6 +472,10 @@ def _build_email_context(instance):
         "cc_recipients": [],
         "bcc_recipients": [],
     }
+    preview = getattr(instance, "_preview_recipients", None)
+    if preview is not None:
+        _append_email_recipients(context, preview)
+        return context
     recipient_manager = getattr(instance, "to_missiverecipient", None)
     if recipient_manager is None or not getattr(instance, "is_persisted", False):
         return context
@@ -424,13 +514,15 @@ def _append_email_recipients(context, recipients):
 
 
 class PreviewView(DetailView):
-    """GET preview: ``missive`` URL uses the saved row; ``campaign`` builds an unsaved missive.
+    """GET preview: ``missive`` uses the saved row; ``campaign`` and ``target`` build one.
 
-    Deliberately unauthenticated: this is the "view in browser" link that
-    ``processors.body.add_preview_browser`` embeds in outgoing emails, so
-    recipients must be able to open it. The unguessable UUID pk is what keeps it
-    private. Being recipient-facing, it must also stay side-effect free — it
-    must never regenerate the first-document PDF of an already sent missive.
+    Missive and campaign URLs stay unauthenticated: this is the "view in browser"
+    link that ``processors.body.add_preview_browser`` embeds in outgoing emails.
+    The unguessable UUID pk is what keeps it private. A target pk is sequential,
+    so that URL requires staff and the view permission; once the target has a
+    missive, it redirects to that missive's preview. Being recipient-facing, the
+    missive page must stay side-effect free — it must never regenerate the
+    first-document PDF of an already sent missive.
     """
 
     context_object_name = "missive"
@@ -456,7 +548,13 @@ class PreviewView(DetailView):
             self.recipient_pk = None
 
     def get(self, request, *args, **kwargs):
+        if self._key == "target":
+            denied = _target_preview_denied(request)
+            if denied is not None:
+                return denied
         self.object = self.get_object()
+        if self._key == "target" and self.object.missive_id:
+            return redirect(self.object.get_browser_preview_path())
         if self.recipient_pk is not None and self._key != "missive":
             raise Http404
         if self._key == "missive" and self.recipient_pk is None and missive_is_postal_like(self.object):
@@ -495,6 +593,8 @@ class PreviewView(DetailView):
                 kind,
                 brand=_brand_from_request(self.request),
             )
+        elif self._key == "target":
+            self._missive_for_preview = missive_for_target_preview(self.object)
         else:
             self._missive_for_preview = self.object
         return self._missive_for_preview
@@ -515,7 +615,7 @@ class PreviewView(DetailView):
             context["campaign_preview_kind"] = channel
             context["title"] = _("Preview: {} ({})").format(self.object, channel)
         else:
-            context["title"] = _("Preview: {}").format(missive)
+            context["title"] = _("Preview: {}").format(self.object if self._key == "target" else missive)
 
         rp = self.recipient_pk if self._key == "missive" else None
         extra = build_preview_context(missive, postal_recipient_pk=rp)

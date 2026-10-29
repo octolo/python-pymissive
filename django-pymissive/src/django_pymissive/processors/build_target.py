@@ -203,6 +203,35 @@ def default_recipient_type(missive_type: str) -> str:
     return _DEFAULT_RECIPIENT_TYPE.get(support, MissiveRecipientType.RECIPIENT)
 
 
+def ordered_target_contacts(row) -> list[tuple[str, str, object]]:
+    """Contacts this row would send, as ``(recipient_type, name, value)``.
+
+    Same order as :func:`build_target_processor`. Used by the target preview,
+    which must show the recipients without saving a missive.
+    """
+    from pymissive.config import missive_support_for_type
+
+    support = missive_support_for_type(getattr(row, "missive_type", None))
+    if support not in _RECIPIENT_FIELD:
+        return []
+    target = _linked_object(row)
+    full_targets = bool(getattr(settings, "PYMISSIVE_BUILD_TARGET_FULL", False))
+    grouped = resolve_target_recipients(
+        getattr(row, "campaign", None),
+        target,
+        row.missive_type,
+        full_targets=full_targets,
+        row=row,
+    )
+    grouped = _usable_grouped_contacts(grouped, support)
+    fallback = _target_name(target, build_target_fields().get("name", ())) if target is not None else ""
+    contacts = []
+    for recipient_type, value in _ordered_contacts(grouped, default_recipient_type(row.missive_type)):
+        name, contact = _split_contact(value, support, fallback)
+        contacts.append((recipient_type, name, contact))
+    return contacts
+
+
 def contacts_of_target(row) -> list:
     """Contacts *row* will use, in send order.
 

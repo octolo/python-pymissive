@@ -49,7 +49,7 @@
            class="postal-preview-actions__link">
             {% trans "Download PDF" %}
         </a>
-        {% else %}
+        {% elif missive.is_persisted %}
         <a href="{% url 'django_pymissive:download_pdf' 'missive' missive.pk %}"
            class="postal-preview-actions__link">
             {% trans "Download PDF" %}

@@ -202,6 +202,10 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
             format_html_join("", "<li>{} — {} ({})</li>", missives),
         )
 
+    @admin_boost_view("redirect", _("Preview"))
+    def preview(self, request, obj):
+        return obj.get_browser_preview_path()
+
     def has_generate_missive_permission(self, request, obj=None):
         """The button only exists while this row is still a checkbox."""
         return bool(self.has_action_rights(request, obj) and obj and obj.pk and obj.is_active())
