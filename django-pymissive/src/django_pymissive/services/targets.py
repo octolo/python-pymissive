@@ -140,9 +140,7 @@ def delete_pending_targets(targets, *, using: str | None = None) -> int:
     """
     grouped = group_targets(targets)
     deleted = 0
-    manager = CampaignTarget._base_manager
-    if using:
-        manager = manager.using(using)
+    manager = CampaignTarget._base_manager.db_manager(using) if using else CampaignTarget._base_manager
     content_types = ContentType.objects.db_manager(using)
     for model, pairs in grouped.items():
         content_type = content_types.get_for_model(model)

@@ -211,7 +211,7 @@ def ordered_target_contacts(row) -> list[tuple[str, str, object]]:
     """
     from pymissive.config import missive_support_for_type
 
-    support = missive_support_for_type(getattr(row, "missive_type", None))
+    support = missive_support_for_type(str(getattr(row, "missive_type", "") or ""))
     if support not in _RECIPIENT_FIELD:
         return []
     target = _linked_object(row)

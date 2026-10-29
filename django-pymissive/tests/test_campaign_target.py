@@ -835,12 +835,23 @@ def test_campaign_counts_targets_still_without_a_missive():
         )
     )
 
-    annotated = MissiveCampaign.objects.with_counts("count_target_pending").get(pk=campaign.pk)
+    annotated = MissiveCampaign.objects.with_counts(
+        "count_target_pending",
+        "count_target_pending_email",
+        "count_target_pending_sms",
+        "count_target_pending_letter",
+    ).get(pk=campaign.pk)
+    assert annotated.count_target_pending_email == 1
+    assert annotated.count_target_pending_sms == 1
+    assert annotated.count_target_pending_letter == 0
     assert annotated.count_target_pending == 2
 
     plain = MissiveCampaign.objects.get(pk=campaign.pk)
+    assert plain.count_target_pending_email == 1
     assert plain.count_target_pending == 2
-    assert MissiveCampaign.objects.with_counts().get(pk=_campaign().pk).count_target_pending == 0
+    empty = MissiveCampaign.objects.with_counts().get(pk=_campaign().pk)
+    assert empty.count_target_pending_email == 0
+    assert empty.count_target_pending == 0
 
 
 @pytest.mark.django_db

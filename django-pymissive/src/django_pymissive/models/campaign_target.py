@@ -255,8 +255,9 @@ class CampaignTarget(models.Model):
         so that page is staff-only (see ``PreviewView``). Returns ``""`` when
         the row is not saved yet.
         """
-        if self.missive_id:
-            return self.missive.get_browser_preview_path()
+        missive = self.missive
+        if missive is not None:
+            return missive.get_browser_preview_path()
         if not self.pk:
             return ""
         return reverse("django_pymissive:preview_target", args=[self.pk])

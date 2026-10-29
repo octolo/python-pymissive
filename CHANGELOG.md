@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.1 — 2026-10-29
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.8.1,<2`.
+
+### Changes
+
+- A campaign exposes `count_target_pending_<type>` for each missive type.
+  `count_target_pending` is the sum of those counters.
+
 ## 1.8.0 — 2026-10-29
 
 ### Compatibility

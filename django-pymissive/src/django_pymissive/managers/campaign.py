@@ -135,11 +135,30 @@ def missive_count_annotations() -> dict:
     }
 
 
-def pending_target_count_expr():
-    """Active selection rows of the campaign, as a subquery."""
+def pending_target_type_annotations() -> dict:
+    """``count_target_pending_<type>`` for each missive type, as a subquery."""
     from ..models.campaign_target import CampaignTarget
 
-    return target_count_expr(CampaignTarget.active_q())
+    active = CampaignTarget.active_q()
+    return {
+        f"count_target_pending_{type_key}": target_count_expr(active & Q(missive_type=type_key))
+        for type_key in MISSIVE_TYPES
+    }
+
+
+def pending_target_total_expr():
+    """``count_target_pending`` as the sum of the per-type counters.
+
+    The parts are already subqueries. Adding them avoids scanning the
+    selection table once more for the total.
+    """
+    from django.db.models.expressions import CombinedExpression
+
+    parts = [F(f"count_target_pending_{type_key}") for type_key in MISSIVE_TYPES]
+    total: F | CombinedExpression = parts[0]
+    for part in parts[1:]:
+        total = total + part
+    return total
 
 
 def target_count_expr(condition):
@@ -172,16 +191,18 @@ def related_count_annotations() -> dict:
     and 8 events each yields 80 000 intermediate rows for every
     ``COUNT(DISTINCT)`` to deduplicate.
 
-    ``count_target_pending`` is the checkbox: selection rows that still have
-    no missive and are not abandoned. ``count_target_abandoned`` counts the
-    rows given up without a missive.
+    ``count_target_pending_<type>`` is the checkbox on one channel: selection
+    rows that still have no missive and are not abandoned.
+    ``count_target_abandoned`` counts the rows given up without a missive.
+    ``count_target_pending`` is not here: it is the sum of the per-type
+    counters, added in a second ``annotate`` so it does not scan again.
     """
     return {
         "count_recipient": models.Count(f"{_M}__to_missiverecipient", distinct=True),
         "count_event": models.Count(f"{_M}__to_missiveevent", distinct=True),
         "count_related_object": models.Count("to_campaignrelatedobject", distinct=True),
         "count_attachment": models.Count("to_campaigndocument", distinct=True),
-        "count_target_pending": pending_target_count_expr(),
+        **pending_target_type_annotations(),
         "count_target_abandoned": target_count_expr(Q(abandoned_at__isnull=False)),
         **{
             f"count_recipient_{status.value.lower()}": models.Count(
@@ -217,6 +238,14 @@ def count_annotation_names() -> frozenset:
     return frozenset(count_annotations())
 
 
+def derived_count_annotations() -> dict:
+    """Counters that read annotations declared in the first ``annotate``."""
+    return {
+        "count_target_pending": pending_target_total_expr(),
+        **pct_annotations(),
+    }
+
+
 def count_annotations() -> dict:
     """Every counter :meth:`MissiveCampaignQuerySet.with_counts` produces.
 
@@ -227,7 +256,7 @@ def count_annotations() -> dict:
     return {
         **missive_count_annotations(),
         **related_count_annotations(),
-        **pct_annotations(),
+        **derived_count_annotations(),
     }
 
 
@@ -256,25 +285,29 @@ class MissiveCampaignQuerySet(models.QuerySet):
                 column would silently fall back to one query per row.
         """
         counters = {**missive_count_annotations(), **related_count_annotations()}
-        percentages = pct_annotations()
+        derived = derived_count_annotations()
         if names:
             wanted = set(names)
-            unknown = wanted - counters.keys() - percentages.keys()
+            unknown = wanted - counters.keys() - derived.keys()
             if unknown:
                 raise ValueError(
                     f"Unknown campaign counters: {', '.join(sorted(unknown))}",
                 )
-            percentages = {key: percentages[key] for key in percentages if key in wanted}
+            derived = {key: derived[key] for key in derived if key in wanted}
             # A percentage divides its own recipient counter by count_recipient,
-            # so asking for one has to bring both along.
-            for name in percentages:
-                wanted |= {"count_recipient", name.replace("pct_", "count_", 1)}
+            # so asking for one has to bring both along. The pending total is
+            # the sum of the per-type counters, so it brings every part along.
+            for name in derived:
+                if name.startswith("pct_"):
+                    wanted |= {"count_recipient", name.replace("pct_", "count_", 1)}
+            if "count_target_pending" in derived:
+                wanted.update(pending_target_type_annotations())
             counters = {key: value for key, value in counters.items() if key in wanted}
         return self.annotate(
             **counters,
-            # Second annotate: a percentage reads the counter declared above, and an
+            # Second annotate: these read counters declared above, and an
             # annotation cannot be referenced from the call that declares it.
-        ).annotate(**percentages)
+        ).annotate(**derived)
 
     def delete(self):
         """Refuse if any selected campaign has a live missive past draft."""

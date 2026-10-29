@@ -179,7 +179,7 @@ def _target_object(row: CampaignTarget):
 
 
 def _preview_recipient(recipient_type: str, name: str, field: str, contact):
-    values = {key: "" for key in _PREVIEW_RECIPIENT_FIELDS}
+    values: dict[str, object] = {key: "" for key in _PREVIEW_RECIPIENT_FIELDS}
     values["address"] = None
     values[field] = contact
     return SimpleNamespace(recipient_type=recipient_type, name=name or "", pk=None, **values)
@@ -200,15 +200,19 @@ def missive_for_target_preview(row: CampaignTarget) -> Missive:
     missive = missive_for_campaign_preview(row.campaign, kind)
     target = _target_object(row)
     if target is not None:
-        missive._preview_related_objects = [target]
+        setattr(missive, "_preview_related_objects", [target])
     field = _RECIPIENT_FIELD.get(missive_support_for_type(row.missive_type))
-    missive._preview_recipients = (
-        [
-            _preview_recipient(recipient_type, name, field, contact)
-            for recipient_type, name, contact in ordered_target_contacts(row)
-        ]
-        if field
-        else []
+    setattr(
+        missive,
+        "_preview_recipients",
+        (
+            [
+                _preview_recipient(recipient_type, name, field, contact)
+                for recipient_type, name, contact in ordered_target_contacts(row)
+            ]
+            if field
+            else []
+        ),
     )
     return missive
 

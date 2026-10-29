@@ -290,7 +290,8 @@ MissiveCampaign.objects.with_counts()
 # count_support_<support> (+ _sent, _error), count_missive_<status>,
 # count_type_<type>, count_thread_<type>,
 # count_recipient (+ _<status>), count_event, count_related_object,
-# count_attachment, pct_recipient_<status>
+# count_attachment, count_target_pending_<type>, count_target_pending,
+# count_target_abandoned, pct_recipient_<status>
 ```
 
 `MissiveCampaign.objects` itself annotates only what costs no `GROUP BY`:

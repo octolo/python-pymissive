@@ -348,7 +348,8 @@ def test_the_default_queryset_aggregates_nothing():
 
     # The joins and aggregates every campaign lookup used to pay for.
     opted_in = str(MissiveCampaign.objects.with_counts().query)
-    # count_target_pending is a subquery: the selection table adds no join.
+    # Pending targets are per-type subqueries, and the total adds those
+    # counters. The selection table adds no join.
     assert opted_in.count("JOIN") == 5
     assert opted_in.count("COUNT(DISTINCT") == 67
 
