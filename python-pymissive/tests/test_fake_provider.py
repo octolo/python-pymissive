@@ -1,4 +1,4 @@
-"""FakeProvider accepts every send service and sleeps for the configured duration."""
+"""FakeProvider accepts every send service, sleeps, and can fail at random."""
 
 import json
 from unittest.mock import patch
@@ -47,7 +47,7 @@ def test_handle_webhook_normalizes_a_json_body():
 
 
 def test_send_returns_an_external_id():
-    provider = FakeProvider(config={"SLEEP_SECONDS": 0})
+    provider = FakeProvider(config={"SLEEP_SECONDS": 0, "FAILURE_RATE": 0})
     with patch("pymissive.providers.fake.time.sleep") as sleep:
         result = provider.send_email(internal_id="m-1")
     sleep.assert_not_called()
@@ -57,7 +57,7 @@ def test_send_returns_an_external_id():
 
 
 def test_send_ignores_missive_type_echoed_by_the_payload():
-    provider = FakeProvider(config={"SLEEP_SECONDS": 0})
+    provider = FakeProvider(config={"SLEEP_SECONDS": 0, "FAILURE_RATE": 0})
     result = provider.send_email(missive_type="email", internal_id="m-1")
     assert result["external_id"].startswith("fake-email-")
     assert result["service"] == "send_email"
@@ -96,7 +96,7 @@ def test_zero_and_invalid_durations_do_not_sleep():
 def test_force_fake_provider_allows_the_send(monkeypatch):
     monkeypatch.delenv("PYMISSIVE_ALLOW_FAKE_PROVIDER")
     monkeypatch.setenv("PYMISSIVE_FORCE_FAKE_PROVIDER", "1")
-    provider = FakeProvider(config={"SLEEP_SECONDS": 0})
+    provider = FakeProvider(config={"SLEEP_SECONDS": 0, "FAILURE_RATE": 0})
     result = provider.send_sms()
     assert result["external_id"].startswith("fake-sms-")
 
@@ -109,6 +109,49 @@ def test_send_is_refused_unless_explicitly_allowed(monkeypatch):
         with pytest.raises(RuntimeError, match="PYMISSIVE_ALLOW_FAKE_PROVIDER"):
             provider.send_email()
     sleep.assert_not_called()
+
+
+def test_a_drawn_failure_returns_no_external_id():
+    provider = FakeProvider(config={"SLEEP_SECONDS": 0, "FAILURE_RATE": 1})
+    with patch("pymissive.providers.fake.time.sleep") as sleep:
+        result = provider.send_email()
+    sleep.assert_not_called()
+    assert "external_id" not in result
+    assert result["event"] == "failed"
+    assert result["code"] == 500
+    assert result["message"] == "Fake send failed"
+    assert result["service"] == "send_email"
+
+
+def test_failure_rate_on_the_call_overrides_the_provider_config():
+    provider = FakeProvider(config={"SLEEP_SECONDS": 0, "FAILURE_RATE": 0})
+    result = provider.send_sms(failure_rate=1)
+    assert "external_id" not in result
+    assert result["event"] == "failed"
+
+
+def test_the_send_sleeps_before_it_fails():
+    provider = FakeProvider(config={"SLEEP_SECONDS": 2, "FAILURE_RATE": 1})
+    with patch("pymissive.providers.fake.time.sleep") as sleep:
+        result = provider.send_letter()
+    sleep.assert_called_once_with(2)
+    assert result["event"] == "failed"
+
+
+def test_zero_and_invalid_failure_rates_always_send():
+    provider = FakeProvider(config={"SLEEP_SECONDS": 0, "FAILURE_RATE": "nope"})
+    with patch("pymissive.providers.fake.random.random", return_value=0):
+        assert provider.send_email(failure_rate=0)["event"] == "sent"
+        assert provider.send_email(failure_rate=-1)["event"] == "sent"
+        assert provider.send_sms()["event"] == "sent"
+
+
+def test_disabled_send_ignores_the_failure_rate(monkeypatch):
+    monkeypatch.setenv("PYMISSIVE_DISABLE_SEND", "1")
+    provider = FakeProvider(config={"FAILURE_RATE": 1})
+    result = provider.send_email()
+    assert result["disabled_send"] is True
+    assert result["external_id"].startswith("fake-email-")
 
 
 def test_disabled_send_returns_at_once(monkeypatch):

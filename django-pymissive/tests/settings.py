@@ -313,8 +313,10 @@ PROVIDERKIT_PROVIDERS_CONFIG = {
     # Local provider. SLEEP_SECONDS is how long each send blocks, so a run
     # can be cancelled by hand and watched while it moves. 0 unless set,
     # to keep pytest fast (the provider itself defaults to 10).
+    # FAILURE_RATE (0–1) is the chance a send is refused, before any webhook.
     "fake": {
         "SLEEP_SECONDS": float(os.getenv("FAKE_SLEEP_SECONDS", 10)),
+        "FAILURE_RATE": float(os.getenv("FAKE_FAILURE_RATE", "0.1")),
     },
 }
 

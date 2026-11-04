@@ -8,6 +8,17 @@ is read in this order:
 - ``SLEEP_SECONDS`` on this provider (``PROVIDERKIT_PROVIDERS_CONFIG["fake"]``)
 - ``10``
 
+A send can also fail on purpose, before any webhook. The chance (``0`` to
+``1``) is read in the same order:
+
+- ``failure_rate`` on the call
+- ``FAILURE_RATE`` on this provider
+- ``0.1``
+
+A failed send returns no ``external_id``. django-pymissive then records an
+ERROR on the missive. Delivery events posted later (``manage.py fake``) are
+unchanged.
+
 Sends are refused unless ``PYMISSIVE_ALLOW_FAKE_PROVIDER`` or
 ``PYMISSIVE_FORCE_FAKE_PROVIDER`` is true, so a misconfigured production
 never marks missives as sent without sending them.
@@ -19,6 +30,7 @@ django-pymissive posts those bodies to ``/webhook/fake/<missive_type>/``.
 
 import json
 import logging
+import random
 import time
 import uuid
 from datetime import datetime, timezone
@@ -32,6 +44,7 @@ from .base import MissiveProviderBase
 logger = logging.getLogger(__name__)
 
 DEFAULT_SLEEP_SECONDS = 10
+DEFAULT_FAILURE_RATE = 0.1
 
 
 class FakeProvider(MissiveProviderBase):
@@ -41,8 +54,11 @@ class FakeProvider(MissiveProviderBase):
     display_name = "Fake"
     description = "Local provider for every send service. No network call."
     required_packages: list[str] = []
-    config_keys = ["SLEEP_SECONDS"]
-    config_defaults: dict[str, Any] = {"SLEEP_SECONDS": DEFAULT_SLEEP_SECONDS}
+    config_keys = ["SLEEP_SECONDS", "FAILURE_RATE"]
+    config_defaults: dict[str, Any] = {
+        "SLEEP_SECONDS": DEFAULT_SLEEP_SECONDS,
+        "FAILURE_RATE": DEFAULT_FAILURE_RATE,
+    }
 
     def _sleep_seconds(self, kwargs: dict[str, Any]) -> float:
         raw = kwargs.get("sleep_seconds")
@@ -53,6 +69,20 @@ class FakeProvider(MissiveProviderBase):
         except (TypeError, ValueError):
             return 0
         return seconds if seconds > 0 else 0
+
+    def _failure_rate(self, kwargs: dict[str, Any]) -> float:
+        raw = kwargs.get("failure_rate")
+        if raw is None:
+            raw = self._get_config_or_env("FAILURE_RATE", DEFAULT_FAILURE_RATE)
+        try:
+            rate = float(raw)
+        except (TypeError, ValueError):
+            return 0
+        if rate <= 0:
+            return 0
+        if rate >= 1:
+            return 1
+        return rate
 
     def _send(self, missive_type: str, **kwargs: Any) -> dict[str, Any]:
         if not is_fake_provider_allowed() and not is_force_fake_provider():
@@ -66,6 +96,15 @@ class FakeProvider(MissiveProviderBase):
         if seconds:
             logger.info("fake send_%s %ss", missive_type, seconds)
             time.sleep(seconds)
+        if self._failure_rate(kwargs) > random.random():  # nosec B311
+            logger.info("fake send_%s failed", missive_type)
+            return {
+                "event": "failed",
+                "code": 500,
+                "message": "Fake send failed",
+                "event_date": datetime.now(timezone.utc).isoformat(),
+                "service": f"send_{missive_type}",
+            }
         return {
             "id": external_id,
             "external_id": external_id,

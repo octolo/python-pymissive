@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.4 — 2026-11-04
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.8.4,<2`.
+
+### Changes
+
+- The fake provider can refuse a send at random (`FAILURE_RATE`, default `0.1`)
+  before any webhook. A refused send returns no `external_id`, so the missive
+  is recorded as an error. Set `FAKE_FAILURE_RATE` or `failure_rate` to change
+  the chance; `0` disables it.
+
 ## 1.8.3 — 2026-11-04
 
 ### Compatibility
