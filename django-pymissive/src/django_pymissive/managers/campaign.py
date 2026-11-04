@@ -203,19 +203,27 @@ def target_count_expr(condition):
 
 
 def target_value_count_expr(missive_type: str):
-    """Stored contact values on active campaign targets of one missive type."""
-    from ..managers.campaign_target import JSONListLength
-    from ..models.campaign_target import CampaignRecipientTarget
+    """Stored contact values on active campaign targets of one missive type.
 
-    count = (
-        CampaignRecipientTarget._base_manager.filter(
-            target__campaign_id=OuterRef("pk"),
-            target__missive_type=missive_type,
-            target__missive__isnull=True,
-            target__abandoned_at__isnull=True,
+    The selection rows are an ``IN`` subquery, so this counter does not join
+    the selection table into the campaign query.
+    """
+    from ..managers.campaign_target import JSONListLength
+    from ..models.campaign_target import CampaignRecipientTarget, CampaignTarget
+
+    active_targets = (
+        CampaignTarget.objects.filter(
+            CampaignTarget.active_q(),
+            campaign_id=OuterRef(OuterRef("pk")),
+            missive_type=missive_type,
         )
         .order_by()
-        .values("target__campaign_id")
+        .values("pk")
+    )
+    count = (
+        CampaignRecipientTarget._base_manager.filter(target_id__in=Subquery(active_targets))
+        .order_by()
+        .values(group=Value(1, output_field=models.IntegerField()))
         .annotate(n=models.Sum(JSONListLength("values")))
         .values("n")
     )
@@ -235,6 +243,7 @@ def related_count_annotations() -> dict:
 
     ``count_target_pending_<type>`` is the checkbox on one channel: selection
     rows that still have no missive and are not abandoned.
+    ``count_target_<type>`` sums the stored contact values of those rows.
     ``count_target_abandoned`` counts the rows given up without a missive.
     ``count_target_pending`` is not here: it is the sum of the per-type
     counters, added in a second ``annotate`` so it does not scan again.
