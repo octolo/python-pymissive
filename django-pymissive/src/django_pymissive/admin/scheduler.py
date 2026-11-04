@@ -80,6 +80,18 @@ class CancelRunForm(forms.Form):
     )
 
 
+class ForceReleaseRunForm(forms.Form):
+    reason = forms.CharField(
+        label=_("Reason"),
+        required=False,
+        help_text=_(
+            "Use this only after confirming that the worker is dead. "
+            "A worker still sending can cause duplicate deliveries."
+        ),
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+
+
 _SCHEDULED_CAMPAIGN_INLINE_FIELDSETS: _FieldsetSpec = (
     (
         None,
@@ -260,6 +272,7 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
     changeform_actions = {
         "start_campaign": _("Start campaign"),
         "cancel_run": _("Cancel send"),
+        "force_release_run": _("Force release"),
         "reschedule": _("Reschedule"),
         "duplicate": _("Duplicate"),
     }
@@ -271,6 +284,9 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
 
     def has_cancel_run_permission(self, request, obj=None):
         return bool(self.has_action_rights(request, obj) and obj and obj.pk and obj.is_running and not obj.cancelled_at)
+
+    def has_force_release_run_permission(self, request, obj=None):
+        return bool(self.has_action_rights(request, obj) and obj and obj.pk and obj.is_running)
 
     def has_reschedule_permission(self, request, obj=None):
         return bool(self.has_action_rights(request, obj) and obj and obj.pk and not obj.can_send)
@@ -319,6 +335,30 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
             )
         else:
             messages.error(request, _("Only a send in progress can be cancelled."))
+        return self.redirect_to_change(obj)
+
+    @admin_boost_action("force_release_run", _("Force release"))
+    def handle_force_release_run(self, request, object_id):
+        return self.redirect_to_boost_view(request, object_id, "force_release_run")
+
+    @admin_boost_view("adminform", _("Force release"), hidden=True)
+    def force_release_run(self, request, obj, form=None):
+        self.require_action_rights(request, obj)
+        if form is None:
+            return {
+                "form": ForceReleaseRunForm(),
+                "save_label": _("Force release"),
+                "has_change_permission": True,
+            }
+        try:
+            reopened = obj.force_release(form.cleaned_data["reason"])
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+        else:
+            messages.success(
+                request,
+                _("Run released; %(count)s processing missive(s) reopened.") % {"count": reopened},
+            )
         return self.redirect_to_change(obj)
 
     @admin_boost_action("reschedule", _("Reschedule"))

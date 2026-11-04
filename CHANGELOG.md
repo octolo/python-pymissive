@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.3 — 2026-11-04
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.8.3,<2`.
+
+### Changes
+
+- A crashed campaign run can be force-released from the scheduler admin, a task
+  backend, or `manage.py force_release_run`. The run is ended and unaccepted
+  `PROCESSING` missives return to `DRAFT`. Missives that already have an
+  `external_id` stay as they are.
+
 ## 1.8.2 — 2026-11-04
 
 ### Compatibility

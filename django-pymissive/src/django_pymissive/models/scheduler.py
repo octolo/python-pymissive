@@ -1097,6 +1097,36 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             self.cancel_reason = reason
         return bool(updated)
 
+    def force_release(self, reason: str = "") -> int:
+        """End this run and reopen claims left by a worker known to be dead.
+
+        Returns the number of ``PROCESSING`` missives reset to ``DRAFT``.
+        Provider-accepted missives (those with an ``external_id``) are never
+        reopened, because sending them again could duplicate a delivery.
+        """
+        from .missive import Missive
+
+        with transaction.atomic():
+            run = type(self).objects.select_for_update().get(pk=self.pk)
+            if not run.is_running:
+                raise ValidationError(_("Only a send in progress can be force-released."))
+
+            error = reason.strip() or str(_("Run force-released manually."))
+            run._finalize_run(error)
+            reopened = (
+                Missive._base_manager.filter(
+                    scheduler=run,
+                    status=MissiveStatus.PROCESSING,
+                    thread_type=MissiveThreadType.MISSIVE,
+                )
+                .filter(models.Q(external_id__isnull=True) | models.Q(external_id=""))
+                .update(status=MissiveStatus.DRAFT, updated_at=timezone.now())
+            )
+
+        self.ended_at = run.ended_at
+        self.additional_config = run.additional_config
+        return reopened
+
     def checkpoint(self) -> bool:
         """Heartbeat, then tell whether the worker must stop.
 
