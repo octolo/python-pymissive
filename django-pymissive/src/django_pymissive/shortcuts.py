@@ -33,7 +33,7 @@ Usage::
         sender_name="Octolo",
         and_send=False,
     )
-    missive.send_missive()
+    missive.dispatch_send()
 """
 
 from __future__ import annotations
@@ -163,7 +163,7 @@ def send_missive(
                 )
         extra_recipient_fields: Extra kwargs forwarded verbatim to the
             recipient ``create(…)`` call.
-        and_send: When ``True`` (default) call ``missive.send_missive()``
+        and_send: When ``True`` (default) call ``missive.dispatch_send()``
             immediately after creating the DB rows.  Pass ``False`` to only
             stage the missive for deferred / batch sending.
 
@@ -235,7 +235,7 @@ def send_missive(
     recipient_cls.objects.create(**recipient_kwargs)
 
     if and_send:
-        missive.send_missive()
+        missive.dispatch_send()
 
     return missive
 

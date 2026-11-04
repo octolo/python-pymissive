@@ -446,3 +446,37 @@ def test_can_send_without_a_type_check_requires_recipients():
         assert missive.can_send() is False
         MissiveRecipientApplication.objects.create(missive=missive, name="chan")
         assert missive.can_send() is True
+
+
+def test_dispatch_send_calls_send_missive_when_the_flag_is_off():
+    missive = _email_missive()
+    with patch.object(Missive, "send_missive") as send:
+        missive.dispatch_send()
+    send.assert_called_once_with(old_missive=None)
+
+
+def test_dispatch_send_queues_a_task_when_the_flag_is_on():
+    missive = _email_missive()
+    missive.send_via_task = True
+    missive.save(update_fields=["send_via_task"])
+    queued = []
+
+    class _Queue:
+        def enqueue(self, func, *args, **kwargs):
+            queued.append((func, args))
+
+    with (
+        patch("django_pymissive.task.get_task_backend", return_value=_Queue()),
+        patch.object(Missive, "send_missive") as send,
+    ):
+        missive.dispatch_send()
+
+    send.assert_not_called()
+    assert len(queued) == 1
+    func, args = queued[0]
+    assert args == (str(missive.pk), None)
+
+    with patch.object(Missive, "send_missive") as send:
+        func(*args)
+
+    send.assert_called_once_with(old_missive=None)

@@ -442,6 +442,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
                 "acknowledgement",
                 "delivery_mode",
                 "priority",
+                "send_via_task",
             ],
         )
         self.add_to_fieldset(
@@ -599,6 +600,9 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         if waiting:
             return waiting
         new_missive = obj.resend_missive()
+        if new_missive.send_via_task:
+            messages.success(request, _("Missive queued for sending."))
+            return self.redirect_to_change(new_missive)
         new_missive.refresh_from_db()
         if new_missive.status == MissiveStatus.ERROR:
             messages.error(
@@ -627,6 +631,10 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         waiting = self.confirm_action(request, obj, confirmed, _("Are you sure you want to send this missive?"))
         if waiting:
             return waiting
+        if obj.send_via_task:
+            obj.dispatch_send()
+            messages.success(request, _("Missive queued for sending."))
+            return self.redirect_to_change(obj)
         obj.send_missive()
         obj.refresh_from_db()
         if obj.status == MissiveStatus.ERROR:

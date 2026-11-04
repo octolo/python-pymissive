@@ -146,6 +146,14 @@ def pending_target_type_annotations() -> dict:
     }
 
 
+def target_value_type_annotations() -> dict:
+    """``count_target_<type>`` for stored contact values on active targets."""
+    return {
+        f"count_target_{type_key}": target_value_count_expr(type_key)
+        for type_key in MISSIVE_TYPES
+    }
+
+
 def pending_target_total_expr():
     """``count_target_pending`` as the sum of the per-type counters.
 
@@ -155,6 +163,17 @@ def pending_target_total_expr():
     from django.db.models.expressions import CombinedExpression
 
     parts = [F(f"count_target_pending_{type_key}") for type_key in MISSIVE_TYPES]
+    total: F | CombinedExpression = parts[0]
+    for part in parts[1:]:
+        total = total + part
+    return total
+
+
+def target_value_total_expr():
+    """``count_target`` as the sum of the per-type stored contact values."""
+    from django.db.models.expressions import CombinedExpression
+
+    parts = [F(f"count_target_{type_key}") for type_key in MISSIVE_TYPES]
     total: F | CombinedExpression = parts[0]
     for part in parts[1:]:
         total = total + part
@@ -183,6 +202,29 @@ def target_count_expr(condition):
     )
 
 
+def target_value_count_expr(missive_type: str):
+    """Stored contact values on active campaign targets of one missive type."""
+    from ..managers.campaign_target import JSONListLength
+    from ..models.campaign_target import CampaignRecipientTarget
+
+    count = (
+        CampaignRecipientTarget._base_manager.filter(
+            target__campaign_id=OuterRef("pk"),
+            target__missive_type=missive_type,
+            target__missive__isnull=True,
+            target__abandoned_at__isnull=True,
+        )
+        .order_by()
+        .values("target__campaign_id")
+        .annotate(n=models.Sum(JSONListLength("values")))
+        .values("n")
+    )
+    return Coalesce(
+        Subquery(count, output_field=models.IntegerField()),
+        Value(0),
+    )
+
+
 def related_count_annotations() -> dict:
     """The counters that each walk a relation of their own.
 
@@ -203,6 +245,7 @@ def related_count_annotations() -> dict:
         "count_related_object": models.Count("to_campaignrelatedobject", distinct=True),
         "count_attachment": models.Count("to_campaigndocument", distinct=True),
         **pending_target_type_annotations(),
+        **target_value_type_annotations(),
         "count_target_abandoned": target_count_expr(Q(abandoned_at__isnull=False)),
         **{
             f"count_recipient_{status.value.lower()}": models.Count(
@@ -242,6 +285,7 @@ def derived_count_annotations() -> dict:
     """Counters that read annotations declared in the first ``annotate``."""
     return {
         "count_target_pending": pending_target_total_expr(),
+        "count_target": target_value_total_expr(),
         **pct_annotations(),
     }
 
@@ -302,6 +346,8 @@ class MissiveCampaignQuerySet(models.QuerySet):
                     wanted |= {"count_recipient", name.replace("pct_", "count_", 1)}
             if "count_target_pending" in derived:
                 wanted.update(pending_target_type_annotations())
+            if "count_target" in derived:
+                wanted.update(target_value_type_annotations())
             counters = {key: value for key, value in counters.items() if key in wanted}
         return self.annotate(
             **counters,

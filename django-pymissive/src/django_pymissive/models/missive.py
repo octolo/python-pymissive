@@ -193,6 +193,11 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         verbose_name=_("Priority"),
         help_text=_("Priority level"),
     )
+    send_via_task = models.BooleanField(
+        default=False,
+        verbose_name=_("Send via task"),
+        help_text=_("Queue the send on the campaign task backend. Leave off to send immediately."),
+    )
     duplex_printing = models.BooleanField(
         default=True,
         verbose_name=_("Duplex printing"),
@@ -1415,7 +1420,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                 resend=True,
                 sync_campaign=sync_campaign,
             )
-        new_missive.send_missive(old_missive=self)
+        new_missive.dispatch_send(old_missive=self)
         return new_missive
 
     def duplicate_attachments(self, new_missive, source_missive):
@@ -1593,6 +1598,21 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def last_send_error(self) -> str:
         """Return the last send failure message, if any."""
         return (self.additional_config or {}).get("last_error") or ""
+
+    def dispatch_send(self, *, old_missive=None):
+        """Send this missive now, or queue that send when ``send_via_task`` is set.
+
+        The queued task calls :meth:`send_missive`. With the flag off, this
+        calls :meth:`send_missive` directly.
+        """
+        if not self.send_via_task:
+            self.send_missive(old_missive=old_missive)
+            return
+        from ..task import get_task_backend
+        from ..task.missive import send_missive
+
+        old_missive_id = str(old_missive.pk) if old_missive is not None else None
+        get_task_backend().enqueue(send_missive, str(self.pk), old_missive_id)
 
     def send_missive(self, *, old_missive=None):
         """Send the missive.

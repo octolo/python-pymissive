@@ -28,6 +28,7 @@ from ..managers.scheduler import (
 )
 from ..models.choices import MissiveStatus, MissiveThreadType, MissiveType, sent_missive_q
 from ..models.missive import MissiveAlreadySending
+from ..models.mixins import CommentTimestampedModel
 from ..utils import (
     get_progress_hooks,
     is_import_allowed,
@@ -36,7 +37,6 @@ from ..utils import (
     stale_processing_cutoff,
     validate_import_paths,
 )
-from ..models.mixins import CommentTimestampedModel
 
 logger = logging.getLogger(__name__)
 

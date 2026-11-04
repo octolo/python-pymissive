@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 
 import pytest
 
@@ -855,6 +855,51 @@ def test_campaign_counts_targets_still_without_a_missive():
 
 
 @pytest.mark.django_db
+def test_campaign_counts_stored_contacts_on_active_targets():
+    from django_pymissive.models import CampaignRecipientTarget
+
+    campaign = _campaign()
+    ada = _contact("ada@example.com")
+    grace = _contact("grace@example.com", first="Grace")
+    select(campaign, "email", [ada, grace])
+    select(campaign, "sms", ada)
+    email_targets = CampaignTarget.objects.filter(
+        campaign=campaign,
+        missive_type=MissiveType.EMAIL,
+    ).order_by("pk")
+    CampaignRecipientTarget.objects.create(
+        target=email_targets[0],
+        values=["ada@example.com", "ada.work@example.com"],
+    )
+    CampaignRecipientTarget.objects.create(
+        target=email_targets[1],
+        values=["grace@example.com"],
+    )
+    CampaignRecipientTarget.objects.create(
+        target=CampaignTarget.objects.get(campaign=campaign, missive_type=MissiveType.SMS),
+        values=["+33612345678"],
+    )
+
+    annotated = MissiveCampaign.objects.with_counts(
+        "count_target",
+        "count_target_email",
+        "count_target_sms",
+    ).get(pk=campaign.pk)
+
+    assert annotated.count_target_email == 3
+    assert annotated.count_target_sms == 1
+    assert annotated.count_target == 4
+
+    email_targets[1].abandon("removed")
+    refreshed = MissiveCampaign.objects.with_counts(
+        "count_target",
+        "count_target_email",
+    ).get(pk=campaign.pk)
+    assert refreshed.count_target_email == 2
+    assert refreshed.count_target == 3
+
+
+@pytest.mark.django_db
 def test_campaign_contact_selects_and_builds_email_or_sms():
     campaign = _campaign()
     ada = create_campaign_contact(
@@ -1098,6 +1143,36 @@ def test_targets_lists_the_contacts_that_stay_checked(settings):
         ("ada.home@example.com", MissiveRecipientType.RECIPIENT),
         ("copy@example.com", MissiveRecipientType.CC),
     ]
+
+
+@pytest.mark.django_db
+def test_with_target_count_counts_stored_contact_lists():
+    from django_pymissive.models import CampaignRecipientTarget
+    from django_pymissive.models.choices import MissiveRecipientType
+
+    campaign = _campaign()
+    ada = create_campaign_contact("Ada", "Lovelace", emails=["ada@example.com"])
+    grace = create_campaign_contact("Grace", "Hopper", emails=["grace@example.com"])
+    select(campaign, "email", [ada, grace])
+    ada_target, grace_target = CampaignTarget.objects.filter(campaign=campaign).order_by("pk")
+    CampaignRecipientTarget.objects.create(
+        target=ada_target,
+        recipient_type=MissiveRecipientType.RECIPIENT,
+        values=["ada@example.com", "ada.work@example.com"],
+    )
+    CampaignRecipientTarget.objects.create(
+        target=ada_target,
+        recipient_type=MissiveRecipientType.CC,
+        values=["copy@example.com"],
+    )
+
+    targets = CampaignTarget.objects.filter(campaign=campaign).with_target_count().order_by("pk")
+
+    assert [(target.pk, target.target_count) for target in targets] == [
+        (ada_target.pk, 3),
+        (grace_target.pk, 0),
+    ]
+    assert targets.aggregate(total=models.Sum("target_count"))["total"] == 3
 
 
 @pytest.mark.django_db

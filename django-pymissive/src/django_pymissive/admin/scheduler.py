@@ -5,18 +5,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
-from django.forms.models import BaseInlineFormSet
 from django.forms.formsets import DELETION_FIELD_NAME
+from django.forms.models import BaseInlineFormSet
+from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils import formats, timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.translation import gettext_lazy as _
-from django.contrib import messages
-from django.shortcuts import redirect
 from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
-from django_boosted.decorators import admin_boost_view, admin_boost_action  # type: ignore[import-untyped]
+from django_boosted.decorators import admin_boost_action, admin_boost_view  # type: ignore[import-untyped]
 from pymissive.config import MISSIVE_TYPES
 
 from ..managers.scheduler import MissiveScheduledCampaignQuerySet

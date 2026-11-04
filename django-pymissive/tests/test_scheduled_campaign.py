@@ -22,16 +22,16 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.test import override_settings
 from django.utils import timezone
-
 from django_pymissive.managers.scheduler import count_annotations
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.choices import MissiveEventType, MissiveStatus, MissiveThreadType
+from django_pymissive.models.event import MissiveEvent
+from django_pymissive.models.missive import Missive
 from django_pymissive.models.scheduler import (
     MissiveScheduledCampaign,
     format_average_send_speed,
 )
-from django_pymissive.models.choices import MissiveEventType, MissiveStatus, MissiveThreadType
-from django_pymissive.models.event import MissiveEvent
-from django_pymissive.models.missive import Missive
+
 from tests.fakeapp.models import Contact
 
 pytestmark = pytest.mark.django_db

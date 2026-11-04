@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.8.2 — 2026-11-04
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.8.2,<2`.
+- Apply migration `0035_missive_send_via_task`.
+
+### Changes
+
+- A missive can set `send_via_task` to queue its send on the campaign task
+  backend. `dispatch_send` sends immediately when the flag is off and enqueues
+  `send_missive` when it is on. Admin send, duplication, campaign target
+  sends, and the `send_missive` shortcut use `dispatch_send`.
+- A campaign exposes `count_target_<type>` for the stored contact values on
+  active targets of each missive type. `count_target` is the sum of those
+  counters. `CampaignTargetQuerySet.with_target_count()` annotates the same
+  count on each target.
+
 ## 1.8.1 — 2026-10-29
 
 ### Compatibility

@@ -178,7 +178,7 @@ def send_target(campaign, target, missive_type: str, *, build=None) -> None:
         raise ValidationError(
             _("This target has no reachable recipient on this channel."),
         )
-    missive.send_missive()
+    missive.dispatch_send()
 
 
 def generate_target(row):

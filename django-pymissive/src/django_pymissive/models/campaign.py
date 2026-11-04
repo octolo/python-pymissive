@@ -10,13 +10,16 @@ from django.db.models.deletion import ProtectedError
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_geoaddress.fields import GeoaddressField
+from namedid import NamedIDField
+from phonenumber_field.modelfields import PhoneNumberField
 
+from ..fields import JSONField, RichTextField
 from ..managers.campaign import (
     MissiveCampaignManager,
     MissiveCampaignQuerySet,
     count_annotation_names,
 )
-from ..models.mixins import CommentTimestampedModel, ConfigMixin, ProcessorsMixin
 from ..models.choices import (
     AcknowledgementLevel,
     MissiveDeliveryMode,
@@ -25,10 +28,7 @@ from ..models.choices import (
     MissiveThreadType,
     sent_missive_q,
 )
-from django_geoaddress.fields import GeoaddressField
-from namedid import NamedIDField
-from phonenumber_field.modelfields import PhoneNumberField
-from ..fields import JSONField, RichTextField
+from ..models.mixins import CommentTimestampedModel, ConfigMixin, ProcessorsMixin
 from ..utils import (
     CAMPAIGN_SENDER_NAME_FIELDS,
     SENDER_CONTACT_FIELDS,
@@ -407,8 +407,9 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     @property
     def attachments(self):
         """Campaign-level attachments (ATTACHMENT + VIRTUAL_ATTACHMENT)."""
-        from .choices import MissiveAttachmentType
         from django.db.models import Q
+
+        from .choices import MissiveAttachmentType
 
         return self.to_campaigndocument.filter(
             Q(attachment_type=MissiveAttachmentType.ATTACHMENT)
@@ -618,6 +619,7 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """
         from django.db.models import Count
         from pymissive.config import MISSIVE_TYPES
+
         from ..models.choices import error_missive_q
         from ..models.missive import Missive
 
