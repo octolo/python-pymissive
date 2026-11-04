@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.5 — 2026-11-04
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.8.5,<2`.
+
+### Changes
+
+- After a local `submitted` event, each recipient and the missive recompute
+  their status. Recipients no longer stay `draft` until a webhook or a status
+  retrieval.
+
 ## 1.8.4 — 2026-11-04
 
 ### Compatibility

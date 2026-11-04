@@ -24,6 +24,7 @@ from django_pymissive.models import (
     MissiveEvent,
     MissiveEventType,
     MissiveRecipientApplication,
+    MissiveRecipientEmail,
     MissiveStatus,
 )
 from django_pymissive.models.choices import MissiveType
@@ -51,6 +52,7 @@ def test_dry_run_skips_provider(settings):
     settings.PYMISSIVE_DRY_RUN = True
     settings.PYMISSIVE_DISABLE_SEND = False
     missive = _email_missive()
+    recipient = MissiveRecipientEmail.objects.create(missive=missive, email="recipient@example.com")
 
     with (
         patch.object(Missive, "can_send", return_value=True),
@@ -61,7 +63,10 @@ def test_dry_run_skips_provider(settings):
 
     call_provider.assert_not_called()
     missive.refresh_from_db()
+    recipient.refresh_from_db()
     assert missive.external_id == f"dry-run:{missive.thread_id}"
+    assert missive.status == MissiveStatus.PROCESSING
+    assert recipient.status == MissiveStatus.PROCESSING
     events = _events(missive)
     assert len(events) == 1
     assert events[0].event == MissiveEventType.SUBMITTED
@@ -72,6 +77,7 @@ def test_disable_send_calls_provider_and_records_request(settings):
     settings.PYMISSIVE_DRY_RUN = False
     settings.PYMISSIVE_DISABLE_SEND = True
     missive = _email_missive()
+    recipient = MissiveRecipientEmail.objects.create(missive=missive, email="recipient@example.com")
 
     disabled_response = {
         "external_id": None,
@@ -92,7 +98,9 @@ def test_disable_send_calls_provider_and_records_request(settings):
     assert call_provider.call_args.args[0] == "send"
 
     missive.refresh_from_db()
+    recipient.refresh_from_db()
     assert missive.status == MissiveStatus.PROCESSING
+    assert recipient.status == MissiveStatus.PROCESSING
     events = _events(missive)
     assert len(events) == 1
     assert events[0].event == MissiveEventType.SUBMITTED
@@ -129,6 +137,7 @@ def test_real_send_uses_provider_response(settings):
     settings.PYMISSIVE_DRY_RUN = False
     settings.PYMISSIVE_DISABLE_SEND = False
     missive = _email_missive()
+    recipient = MissiveRecipientEmail.objects.create(missive=missive, email="recipient@example.com")
 
     response = {
         "external_id": "ext-123",
@@ -148,7 +157,10 @@ def test_real_send_uses_provider_response(settings):
     assert call_provider.call_args.args[0] == "send"
 
     missive.refresh_from_db()
+    recipient.refresh_from_db()
     assert missive.external_id == "ext-123"
+    assert missive.status == MissiveStatus.PROCESSING
+    assert recipient.status == MissiveStatus.PROCESSING
     events = _events(missive)
     assert len(events) == 1
     assert events[0].event == MissiveEventType.SUBMITTED

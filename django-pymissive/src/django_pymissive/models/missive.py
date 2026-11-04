@@ -1839,6 +1839,9 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                     client_initiated=True,
                     occurred_at=occurred_at,
                 )
+                if recipient is not None:
+                    recipient.set_status()
+        self.set_status()
 
     def set_status(self):
         from ..models.event import MissiveEvent
