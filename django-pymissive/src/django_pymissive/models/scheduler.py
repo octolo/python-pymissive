@@ -40,6 +40,9 @@ from ..utils import (
 
 logger = logging.getLogger(__name__)
 
+#: ``get_missives`` / ``process_missives`` default: do not filter on a step.
+_ANY_STEP = object()
+
 MISSIVE_TYPE_ALL = "*"
 
 
@@ -733,8 +736,15 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             update_fields.append("additional_config")
         self.save(update_fields=update_fields)
 
-    def get_missives(self):
+    def get_missives(self, *, campaign_step=_ANY_STEP):
         """Return the queryset of DRAFT missives to process for this run.
+
+        *campaign_step* limits the queryset to that step. ``None`` keeps the
+        drafts that have no step. The default returns every draft of the run.
+
+        When the campaign has steps and no step was asked for, the order is
+        the step position, then the primary key. A run can stop and resume
+        without changing that order.
 
         When missives were bulk-attached to the run via the ``scheduler`` FK
         (see :meth:`MissiveCampaign.start_campaign`), we query through that
@@ -760,7 +770,24 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             qs = self.campaign.claimable_send_queryset()
         if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
             qs = qs.filter(missive_type=self.missive_type)
+        if campaign_step is None:
+            qs = qs.filter(campaign_step__isnull=True).order_by("pk")
+        elif campaign_step is not _ANY_STEP:
+            qs = qs.filter(campaign_step=campaign_step).order_by("pk")
+        elif self._campaign_has_steps():
+            from django.db.models import F
+
+            qs = qs.order_by(F("campaign_step__position").asc(nulls_last=True), "pk")
         return qs
+
+    def _campaign_has_steps(self) -> bool:
+        from .campaign_step import CampaignStep
+
+        cache = self.__dict__.get("_campaign_has_steps_cache")
+        if cache is None:
+            cache = CampaignStep.objects.filter(campaign_id=self.campaign_id).exists()
+            self.__dict__["_campaign_has_steps_cache"] = cache
+        return cache
 
     @staticmethod
     def claim_missive(missive) -> bool:
@@ -803,7 +830,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             return 1
         return max(1, (total + steps - 1) // steps)
 
-    def process_missives(self, send_fn=None) -> list:
+    def process_missives(self, send_fn=None, *, campaign_step=_ANY_STEP) -> list:
         """Send each DRAFT missive best-effort.
 
         ``send_fn(missive)`` defaults to ``missive.send_missive()``, which
@@ -833,7 +860,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             def send_fn(missive):
                 missive.send_missive()
 
-        pks = list(self.get_missives().values_list("pk", flat=True))
+        pks = list(self.get_missives(campaign_step=campaign_step).values_list("pk", flat=True))
         hooks = self.resolve_progress_hooks()
         total = len(pks)
         stride = self._progress_stride(total)
@@ -911,7 +938,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         Live sends only: archived attempts are already retried through their
         replacement, and a failed conversation message is not a campaign send.
         """
-        base_qs = self.campaign.to_missive.filter(
+        base_qs = self.campaign.missive_queryset().filter(
             thread_type=MissiveThreadType.MISSIVE,
             status__in=ERROR_STATUSES,
         )

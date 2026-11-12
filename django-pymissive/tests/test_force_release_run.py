@@ -12,6 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from django_pymissive.models import (
+    CampaignStep,
     Missive,
     MissiveCampaign,
     MissiveScheduledCampaign,
@@ -35,8 +36,13 @@ def _running_run():
 
 
 def _processing(campaign, run, *, external_id=None):
-    return Missive.objects.create(
+    step, _created = CampaignStep.objects.get_or_create(
         campaign=campaign,
+        missive_type="email",
+        defaults={"position": 1},
+    )
+    return Missive.objects.create(
+        campaign_step=step,
         scheduler=run,
         missive_type="email",
         subject="Queued",

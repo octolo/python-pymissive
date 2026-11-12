@@ -142,6 +142,14 @@ class MissiveBaseAttachment(CommentTimestampedModel):
         help_text=_("Campaign to which this file is attached"),
     )
 
+    campaign_step = models.ManyToManyField(
+        "django_pymissive.CampaignStep",
+        related_name="attachments",
+        blank=True,
+        verbose_name=_("Campaign steps"),
+        help_text=_("Campaign steps that use this file. Empty makes it available to every step."),
+    )
+
     missive = models.ForeignKey(
         "django_pymissive.Missive",
         on_delete=models.CASCADE,

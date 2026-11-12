@@ -1,4 +1,5 @@
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep, PostalCampaignStep
 from django_pymissive.models.missive import Missive
 
 
@@ -25,29 +26,41 @@ def test_snapshot_read_more_length_defaults_for_invalid_setting(settings):
     assert excerpt.endswith("…</p>")
 
 
-def test_campaign_exposes_read_more_for_each_rich_snapshot(settings):
+def test_campaign_and_steps_expose_read_more_for_rich_snapshots(settings):
     settings.PYMISSIVE_SNAPSHOT_HTML_READ_MORE_LENGTH = 5
     campaign = MissiveCampaign(
         subject="Campaign",
         description_snapshot_html="<p>Description</p>",
-        email_body_rich_snapshot_html="<p>Email body</p>",
-        phone_body_rich_snapshot_html="<p>Phone body</p>",
-        first_document_snapshot_html="<p>First document</p>",
+    )
+    email = CampaignStep(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        body_rich_snapshot_html="<p>Email body</p>",
+    )
+    postal = PostalCampaignStep(
+        campaign=campaign,
+        position=2,
+        missive_type="letter",
+        body_rich_snapshot_html="<p>First document</p>",
     )
 
     assert campaign.description_snapshot_html_read_more == "<p>Desc…</p>"
-    assert campaign.email_body_rich_snapshot_html_read_more == "<p>Emai…</p>"
-    assert campaign.phone_body_rich_snapshot_html_read_more == "<p>Phon…</p>"
-    assert campaign.first_document_snapshot_html_read_more == "<p>Firs…</p>"
+    assert email.body_rich_snapshot_html_read_more == "<p>Emai…</p>"
+    assert postal.first_document_snapshot_html_read_more == "<p>Firs…</p>"
 
 
-def test_missive_resolves_snapshot_from_campaign():
-    campaign = MissiveCampaign(
-        subject="Campaign",
-        email_body_rich_snapshot_html="<p>Email snapshot</p>",
+def test_missive_resolves_snapshot_from_campaign_step():
+    campaign = MissiveCampaign(subject="Campaign")
+    step = CampaignStep(
+        id=1,
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        body_rich_snapshot_html="<p>Email snapshot</p>",
     )
     missive = Missive(
-        campaign=campaign,
+        campaign_step=step,
         missive_type="email",
         missive_support="email",
     )

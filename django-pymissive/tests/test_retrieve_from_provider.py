@@ -393,16 +393,22 @@ def test_refresh_from_provider_keeps_metadata_context_and_processors():
     from django.contrib.contenttypes.models import ContentType
 
     from django_pymissive.models.campaign import MissiveCampaign
+    from django_pymissive.models.campaign_step import CampaignStep
     from django_pymissive.models.related_object import MissiveRelatedObject
     from django_pymissive.models.scheduler import MissiveScheduledCampaign
     from tests.fakeapp.models import PdfDocument
 
     campaign = MissiveCampaign.objects.create(subject="Camp")
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+    )
     scheduler = MissiveScheduledCampaign.objects.create(campaign=campaign)
     processors = ["django_pymissive.processors.body.django_template.django_template_processor"]
     missive = _email_missive(
         external_id="ext-config",
-        campaign=campaign,
+        campaign_step=step,
         scheduler=scheduler,
         metadata={"source": "local"},
         additional_context={"foo": "bar"},

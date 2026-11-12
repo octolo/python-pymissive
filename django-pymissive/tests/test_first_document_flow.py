@@ -205,19 +205,21 @@ def test_ensure_first_document_skips_unsaved_missive(settings):
     )
 
 
-def test_first_document_compiled_reads_campaign_first_document(settings):
+def test_first_document_compiled_reads_postal_step_body(settings):
     settings.PYMISSIVE_DEFAULT_BODY_PROCESSORS = []
     from django_pymissive.models.campaign import MissiveCampaign
+    from django_pymissive.models.campaign_step import CampaignStep
     from django_pymissive.views.preview import missive_for_campaign_preview
 
-    campaign = MissiveCampaign.objects.create(
-        subject="Camp",
-        first_document="<p>campaign letter</p>",
-        email_body_rich="<p>email body</p>",
+    campaign = MissiveCampaign.objects.create(subject="Camp")
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type="letter",
+        body_rich="<p>campaign letter</p>",
     )
-    missive = missive_for_campaign_preview(campaign, "postal")
+    missive = missive_for_campaign_preview(campaign, "postal", campaign_step=step)
     assert "campaign letter" in missive.first_document_compiled
-    assert "email body" not in missive.first_document_compiled
 
 
 def test_ensure_first_document_skips_non_postal(settings):

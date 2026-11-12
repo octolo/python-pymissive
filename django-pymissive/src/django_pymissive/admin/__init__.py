@@ -12,6 +12,7 @@ from .attachment import (
     CampaignVirtualAttachmentInline,
 )
 from .campaign import MissiveCampaignAdmin
+from .campaign_step import CampaignStepAdmin
 from .campaign_target import CampaignTargetAdmin
 from .scheduler import MissiveScheduledCampaignAdmin, MissiveScheduledCampaignInline
 from .event import MissiveEventAdmin
@@ -34,6 +35,7 @@ __all__ = [
     "MissiveConfigAdmin",
     "ProviderAdmin",
     "MissiveCampaignAdmin",
+    "CampaignStepAdmin",
     "CampaignTargetAdmin",
     "MissiveScheduledCampaignAdmin",
     "MissiveScheduledCampaignInline",

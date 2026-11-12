@@ -92,7 +92,7 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
         "missive_type",
         "created_at",
     ]
-    list_select_related = ("campaign", "content_type", "missive")
+    list_select_related = ("campaign", "campaign_step", "content_type", "missive")
     search_fields = [
         "object_str",
         "object_id",
@@ -109,7 +109,7 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
         "created_at",
         "updated_at",
     ]
-    raw_id_fields = ["campaign", "missive"]
+    raw_id_fields = ["campaign", "campaign_step", "missive"]
     actions = ["abandon_selected"]
 
     def change_fieldsets(self):
@@ -118,6 +118,7 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
             None,
             [
                 "campaign",
+                "campaign_step",
                 "missive_type",
                 "content_type",
                 "object_id",

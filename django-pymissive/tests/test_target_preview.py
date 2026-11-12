@@ -8,7 +8,7 @@ from django.urls import reverse
 
 import pytest
 
-from django_pymissive.models import CampaignTarget, Missive, MissiveCampaign, MissiveStatus, MissiveType
+from django_pymissive.models import CampaignStep, CampaignTarget, Missive, MissiveCampaign, MissiveStatus, MissiveType
 from django_pymissive.models.choices import MissiveRecipientType
 from django_pymissive.services import select
 from tests.fakeapp.models import Contact
@@ -17,11 +17,16 @@ pytestmark = pytest.mark.django_db
 
 
 def _campaign():
-    return MissiveCampaign.objects.create(
+    campaign = MissiveCampaign.objects.create(subject="Assemblée")
+    CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type=MissiveType.EMAIL,
         subject="Assemblée",
-        email_body_rich="<p>token-{{ contact.id }}</p>",
-        email_body_text="Bonjour",
+        body_rich="<p>token-{{ contact.id }}</p>",
+        body_text="Bonjour",
     )
+    return campaign
 
 
 def _staff(username, *, view=True):
@@ -34,8 +39,9 @@ def _staff(username, *, view=True):
 
 def _row():
     campaign = _campaign()
+    step = campaign.to_campaignstep.get()
     contact = Contact.objects.create(first_name="Ada", last_name="Lovelace", email="ada-preview@example.com")
-    select(campaign, "email", contact)
+    select(campaign, "email", contact, campaign_step=step)
     return CampaignTarget.objects.get(campaign=campaign), contact
 
 
@@ -76,7 +82,7 @@ def test_target_preview_is_staff_only():
 def test_target_with_a_missive_uses_that_preview():
     row, _contact = _row()
     missive = Missive.objects.create(
-        campaign=row.campaign,
+        campaign_step=row.campaign_step,
         missive_type=MissiveType.EMAIL,
         subject="Déjà rédigé",
         body_rich="<p>Déjà rédigé</p>",

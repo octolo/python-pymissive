@@ -12,6 +12,13 @@ from .attachment import (
     MissiveProof,
 )
 from .campaign import MissiveCampaign
+from .campaign_step import (
+    BrandedCampaignStep,
+    CampaignStep,
+    EmailCampaignStep,
+    PhoneCampaignStep,
+    PostalCampaignStep,
+)
 from .campaign_target import CampaignRecipientTarget, CampaignTarget
 from .scheduler import MissiveScheduledCampaign
 from .choices import (
@@ -42,6 +49,11 @@ __all__ = [
     "CampaignAttachment",
     "CampaignVirtualAttachment",
     "MissiveCampaign",
+    "BrandedCampaignStep",
+    "CampaignStep",
+    "EmailCampaignStep",
+    "PhoneCampaignStep",
+    "PostalCampaignStep",
     "CampaignRecipientTarget",
     "CampaignTarget",
     "MissiveScheduledCampaign",

@@ -156,10 +156,14 @@ def _csv_value(value) -> str:
 def billings_export_queryset(*, start_date, end_date, provider=None, missive_type=None):
     """Billings whose ``created_at`` falls in ``[start_date, end_date]``."""
     qs = (
-        MissiveBilling.objects.select_related("missive", "missive__campaign", "recipient")
+        MissiveBilling.objects.select_related(
+            "missive",
+            "missive__campaign_step__campaign",
+            "recipient",
+        )
         .prefetch_related(
             "missive__to_missiverelatedobject__content_type",
-            "missive__campaign__to_campaignrelatedobject__content_type",
+            "missive__campaign_step__campaign__to_campaignrelatedobject__content_type",
         )
         .filter(
             created_at__date__gte=start_date,

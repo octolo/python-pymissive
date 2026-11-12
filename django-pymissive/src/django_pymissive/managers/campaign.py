@@ -18,8 +18,8 @@ from ..models.choices import (
     sent_missive_q,
 )
 
-#: Lookup path to the missives, from a campaign as well as from a run.
-_M = "to_missive"
+#: Lookup path from a campaign to missives through their required step.
+_M = "to_campaignstep__to_missive"
 
 
 def support_count_name(support: str, suffix: str = "") -> str:
@@ -27,23 +27,23 @@ def support_count_name(support: str, suffix: str = "") -> str:
     return f"count_support_{support}{f'_{suffix}' if suffix else ''}"
 
 
-def missive_thread_q() -> Q:
+def missive_thread_q(lookup: str = _M) -> Q:
     """``Q`` restricting the missive join to live sends (no history/message)."""
-    return Q(**{f"{_M}__thread_type": MissiveThreadType.MISSIVE})
+    return Q(**{f"{lookup}__thread_type": MissiveThreadType.MISSIVE})
 
 
-def count_missive_expr(*conditions: Q):
+def count_missive_expr(*conditions: Q, lookup: str = _M):
     """``Count`` of the live missives narrowed by ``conditions``.
 
     Shared by :class:`MissiveCampaignManager` and
     ``MissiveScheduledCampaignQuerySet.with_counts()`` so that a counter of the
     same name means the same thing on a campaign and on one of its runs. Both
-    reach their missives through ``to_missive``.
+    reach their missives through their respective lookup paths.
     """
-    missive_q = missive_thread_q()
+    missive_q = missive_thread_q(lookup)
     for condition in conditions:
         missive_q &= condition
-    return models.Count(_M, filter=missive_q, distinct=True)
+    return models.Count(lookup, filter=missive_q, distinct=True)
 
 
 def pct_expr(cnt):
@@ -84,7 +84,7 @@ def support_count_annotations() -> dict:
 
 
 def missive_count_annotations() -> dict:
-    """The counters reached through ``to_missive`` and nothing else.
+    """Counters reached through ``to_campaignstep__to_missive``.
 
     Two families, and the difference matters:
 
@@ -133,6 +133,29 @@ def missive_count_annotations() -> dict:
             for type_key in MISSIVE_TYPES
         },
     }
+
+
+def step_count_annotations() -> dict:
+    """``count_step_<type>`` for each registered missive type."""
+    return {
+        f"count_step_{type_key}": models.Count(
+            "to_campaignstep",
+            filter=Q(to_campaignstep__missive_type=type_key),
+            distinct=True,
+        )
+        for type_key in MISSIVE_TYPES
+    }
+
+
+def step_total_expr():
+    """Total step definitions as the sum of the per-type annotations."""
+    from django.db.models.expressions import CombinedExpression
+
+    parts = [F(f"count_step_{type_key}") for type_key in MISSIVE_TYPES]
+    total: F | CombinedExpression = parts[0]
+    for part in parts[1:]:
+        total = total + part
+    return total
 
 
 def pending_target_type_annotations() -> dict:
@@ -295,6 +318,7 @@ def derived_count_annotations() -> dict:
     return {
         "count_target_pending": pending_target_total_expr(),
         "count_target": target_value_total_expr(),
+        "count_step": step_total_expr(),
         **pct_annotations(),
     }
 
@@ -308,6 +332,7 @@ def count_annotations() -> dict:
     """
     return {
         **missive_count_annotations(),
+        **step_count_annotations(),
         **related_count_annotations(),
         **derived_count_annotations(),
     }
@@ -337,7 +362,11 @@ class MissiveCampaignQuerySet(models.QuerySet):
             ValueError: for a name no counter answers to. Left through, the
                 column would silently fall back to one query per row.
         """
-        counters = {**missive_count_annotations(), **related_count_annotations()}
+        counters = {
+            **missive_count_annotations(),
+            **step_count_annotations(),
+            **related_count_annotations(),
+        }
         derived = derived_count_annotations()
         if names:
             wanted = set(names)
@@ -357,6 +386,8 @@ class MissiveCampaignQuerySet(models.QuerySet):
                 wanted.update(pending_target_type_annotations())
             if "count_target" in derived:
                 wanted.update(target_value_type_annotations())
+            if "count_step" in derived:
+                wanted.update(step_count_annotations())
             counters = {key: value for key, value in counters.items() if key in wanted}
         return self.annotate(
             **counters,
@@ -375,7 +406,7 @@ class MissiveCampaignQuerySet(models.QuerySet):
             Exists(
                 Missive._base_manager.filter(
                     sent_missive_q(),
-                    campaign_id=OuterRef("pk"),
+                    campaign_step__campaign_id=OuterRef("pk"),
                     thread_type=MissiveThreadType.MISSIVE,
                 )
             )
@@ -383,7 +414,7 @@ class MissiveCampaignQuerySet(models.QuerySet):
         if blocked.exists():
             protected = set(
                 Missive._base_manager.filter(
-                    campaign_id__in=self.values("pk"),
+                    campaign_step__campaign_id__in=self.values("pk"),
                     thread_type=MissiveThreadType.MISSIVE,
                 ).filter(sent_missive_q())
             )
@@ -438,7 +469,7 @@ class MissiveCampaignManager(models.Manager.from_queryset(MissiveCampaignQuerySe
         return Exists(
             Missive._base_manager.filter(
                 sent_missive_q(),
-                campaign_id=OuterRef("pk"),
+                campaign_step__campaign_id=OuterRef("pk"),
                 thread_type=MissiveThreadType.MISSIVE,
             ),
         )

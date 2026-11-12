@@ -100,19 +100,20 @@ def build_from_processors(processors, *, row=None):
     A processor that declares ``row`` or accepts ``**kwargs`` receives it.
     """
 
-    def build(campaign, target, missive_type):
+    def build(campaign, target, missive_type, *, campaign_step=None):
         return apply_build_target_processors(
             campaign,
             target,
             missive_type,
             processors,
             row=row,
+            campaign_step=campaign_step,
         )
 
     return build
 
 
-def apply_build_target_processors(campaign, target, missive_type, processors, *, row=None):
+def apply_build_target_processors(campaign, target, missive_type, processors, *, row=None, campaign_step=None):
     """Run *processors* until one returns a missive. None of them send it."""
     for entry in processors or []:
         if entry is None:
@@ -124,6 +125,7 @@ def apply_build_target_processors(campaign, target, missive_type, processors, *,
             target,
             missive_type,
             row=row,
+            campaign_step=campaign_step,
             **extra_kwargs,
         )
         if result is not None:
@@ -139,6 +141,7 @@ def build_target_processor(
     full_targets=None,
     extra_missive_fields=None,
     row=None,
+    campaign_step=None,
 ):
     """Create one draft missive for *target*. Does not send it.
 
@@ -172,6 +175,9 @@ def build_target_processor(
     first_type, first_value = ordered[0]
     first_name, first_contact = _split_contact(first_value, support, fallback_name)
     recipient: dict[str, Any] = {_RECIPIENT_FIELD[support]: first_contact}
+    step = campaign_step
+    if step is None and row is not None and getattr(row, "campaign_step_id", None):
+        step = row.campaign_step
     missive = build_draft(
         campaign,
         target,
@@ -179,6 +185,7 @@ def build_target_processor(
         name=first_name,
         recipient_type=first_type,
         extra_missive_fields=extra_missive_fields,
+        campaign_step=step,
         **recipient,
     )
     if missive is None:
@@ -503,13 +510,18 @@ def _resolve_processor(processor: Any) -> tuple[Any, dict]:
 
 def _call_processor(processor, campaign, target, missive_type, **kwargs):
     row = kwargs.pop("row", None)
+    campaign_step = kwargs.pop("campaign_step", None)
     if hasattr(processor, "process") and callable(processor.process):
         if row is not None and _accepts_keyword(processor.process, "row"):
             kwargs["row"] = row
+        if campaign_step is not None and _accepts_keyword(processor.process, "campaign_step"):
+            kwargs["campaign_step"] = campaign_step
         return processor.process(campaign, target, missive_type, **kwargs)
     if callable(processor):
         if row is not None and _accepts_keyword(processor, "row"):
             kwargs["row"] = row
+        if campaign_step is not None and _accepts_keyword(processor, "campaign_step"):
+            kwargs["campaign_step"] = campaign_step
         return processor(campaign, target, missive_type, **kwargs)
     raise TypeError(f"Build target processor {processor!r} is not callable and has no .process() method")
 

@@ -144,21 +144,40 @@ def _campaign_preview_kind_to_missive_type(kind: str) -> str:
     return str(MissiveType.EMAIL)
 
 
+def campaign_step_from_request(request, campaign):
+    """Step selected by ``?step=``, when it belongs to *campaign*."""
+    raw = str(request.GET.get("step") or "").strip()
+    if not raw or campaign is None or not getattr(campaign, "pk", None):
+        return None
+    from ..models.campaign_step import CampaignStep
+
+    return CampaignStep.objects.filter(pk=raw, campaign_id=campaign.pk).first()
+
+
 def missive_for_campaign_preview(
     campaign: MissiveCampaign,
     preview_kind: str,
     *,
     brand: str | None = None,
+    campaign_step=None,
 ) -> Missive:
     """Unsaved missive linked to ``campaign`` so getters and compilation match a real missive.
 
     The unsaved missive routes ``base_url + get_browser_preview_path()`` and the
     ``show_*`` snippets through ``self.campaign`` automatically (see
     ``Missive.get_browser_preview_path``), so no special context override is needed.
+
+    *campaign_step* identifies the preview. Its missive type wins over
+    *preview_kind*, and its configuration is what the compiled body reads.
     """
+    if campaign_step is not None:
+        missive_type = campaign_step.missive_type
+    else:
+        missive_type = _campaign_preview_kind_to_missive_type(preview_kind)
+        campaign_step = campaign.to_campaignstep.filter(missive_type=missive_type).order_by("position", "pk").first()
     missive = Missive(
-        campaign=campaign,
-        missive_type=_campaign_preview_kind_to_missive_type(preview_kind),
+        campaign_step=campaign_step,
+        missive_type=missive_type,
         status=MissiveStatus.DRAFT,
         thread_type=MissiveThreadType.MISSIVE,
     )
@@ -197,7 +216,8 @@ def missive_for_target_preview(row: CampaignTarget) -> Missive:
     from ..processors.build_target import _RECIPIENT_FIELD, ordered_target_contacts
 
     kind = preview_kind_for_missive_type(row.missive_type)
-    missive = missive_for_campaign_preview(row.campaign, kind)
+    step = row.campaign_step if row.campaign_step_id else None
+    missive = missive_for_campaign_preview(row.campaign, kind, campaign_step=step)
     target = _target_object(row)
     if target is not None:
         setattr(missive, "_preview_related_objects", [target])
@@ -592,10 +612,12 @@ class PreviewView(DetailView):
             return self._missive_for_preview
         if self._key == "campaign":
             kind = (self.request.GET.get("type") or "email").lower()
+            step = campaign_step_from_request(self.request, self.object)
             self._missive_for_preview = missive_for_campaign_preview(
                 self.object,
                 kind,
                 brand=_brand_from_request(self.request),
+                campaign_step=step,
             )
         elif self._key == "target":
             self._missive_for_preview = missive_for_target_preview(self.object)
@@ -615,9 +637,14 @@ class PreviewView(DetailView):
 
         if self._key == "campaign":
             context["campaign"] = self.object
-            channel = (self.request.GET.get("type") or "email").lower()
+            step = campaign_step_from_request(self.request, self.object)
+            channel = step.missive_type if step is not None else (self.request.GET.get("type") or "email").lower()
+            context["campaign_step"] = step
             context["campaign_preview_kind"] = channel
-            context["title"] = _("Preview: {} ({})").format(self.object, channel)
+            if step is not None:
+                context["title"] = _("Preview: {} — {}").format(self.object, step)
+            else:
+                context["title"] = _("Preview: {} ({})").format(self.object, channel)
         else:
             context["title"] = _("Preview: {}").format(self.object if self._key == "target" else missive)
 
@@ -664,15 +691,19 @@ class PreviewFormView(View):
 
         if key == "campaign":
             preview_kind = self._preview_kind_for_campaign(request.POST)
+            step = campaign_step_from_request(request, instance)
             missive = missive_for_campaign_preview(
                 instance,
                 preview_kind,
                 brand=_brand_from_request(request, request.POST),
+                campaign_step=step,
             )
-            title = _("Preview: {} ({})").format(
-                getattr(instance, "name", None) or getattr(instance, "subject", None) or "Campaign",
-                preview_kind,
-            )
+            label = getattr(instance, "name", None) or getattr(instance, "subject", None) or "Campaign"
+            if step is not None:
+                title = _("Preview: {} — {}").format(label, step)
+                preview_kind = step.missive_type
+            else:
+                title = _("Preview: {} ({})").format(label, preview_kind)
             context = {
                 "missive": missive,
                 "campaign": instance,
@@ -755,7 +786,8 @@ class DownloadPDFView(DetailView):
             if self.recipient_pk is not None:
                 raise Http404
             preview_kind = (request.GET.get("type") or "postal").lower()
-            missive = missive_for_campaign_preview(self.object, preview_kind)
+            step = campaign_step_from_request(request, self.object)
+            missive = missive_for_campaign_preview(self.object, preview_kind, campaign_step=step)
             pdf_bytes = missive.body_to_pdf(postal_recipient_pk=None)
             filename = f"campaign-{self.object.pk}.pdf"
 

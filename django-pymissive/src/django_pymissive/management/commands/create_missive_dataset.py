@@ -121,9 +121,6 @@ def _resolve_campaign(command, campaign_id, subject):
         return campaign
     campaign = MissiveCampaign.objects.create(
         subject=subject or f"Dataset {timezone.now().strftime('%Y-%m-%d %H:%M')}",
-        email_body_rich="<p>Dataset body</p>",
-        email_body_text="Dataset body",
-        phone_body_text="Dataset SMS body",
     )
     command.stdout.write(command.style.SUCCESS(f"Created campaign: {campaign.subject} ({campaign.pk})"))
     return campaign
@@ -140,19 +137,31 @@ def _recipient_contact(missive_type, index):
 
 
 def _create_type_batch(campaign, missive_type, count, start_index):
-    from django_pymissive.models import Missive
+    from django_pymissive.models import CampaignStep, Missive
     from django_pymissive.models.choices import (
         MissiveRecipientType,
         MissiveStatus,
     )
     from django_pymissive.models.recipient import MissiveRecipient
 
+    campaign_step = None
+    if campaign is not None:
+        campaign_step = campaign.to_campaignstep.filter(missive_type=missive_type).order_by("position", "pk").first()
+        if campaign_step is None:
+            campaign_step = CampaignStep.objects.create(
+                campaign=campaign,
+                position=(campaign.to_campaignstep.order_by("-position").values_list("position", flat=True).first() or 0)
+                + 1,
+                label=missive_type.replace("_", " ").title(),
+                missive_type=missive_type,
+            )
+
     missives = []
     for index in range(start_index, start_index + count):
         name = _name(index)
         reference = _ref(index)
         missive = Missive(
-            **({} if campaign is None else {"campaign": campaign}),
+            campaign_step=campaign_step,
             missive_type=missive_type,
             subject=f"[{missive_type.upper()}] Test {reference}",
             body_rich=_BODY_RICH.get(missive_type, "").format(name=name, ref=reference) or None,

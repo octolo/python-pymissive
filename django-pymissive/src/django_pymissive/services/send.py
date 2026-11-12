@@ -69,6 +69,8 @@ def materialize_selection(
     build=None,
     scheduler=None,
     on_row=None,
+    campaign_step=None,
+    unassigned: bool = False,
 ) -> int:
     """Build a draft for every live selection row of *missive_types*. Sends nothing.
 
@@ -80,11 +82,14 @@ def materialize_selection(
     row; returning false stops the build.
     """
     attached = 0
-    for channel in _channels(missive_types):
+    channels = [campaign_step.missive_type] if campaign_step is not None else _channels(missive_types)
+    for channel in channels:
         for row in target_services.iter_targets(
             campaign,
             channel,
             active_only=True,
+            campaign_step=campaign_step,
+            unassigned=unassigned,
         ):
             if on_row is not None and on_row(row) is False:
                 return attached
@@ -94,11 +99,12 @@ def materialize_selection(
                 channel,
                 build=build,
                 scheduler=scheduler,
+                campaign_step=campaign_step or row.campaign_step,
             )
     return attached
 
 
-def _materialize_target(row, campaign, channel, *, build=None, scheduler=None) -> int:
+def _materialize_target(row, campaign, channel, *, build=None, scheduler=None, campaign_step=None) -> int:
     """Build one active target while holding its database row lock."""
     try:
         with transaction.atomic():
@@ -124,6 +130,7 @@ def _materialize_target(row, campaign, channel, *, build=None, scheduler=None) -
                     campaign=campaign,
                 ),
                 scheduler=scheduler,
+                campaign_step=campaign_step,
             )
             if missive is None:
                 _abandon(locked, NO_REACHABLE_RECIPIENT)
@@ -152,7 +159,7 @@ def _abandon(row, reason: str) -> None:
         )
 
 
-def send_target(campaign, target, missive_type: str, *, build=None) -> None:
+def send_target(campaign, target, missive_type: str, *, campaign_step=None, build=None) -> None:
     """Materialize and send one *target* outside of a scheduled run.
 
     Raises when a campaign send is already running, or when the build
@@ -169,7 +176,12 @@ def send_target(campaign, target, missive_type: str, *, build=None) -> None:
     with transaction.atomic():
         _lock_idle_campaign(campaign)
         row = (
-            target_services.selection_qs(campaign, missive_type=channel, active_only=True)
+            target_services.selection_qs(
+                campaign,
+                missive_type=channel,
+                active_only=True,
+                campaign_step=campaign_step,
+            )
             .filter(content_type=content_type, object_id=object_id)
             .first()
         )
@@ -209,11 +221,13 @@ def _lock_idle_campaign(campaign) -> None:
 
 def _materialize_row(campaign, target, channel, row, *, build=None):
     chosen = selection_build(row, build=build, campaign=campaign)
+    step = row.campaign_step if row is not None and row.campaign_step_id else None
     missive, _created = draft_services.materialize_missive(
         campaign,
         target,
         channel,
         build=chosen,
+        campaign_step=step,
     )
     if missive is not None and row is not None:
         row.attach_missive(missive)
@@ -275,16 +289,51 @@ def run_selection(scheduled_id) -> None:
     def on_row(_row) -> bool:
         return not scheduled.checkpoint()
 
+    steps = list(scheduled.campaign.to_campaignstep.order_by("position", "pk"))
+    if steps:
+        _run_steps(scheduled, steps, on_row)
+    else:
+        materialize_selection(
+            scheduled.campaign,
+            scheduled.selection_channels(),
+            scheduler=scheduled,
+            on_row=on_row,
+        )
+        if not scheduled.cancelled_at:
+            scheduled.process_missives()
+    if scheduled.cancelled_at:
+        _release_unsent_targets(scheduled)
+
+
+def _run_steps(scheduled, steps, on_row) -> None:
+    """Materialize and send one step at a time, then the rows that have no step.
+
+    A failed missive stays on its step. The next step still runs.
+    """
+    for step in steps:
+        if scheduled.checkpoint():
+            return
+        materialize_selection(
+            scheduled.campaign,
+            [step.missive_type],
+            scheduler=scheduled,
+            on_row=on_row,
+            campaign_step=step,
+        )
+        if scheduled.cancelled_at:
+            return
+        scheduled.process_missives(campaign_step=step)
+        if scheduled.cancelled_at:
+            return
     materialize_selection(
         scheduled.campaign,
         scheduled.selection_channels(),
         scheduler=scheduled,
         on_row=on_row,
+        unassigned=True,
     )
     if not scheduled.cancelled_at:
-        scheduled.process_missives()
-    if scheduled.cancelled_at:
-        _release_unsent_targets(scheduled)
+        scheduled.process_missives(campaign_step=None)
 
 
 def _release_unsent_targets(scheduled) -> None:

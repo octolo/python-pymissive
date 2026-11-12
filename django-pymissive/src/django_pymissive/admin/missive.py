@@ -151,6 +151,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         IsBilledListFilter,
         HistoryOrMessageListFilter,
         "provider",
+        "is_internal",
         "created_at",
     ]
     search_fields = [
@@ -183,7 +184,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         "campaign_target_display",
     ]
     raw_id_fields = [
-        "campaign",
+        "campaign_step",
         "scheduler",
     ]
     inlines = [
@@ -203,7 +204,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         queryset = (
             super()
             .get_queryset(request)
-            .select_related("campaign", "scheduler")
+            .select_related("campaign_step__campaign", "scheduler")
             .prefetch_related(Missive.objects.first_recipients_prefetch())
         )
         return cast(MissiveQuerySet, queryset).with_counts()
@@ -468,7 +469,8 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         self.add_to_fieldset(
             _("Tracking"),
             [
-                "campaign",
+                "is_internal",
+                "campaign_step",
                 "scheduler",
                 "campaign_target_display",
                 "status",

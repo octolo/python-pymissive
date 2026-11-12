@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-def build_contact_email(campaign, target, missive_type):
+def build_contact_email(campaign, target, missive_type, *, campaign_step=None):
     """Draft an email when *target* has an ``email`` attribute."""
     from django_pymissive.services.drafts import build_draft
 
@@ -13,6 +13,7 @@ def build_contact_email(campaign, target, missive_type):
         missive_type,
         name=getattr(target, "full_name", "") or str(target),
         email=getattr(target, "email", None),
+        campaign_step=campaign_step,
     )
 
 

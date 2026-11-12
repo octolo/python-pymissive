@@ -24,6 +24,7 @@ from django.test import override_settings
 from django.utils import timezone
 from django_pymissive.managers.scheduler import count_annotations
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.choices import MissiveEventType, MissiveStatus, MissiveThreadType
 from django_pymissive.models.event import MissiveEvent
 from django_pymissive.models.missive import Missive
@@ -47,8 +48,15 @@ def _campaign(**kw) -> MissiveCampaign:
 
 
 def _missive(campaign, *, missive_type="email", status=MissiveStatus.DRAFT, **kw) -> Missive:
+    step = campaign.to_campaignstep.filter(missive_type=missive_type).first()
+    if step is None:
+        step = CampaignStep.objects.create(
+            campaign=campaign,
+            position=campaign.to_campaignstep.count() + 1,
+            missive_type=missive_type,
+        )
     return Missive.objects.create(
-        campaign=campaign,
+        campaign_step=step,
         missive_type=missive_type,
         subject="Test missive",
         status=status,
@@ -349,10 +357,15 @@ def test_campaign_snapshot_empty_until_run():
 def test_campaign_snapshot_frozen_at_run():
     """The run stores the campaign as it was when sending started."""
     c = _campaign(
-        email_body_text="Hello",
         additional_config={"watermark": True},
         additional_context={"offer": "spring"},
         body_processors=["some.processor"],
+    )
+    step = CampaignStep.objects.create(
+        campaign=c,
+        position=1,
+        missive_type="email",
+        body_text="Hello",
     )
     sched = _scheduled(c)
     with patch.object(sched, "run_campaign"):
@@ -360,20 +373,23 @@ def test_campaign_snapshot_frozen_at_run():
 
     sched.refresh_from_db()
     snap = sched.campaign_snapshot
-    assert snap["subject"] == "Test campaign"
-    assert snap["email_body_text"] == "Hello"
-    assert snap["additional_config"] == {"watermark": True}
-    assert snap["additional_context"] == {"offer": "spring"}
-    assert snap["body_processors"] == ["some.processor"]
-    assert snap["id"] == str(c.pk)
-    assert "processing" not in (snap.get("metadata") or {})
+    assert snap["version"] == 1
+    assert snap["steps"][0]["config"]["body_text"] == "Hello"
+    campaign = snap["campaign"]
+    assert campaign["subject"] == "Test campaign"
+    assert campaign["additional_config"] == {"watermark": True}
+    assert campaign["additional_context"] == {"offer": "spring"}
+    assert campaign["body_processors"] == ["some.processor"]
+    assert campaign["id"] == str(c.pk)
+    assert "processing" not in (campaign.get("metadata") or {})
 
     c.subject = "Changed subject"
-    c.email_body_text = "Goodbye"
-    c.save(update_fields=["subject", "email_body_text"])
+    c.save(update_fields=["subject"])
+    step.body_text = "Goodbye"
+    step.save(update_fields=["body_text"])
     sched.run_with_tracking()
     sched.refresh_from_db()
-    assert sched.campaign_snapshot["subject"] == "Test campaign"
+    assert sched.campaign_snapshot["campaign"]["subject"] == "Test campaign"
     c.refresh_from_db()
     assert c.subject == "Changed subject"
 
@@ -382,12 +398,18 @@ def test_campaign_snapshot_json_safe():
     """Phone / address / UUID values round-trip through JSON."""
     import json
 
-    c = _campaign(sender_phone="+33600000000")
+    c = _campaign()
+    CampaignStep.objects.create(
+        campaign=c,
+        position=1,
+        missive_type="sms",
+        sender_phone="+33600000000",
+    )
     snap = c.to_snapshot()
     json.dumps(snap)
-    assert isinstance(snap["id"], str)
-    assert isinstance(snap["sender_phone"], str)
-    assert isinstance(snap["sender_address"], dict)
+    assert snap["version"] == 1
+    assert isinstance(snap["campaign"]["id"], str)
+    assert isinstance(snap["steps"][0]["config"]["sender_phone"], str)
 
 
 def test_run_with_tracking_records_error_and_closes_scheduler():
@@ -403,7 +425,7 @@ def test_run_with_tracking_records_error_and_closes_scheduler():
 
     sched.refresh_from_db()
     assert sched.ended_at is not None
-    assert sched.campaign_snapshot.get("subject") == "Test campaign"
+    assert sched.campaign_snapshot.get("campaign", {}).get("subject") == "Test campaign"
     assert "network error" in (sched.additional_config or {}).get("last_error", "")
     assert MissiveCampaign.objects.get(pk=c.pk).current_scheduler_id is None
 
@@ -518,7 +540,7 @@ def test_run_with_tracking_retry_leaves_send_error_on_its_own_run():
     assert failed.status == MissiveStatus.ERROR
     assert failed.scheduler_id == old_run.id
 
-    dups = Missive.objects.filter(campaign=c, status=MissiveStatus.DRAFT, scheduler=sched)
+    dups = Missive.objects.filter(campaign_step__campaign=c, status=MissiveStatus.DRAFT, scheduler=sched)
     assert dups.count() == 1
     assert dups.first().thread_id == failed.thread_id
 
@@ -546,7 +568,7 @@ def test_run_with_tracking_retry_duplicates_error_missives_at_claim():
     assert failed.scheduler_id == old_run.id
 
     # a fresh DRAFT duplicate is attached to the NEW scheduler
-    dups = Missive.objects.filter(campaign=c, status=MissiveStatus.DRAFT, scheduler=sched)
+    dups = Missive.objects.filter(campaign_step__campaign=c, status=MissiveStatus.DRAFT, scheduler=sched)
     assert dups.count() == 1
     assert dups.first().thread_id == failed.thread_id
 
@@ -577,7 +599,7 @@ def test_run_with_tracking_retry_also_sends_the_pending_drafts():
         missive.refresh_from_db()
         assert missive.scheduler_id == sched.id
     assert not Missive.objects.filter(
-        campaign=c,
+        campaign_step__campaign=c,
         status=MissiveStatus.DRAFT,
         scheduler__isnull=True,
     ).exists()
@@ -593,7 +615,7 @@ def test_run_with_tracking_retry_does_not_reclaim_its_own_retry_drafts():
         sched.run_with_tracking()
 
     # One archived attempt, one duplicate — the claim did not duplicate again.
-    assert Missive.objects.filter(campaign=c).count() == 2
+    assert Missive.objects.filter(campaign_step__campaign=c).count() == 2
     assert sched.to_missive.count() == 1
 
 
@@ -673,7 +695,7 @@ def test_run_with_tracking_no_retry_leaves_errors_untouched():
 
     failed.refresh_from_db()
     assert failed.thread_type == MissiveThreadType.MISSIVE
-    assert Missive.objects.filter(campaign=c).count() == 1
+    assert Missive.objects.filter(campaign_step__campaign=c).count() == 1
 
 
 def test_run_campaign_raises_if_task_object_deleted():
@@ -1245,8 +1267,8 @@ def test_process_missives_stops_after_cancel_mid_run():
 
     sched.process_missives(_send)
     assert len(sent) == 1
-    assert Missive.objects.filter(campaign=c, status=MissiveStatus.DRAFT).count() == 1
-    assert Missive.objects.filter(campaign=c, status=MissiveStatus.SUCCESS).count() == 1
+    assert Missive.objects.filter(campaign_step__campaign=c, status=MissiveStatus.DRAFT).count() == 1
+    assert Missive.objects.filter(campaign_step__campaign=c, status=MissiveStatus.SUCCESS).count() == 1
     sched.refresh_from_db()
     assert sched.cancel_reason == "enough"
     assert sched.run_status == "cancelled"
@@ -1266,7 +1288,7 @@ def test_process_missives_stops_when_another_process_ends_the_run():
 
     sched.process_missives(_send)
     assert len(sent) == 1
-    assert Missive.objects.filter(campaign=c, status=MissiveStatus.DRAFT).count() == 2
+    assert Missive.objects.filter(campaign_step__campaign=c, status=MissiveStatus.DRAFT).count() == 2
     sched.refresh_from_db()
     assert sched.cancelled_at is None
 

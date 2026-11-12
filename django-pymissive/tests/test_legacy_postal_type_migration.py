@@ -8,6 +8,7 @@ import pytest
 from django.apps import apps
 from django.utils import timezone
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.choices import AcknowledgementLevel, MissiveType
 from django_pymissive.models.config import MissiveConfig
 from django_pymissive.models.missive import Missive
@@ -26,6 +27,35 @@ def _plant(missive: Missive, missive_type: str) -> None:
     Missive.objects.filter(pk=missive.pk).update(missive_type=missive_type)
 
 
+class _LegacyMissiveManager:
+    def filter(self, *args, **kwargs):
+        if "campaign_id" in kwargs:
+            kwargs["campaign_step__campaign_id"] = kwargs.pop("campaign_id")
+        return Missive.objects.filter(*args, **kwargs)
+
+
+class _LegacyMissive:
+    objects = _LegacyMissiveManager()
+
+
+class _LegacyApps:
+    def get_model(self, app_label, model_name):
+        if app_label == "django_pymissive" and model_name == "Missive":
+            return _LegacyMissive
+        return apps.get_model(app_label, model_name)
+
+
+legacy_apps = _LegacyApps()
+
+
+def _step(campaign, position, missive_type):
+    return CampaignStep.objects.create(
+        campaign=campaign,
+        position=position,
+        missive_type=missive_type,
+    )
+
+
 def test_target_type_for_legacy_postal():
     assert target_type_for_legacy_postal("postal", None) == "letter"
     assert target_type_for_legacy_postal("lre", None) == "letter"
@@ -37,15 +67,20 @@ def test_target_type_for_legacy_postal():
 
 def test_remap_splits_lre_on_acknowledgement_and_rewrites_postal():
     campaign = MissiveCampaign.objects.create(subject="postal split")
-    leftover_postal = Missive.objects.create(campaign=campaign, missive_type=MissiveType.LETTER, subject="old postal")
+    step = _step(campaign, 1, MissiveType.LETTER)
+    leftover_postal = Missive.objects.create(
+        campaign_step=step,
+        missive_type=MissiveType.LETTER,
+        subject="old postal",
+    )
     simple = Missive.objects.create(
-        campaign=campaign,
+        campaign_step=step,
         missive_type=MissiveType.LETTER,
         subject="lre basic",
         acknowledgement=AcknowledgementLevel.BASIC_DELIVERY,
     )
     registered = Missive.objects.create(
-        campaign=campaign,
+        campaign_step=step,
         missive_type=MissiveType.LETTER,
         subject="lre ar",
         acknowledgement=AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT,
@@ -55,7 +90,7 @@ def test_remap_splits_lre_on_acknowledgement_and_rewrites_postal():
     _plant(simple, "lre")
     _plant(registered, "lre")
 
-    remap_legacy_postal_types(apps, None)
+    remap_legacy_postal_types(legacy_apps, None)
 
     leftover_postal.refresh_from_db()
     simple.refresh_from_db()
@@ -69,14 +104,15 @@ def test_remap_splits_lre_on_acknowledgement_and_rewrites_postal():
 
 def test_remap_scheduled_uses_campaign_targets_and_clones_mixed_pending():
     campaign = MissiveCampaign.objects.create(subject="mixed pending")
+    step = _step(campaign, 1, MissiveType.LETTER)
     simple = Missive.objects.create(
-        campaign=campaign,
+        campaign_step=step,
         missive_type=MissiveType.LETTER,
         subject="basic",
         acknowledgement=AcknowledgementLevel.BASIC_DELIVERY,
     )
     registered = Missive.objects.create(
-        campaign=campaign,
+        campaign_step=step,
         missive_type=MissiveType.LETTER,
         subject="ar",
         acknowledgement=AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT,
@@ -91,7 +127,7 @@ def test_remap_scheduled_uses_campaign_targets_and_clones_mixed_pending():
         ended_at=timezone.now(),
     )
 
-    remap_legacy_postal_types(apps, None)
+    remap_legacy_postal_types(legacy_apps, None)
 
     pending.refresh_from_db()
     already_sent.refresh_from_db()

@@ -100,6 +100,7 @@ def send_missive(
     reply_to_email: str | None = None,
     # ── missive options ────────────────────────────────────────────────────
     campaign=None,
+    campaign_step=None,
     provider=None,
     acknowledgement: str | None = None,
     delivery_mode: str | None = None,
@@ -133,7 +134,10 @@ def send_missive(
         sender_address: Sender postal address.
         reply_to_name: Reply-To display name.
         reply_to_email: Reply-To e-mail address.
-        campaign: Optional :class:`~django_pymissive.models.MissiveCampaign`.
+        campaign: Optional campaign, accepted with *campaign_step* for caller
+            compatibility and validated against it.
+        campaign_step: Optional campaign step. This is the persisted campaign
+            link; campaign missives must provide it.
         provider: Provider override (``ProviderField`` value).
         acknowledgement: Acknowledgement level (see
             ``pymissive.config.MISSIVE_ACKNOWLEDGEMENT_LEVELS``).
@@ -186,6 +190,13 @@ def send_missive(
     missive_type = normalize_missive_type(missive_type) or missive_type
     # Resolve (and validate) the support before creating any DB row.
     support = _support_for_type(missive_type)
+    if campaign is not None:
+        if campaign_step is None:
+            raise ValueError("campaign_step is required when campaign is provided")
+        if campaign_step.campaign_id != campaign.pk:
+            raise ValueError("campaign_step does not belong to campaign")
+    if campaign_step is not None and campaign_step.missive_type != missive_type:
+        raise ValueError("campaign_step missive_type does not match missive_type")
 
     missive_kwargs = {
         "missive_type": missive_type,
@@ -200,7 +211,7 @@ def send_missive(
             sender_address=sender_address,
             reply_to_name=reply_to_name,
             reply_to_email=reply_to_email,
-            campaign=campaign,
+            campaign_step=campaign_step,
             provider=provider,
             acknowledgement=acknowledgement,
             delivery_mode=delivery_mode,

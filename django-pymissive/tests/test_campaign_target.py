@@ -10,6 +10,7 @@ import pytest
 
 from django_pymissive.models import (
     CampaignTarget,
+    CampaignStep,
     Missive,
     MissiveCampaign,
     MissiveScheduledCampaign,
@@ -68,11 +69,32 @@ def test_build_processor_passes_row_through_kwargs():
 
 
 def _campaign():
-    return MissiveCampaign.objects.create(
+    campaign = MissiveCampaign.objects.create(subject="Assemblée générale")
+    CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type=MissiveType.EMAIL,
         subject="Assemblée générale",
-        email_body_text="Bonjour",
-        email_body_rich="<p>Bonjour</p>",
+        body_text="Bonjour",
+        body_rich="<p>Bonjour</p>",
     )
+    CampaignStep.objects.create(
+        campaign=campaign,
+        position=2,
+        missive_type=MissiveType.SMS,
+        body_text="Bonjour",
+    )
+    CampaignStep.objects.create(
+        campaign=campaign,
+        position=3,
+        missive_type=MissiveType.LETTER,
+        body_rich="<p>Bonjour</p>",
+    )
+    return campaign
+
+
+def _email_step(campaign):
+    return campaign.to_campaignstep.get(missive_type=MissiveType.EMAIL)
 
 
 def _contact(email, first="Ada"):
@@ -113,7 +135,7 @@ def test_unselect_keeps_rows_that_already_have_a_missive():
     select(campaign, "email", ada)
     row = CampaignTarget.objects.get(campaign=campaign)
     missive = Missive.objects.create(
-        campaign=campaign,
+        campaign_step=campaign.to_campaignstep.get(missive_type=MissiveType.EMAIL),
         missive_type=MissiveType.EMAIL,
         subject="Hi",
         body_text="Hi",
@@ -141,7 +163,7 @@ def test_target_cleanup_deletes_pending_rows_and_keeps_missive_history():
     select(campaign, "sms", ada)
     sent = CampaignTarget.objects.get(campaign=campaign, missive_type="email")
     missive = Missive.objects.create(
-        campaign=campaign,
+        campaign_step=campaign.to_campaignstep.get(missive_type=MissiveType.EMAIL),
         missive_type=MissiveType.EMAIL,
         subject="Hi",
         body_text="Hi",
@@ -199,8 +221,10 @@ def test_target_cleanup_handles_queryset_delete():
 def test_pending_unique_constraint_preserves_text_object_id():
     campaign = _campaign()
     content_type = ContentType.objects.get_for_model(Contact)
+    step = campaign.to_campaignstep.get(missive_type=MissiveType.EMAIL)
     CampaignTarget.objects.create(
         campaign=campaign,
+        campaign_step=step,
         missive_type=MissiveType.EMAIL,
         content_type=content_type,
         object_id="550e8400-e29b-41d4-a716-446655440000",
@@ -213,6 +237,7 @@ def test_pending_unique_constraint_preserves_text_object_id():
         with transaction.atomic():
             CampaignTarget.objects.create(
                 campaign=campaign,
+                campaign_step=step,
                 missive_type=MissiveType.EMAIL,
                 content_type=content_type,
                 object_id="550e8400-e29b-41d4-a716-446655440000",
@@ -464,7 +489,7 @@ def test_materialize_selection_rechecks_a_stale_target_before_building():
     select(campaign, "email", ada)
     stale_row = CampaignTarget.objects.get(campaign=campaign)
     existing = Missive.objects.create(
-        campaign=campaign,
+        campaign_step=campaign.to_campaignstep.get(missive_type=MissiveType.EMAIL),
         missive_type=MissiveType.EMAIL,
         status=MissiveStatus.DRAFT,
     )
@@ -482,7 +507,7 @@ def test_materialize_selection_rechecks_a_stale_target_before_building():
         assert materialize_selection(campaign, ["email"], build=build) == 0
 
     assert build_calls == []
-    assert Missive.objects.filter(campaign=campaign).count() == 1
+    assert Missive.objects.filter(campaign_step__campaign=campaign).count() == 1
 
 
 @pytest.mark.django_db
@@ -490,9 +515,10 @@ def test_start_selection_materializes_during_the_run(settings, django_capture_on
     settings.PYMISSIVE_DRY_RUN = True
     settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
     campaign = _campaign()
+    step = _email_step(campaign)
     ada = _contact("ada@example.com")
     grace = _contact("grace@example.com", first="Grace")
-    select(campaign, "email", [ada, grace])
+    select(campaign, "email", [ada, grace], campaign_step=step)
     assert Missive.objects.count() == 0
 
     with django_capture_on_commit_callbacks(execute=True):
@@ -500,7 +526,7 @@ def test_start_selection_materializes_during_the_run(settings, django_capture_on
 
     campaign.refresh_from_db()
     assert campaign.is_processing is False
-    assert Missive.objects.filter(campaign=campaign).count() == 2
+    assert Missive.objects.filter(campaign_step__campaign=campaign).count() == 2
     assert CampaignTarget.objects.filter(campaign=campaign, missive__isnull=True).count() == 0
     for row in CampaignTarget.objects.filter(campaign=campaign):
         assert row.missive_id is not None
@@ -510,7 +536,7 @@ def test_start_selection_materializes_during_the_run(settings, django_capture_on
 
     with django_capture_on_commit_callbacks(execute=True):
         start_selection(campaign, ["email"], build=BUILD)
-    assert Missive.objects.filter(campaign=campaign).count() == 2
+    assert Missive.objects.filter(campaign_step__campaign=campaign).count() == 2
 
 
 @pytest.mark.django_db
@@ -519,7 +545,8 @@ def test_start_selection_runs_with_a_task_backend_allowlist(settings, django_cap
     settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
     settings.PYMISSIVE_ALLOWED_TASK_BACKENDS = ["myapp.tasks", "tests"]
     campaign = _campaign()
-    select(campaign, "email", _contact("ada@example.com"))
+    step = _email_step(campaign)
+    select(campaign, "email", _contact("ada@example.com"), campaign_step=step)
 
     with django_capture_on_commit_callbacks(execute=True):
         scheduled = start_selection(campaign, ["email"], build=BUILD)
@@ -538,8 +565,9 @@ def test_cancelled_selection_run_checks_its_unsent_targets_again(
     settings.PYMISSIVE_DRY_RUN = True
     settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
     campaign = _campaign()
+    step = _email_step(campaign)
     ada, grace = _contact("ada@example.com"), _contact("grace@example.com", first="Grace")
-    select(campaign, "email", [ada, grace])
+    select(campaign, "email", [ada, grace], campaign_step=step)
     send_missive = Missive.send_missive
 
     def send_then_cancel(missive, *args, **kwargs):
@@ -554,7 +582,7 @@ def test_cancelled_selection_run_checks_its_unsent_targets_again(
     assert run.cancelled_at is not None
     sent = CampaignTarget.objects.get(campaign=campaign, missive__isnull=False)
     assert sent.missive.status != MissiveStatus.DRAFT
-    assert Missive.objects.filter(campaign=campaign).count() == 1
+    assert Missive.objects.filter(campaign_step__campaign=campaign).count() == 1
     assert sum(is_selected(campaign, target, "email") for target in (ada, grace)) == 1
     assert CampaignTarget.objects.filter(campaign=campaign).count() == 2
 
@@ -568,14 +596,15 @@ def test_checking_a_sent_target_again_continues_its_thread(settings):
     settings.PYMISSIVE_DRY_RUN = True
     settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
     campaign = _campaign()
+    step = _email_step(campaign)
     ada = _contact("ada@example.com")
-    select(campaign, "email", ada)
-    send_target(campaign, ada, "email", build=build_contact_email)
+    select(campaign, "email", ada, campaign_step=step)
+    send_target(campaign, ada, "email", campaign_step=step, build=build_contact_email)
     first_row = CampaignTarget.objects.get(campaign=campaign)
     first = first_row.missive
 
-    select(campaign, "email", ada)
-    send_target(campaign, ada, "email", build=build_contact_email)
+    select(campaign, "email", ada, campaign_step=step)
+    send_target(campaign, ada, "email", campaign_step=step, build=build_contact_email)
 
     second_row = CampaignTarget.objects.filter(campaign=campaign).latest("created_at")
     second = second_row.missive
@@ -605,7 +634,7 @@ def test_a_missive_claimed_but_not_yet_sent_is_neither_reused_nor_duplicated():
     campaign = _campaign()
     ada = _contact("ada@example.com")
     claimed = Missive.objects.create(
-        campaign=campaign,
+        campaign_step=campaign.to_campaignstep.get(missive_type=MissiveType.EMAIL),
         missive_type=MissiveType.EMAIL,
         subject="Hi",
         status=MissiveStatus.PROCESSING,
@@ -711,7 +740,7 @@ def test_selection_run_builds_every_target_before_sending(settings, django_captu
     BUILD_LOG.clear()
     campaign = _campaign()
     hand_draft = Missive.objects.create(
-        campaign=campaign,
+        campaign_step=campaign.to_campaignstep.get(missive_type=MissiveType.EMAIL),
         missive_type=MissiveType.EMAIL,
         subject="Hi",
         body_text="Hi",
@@ -755,10 +784,11 @@ def test_send_target_sends_one_selected_target(settings):
     settings.PYMISSIVE_DRY_RUN = True
     settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
     campaign = _campaign()
+    step = _email_step(campaign)
     ada = _contact("ada@example.com")
-    select(campaign, "email", ada)
+    select(campaign, "email", ada, campaign_step=step)
 
-    send_target(campaign, ada, "email", build=build_contact_email)
+    send_target(campaign, ada, "email", campaign_step=step, build=build_contact_email)
 
     row = CampaignTarget.objects.get(campaign=campaign)
     assert row.missive.external_id.startswith("dry-run:")
@@ -771,7 +801,7 @@ def test_send_target_refuses_while_a_run_is_open_without_the_flag():
     campaign.to_missivecampaignsend.create()
     with pytest.raises(CampaignAlreadySending):
         send_target(campaign, _contact("ada@example.com"), "email", build=build_contact_email)
-    assert Missive.objects.filter(campaign=campaign).count() == 0
+    assert Missive.objects.filter(campaign_step__campaign=campaign).count() == 0
 
 
 @pytest.mark.django_db
@@ -779,13 +809,14 @@ def test_a_run_after_send_target_does_not_build_the_target_again(settings):
     settings.PYMISSIVE_DRY_RUN = True
     settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
     campaign = _campaign()
+    step = _email_step(campaign)
     ada = _contact("ada@example.com")
-    select(campaign, "email", ada)
+    select(campaign, "email", ada, campaign_step=step)
 
-    send_target(campaign, ada, "email", build=build_contact_email)
+    send_target(campaign, ada, "email", campaign_step=step, build=build_contact_email)
     start_selection(campaign, ["email"], build=BUILD)
 
-    assert Missive.objects.filter(campaign=campaign).count() == 1
+    assert Missive.objects.filter(campaign_step__campaign=campaign).count() == 1
 
 
 @pytest.mark.django_db
@@ -793,8 +824,9 @@ def test_send_target_attaches_the_row_before_delivering(settings):
     settings.PYMISSIVE_DRY_RUN = True
     settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
     campaign = _campaign()
+    step = _email_step(campaign)
     ada = _contact("ada@example.com")
-    select(campaign, "email", ada)
+    select(campaign, "email", ada, campaign_step=step)
     seen = []
     send_missive = Missive.send_missive
 
@@ -804,7 +836,7 @@ def test_send_target_attaches_the_row_before_delivering(settings):
         return send_missive(missive, *args, **kwargs)
 
     with patch.object(Missive, "send_missive", spy):
-        send_target(campaign, ada, "email", build=build_contact_email)
+        send_target(campaign, ada, "email", campaign_step=step, build=build_contact_email)
 
     assert seen == [True]
 
@@ -827,7 +859,7 @@ def test_campaign_counts_targets_still_without_a_missive():
     pending = CampaignTarget.objects.filter(campaign=campaign, missive__isnull=True)
     pending.first().attach_missive(
         Missive.objects.create(
-            campaign=campaign,
+            campaign_step=campaign.to_campaignstep.get(missive_type=MissiveType.EMAIL),
             missive_type=MissiveType.EMAIL,
             subject="Hi",
             body_text="Hi",
@@ -1200,7 +1232,7 @@ def test_materialize_selection_refuses_cc_without_a_primary_recipient():
     )
 
     assert materialize_selection(campaign, ["email"]) == 0
-    assert not Missive.objects.filter(campaign=campaign).exists()
+    assert not Missive.objects.filter(campaign_step__campaign=campaign).exists()
     row.refresh_from_db()
     assert row.missive_id is None
     assert row.abandon_reason == "No reachable recipient"
@@ -1231,7 +1263,7 @@ def test_materialize_selection_skips_malformed_contacts_before_a_valid_one():
 
     assert row.targets == ["valid@example.com"]
     assert materialize_selection(campaign, ["email"]) == 1
-    missive = Missive.objects.get(campaign=campaign)
+    missive = Missive.objects.get(campaign_step__campaign=campaign)
     assert list(missive.to_missiverecipient.values_list("email", flat=True)) == [
         "valid@example.com",
     ]
@@ -1298,7 +1330,7 @@ def test_materialize_selection_reloads_recipient_targets_after_locking():
     ):
         assert materialize_selection(campaign, ["email"]) == 1
 
-    missive = Missive.objects.get(campaign=campaign)
+    missive = Missive.objects.get(campaign_step__campaign=campaign)
     assert list(missive.to_missiverecipient.values_list("email", flat=True)) == [
         "new@example.com",
     ]
@@ -1639,7 +1671,7 @@ def test_start_selection_build_becomes_the_run_chain_and_beats_the_campaign(
     run.refresh_from_db()
     assert run.build_target_processors == ["tests.test_campaign_target.build_marked"]
     assert "build" not in run.additional_config
-    assert Missive.objects.get(campaign=campaign).subject == "from-target-processor"
+    assert Missive.objects.get(campaign_step__campaign=campaign).subject == "from-target-processor"
 
 
 @pytest.mark.django_db
@@ -1656,7 +1688,7 @@ def test_start_selection_without_build_uses_the_campaign_chain(settings, django_
 
     run.refresh_from_db()
     assert run.build_target_processors == campaign.build_target_processors
-    assert Missive.objects.get(campaign=campaign).subject == "from-target-processor"
+    assert Missive.objects.get(campaign_step__campaign=campaign).subject == "from-target-processor"
 
 
 @pytest.mark.django_db
@@ -1683,7 +1715,7 @@ def test_start_campaign_builds_and_sends_the_pending_targets(settings, django_ca
     assert run.ended_at is not None
     assert CampaignTarget.objects.filter(campaign=campaign, missive__isnull=False).count() == 3
     assert set(
-        Missive.objects.filter(campaign=campaign).values_list(
+        Missive.objects.filter(campaign_step__campaign=campaign).values_list(
             "to_missiverecipient__email",
             flat=True,
         )
@@ -1752,7 +1784,8 @@ def test_generate_missive_action_refuses_a_view_only_account():
 
 
 def build_unsaved(campaign, target, missive_type):
-    return Missive(campaign=campaign, missive_type=missive_type)
+    step = campaign.to_campaignstep.get(missive_type=missive_type)
+    return Missive(campaign_step=step, missive_type=missive_type)
 
 
 def _generate_from_admin(row, username):
@@ -1773,7 +1806,10 @@ def test_missive_change_page_links_to_its_campaign_target():
     campaign = _campaign()
     select(campaign, "email", _contact("ada@example.com"))
     row = CampaignTarget.objects.get(campaign=campaign)
-    row.missive = Missive.objects.create(campaign=campaign, missive_type="email")
+    row.missive = Missive.objects.create(
+        campaign_step=campaign.to_campaignstep.get(missive_type="email"),
+        missive_type="email",
+    )
     row.save(update_fields=["missive"])
     client = Client()
     client.force_login(_superuser("target-admin-missive-link"))
@@ -1836,7 +1872,7 @@ def test_bulk_abandon_skips_rows_that_already_have_a_missive():
     sent = CampaignTarget.objects.filter(campaign=campaign).first()
     sent.attach_missive(
         Missive.objects.create(
-            campaign=campaign,
+            campaign_step=campaign.to_campaignstep.get(missive_type=MissiveType.EMAIL),
             missive_type=MissiveType.EMAIL,
             subject="Hi",
         )
@@ -1866,4 +1902,4 @@ def test_generate_missive_action_refuses_while_the_campaign_is_sending():
     assert response.status_code == 302
     assert "A campaign send is already in progress." in sent
     assert CampaignTarget.objects.get(pk=row.pk).missive_id is None
-    assert not Missive.objects.filter(campaign=campaign).exists()
+    assert not Missive.objects.filter(campaign_step__campaign=campaign).exists()

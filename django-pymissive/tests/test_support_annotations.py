@@ -47,6 +47,7 @@ from django.contrib.contenttypes.models import ContentType
 
 from django_pymissive.models.attachment import MissiveBaseAttachment
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.choices import (
     MissiveAttachmentType,
     MissiveStatus,
@@ -75,8 +76,20 @@ def _campaign(**kw) -> MissiveCampaign:
 
 
 def _missive(campaign=None, *, missive_type="email", status=MissiveStatus.DRAFT, **kw) -> Missive:
+    campaign_step = None
+    if campaign is not None:
+        campaign_step = CampaignStep.objects.filter(
+            campaign=campaign,
+            missive_type=missive_type,
+        ).first()
+        if campaign_step is None:
+            campaign_step = CampaignStep.objects.create(
+                campaign=campaign,
+                position=campaign.to_campaignstep.count() + 1,
+                missive_type=missive_type,
+            )
     return Missive.objects.create(
-        campaign=campaign,
+        campaign_step=campaign_step,
         missive_type=missive_type,
         subject="Test missive",
         status=status,
@@ -337,7 +350,9 @@ def test_the_default_queryset_aggregates_nothing():
     default_sql = str(default.query)
     assert "COUNT(" not in default_sql
     assert "GROUP BY" not in default_sql
-    assert default_sql.count("JOIN") == 0
+    # The has-sent EXISTS follows campaign_step; the outer campaign query
+    # itself still has no aggregate join.
+    assert default_sql.count("JOIN") == 1
     # What is left: three ORDER BY … LIMIT 1 subqueries and one EXISTS.
     assert set(default.query.annotations) == {
         "last_send_date",
@@ -350,8 +365,8 @@ def test_the_default_queryset_aggregates_nothing():
     opted_in = str(MissiveCampaign.objects.with_counts().query)
     # Pending targets and stored contact values are per-type subqueries, and
     # the totals add those counters. The selection table adds no join.
-    assert opted_in.count("JOIN") == 5
-    assert opted_in.count("COUNT(DISTINCT") == 67
+    assert opted_in.count("JOIN") == 7
+    assert opted_in.count("COUNT(DISTINCT") == 91
 
 
 def test_with_counts_annotates_only_the_names_it_is_given():
@@ -670,11 +685,11 @@ def test_missive_default_queryset_aggregates_nothing():
     assert "COUNT(" in opted_in
 
 
-def test_reverse_missive_relation_stays_a_plain_lookup():
+def test_campaign_missive_queryset_stays_a_plain_lookup():
     """``campaign.to_missive`` inherits the lean manager, not the admin annotations."""
     campaign = _campaign()
     _missive(campaign)
-    sql = str(campaign.to_missive.all().query)
+    sql = str(campaign.missive_queryset().query)
     assert "GROUP BY" not in sql
     assert "COUNT(" not in sql
 

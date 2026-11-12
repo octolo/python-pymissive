@@ -158,7 +158,9 @@ def missive_link_q(
 
     q = Q()
     if campaign is not None:
-        q &= Q(**{field("campaign_id"): getattr(campaign, "pk", campaign)})
+        q &= Q(**{
+            field("campaign_step__campaign_id"): getattr(campaign, "pk", campaign),
+        })
     if support is not None:
         q &= Q(**missive_type_filter(support, prefix=prefix))
     if missive_type is not None:
@@ -462,7 +464,7 @@ class MissiveRelatedQuerySetMixin(_QuerySetMixinBase):
         """
         from ..models.missive import Missive
 
-        rel = "campaign__to_campaignrelatedobject"
+        rel = "campaign_step__campaign__to_campaignrelatedobject"
         counted = (
             Missive._base_manager.filter(
                 content_type_q(self.model, prefix=rel),

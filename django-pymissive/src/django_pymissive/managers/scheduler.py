@@ -87,25 +87,29 @@ def count_annotations() -> dict:
     counts = {}
     for missive_type in MISSIVE_TYPES:
         type_q = Q(**{f"{_M}__missive_type": missive_type})
-        counts[total_annotation_name(missive_type)] = count_missive_expr(type_q)
+        counts[total_annotation_name(missive_type)] = count_missive_expr(type_q, lookup=_M)
         counts[sent_annotation_name(missive_type)] = count_missive_expr(
             type_q,
             sent_missive_q(prefix=_M),
+            lookup=_M,
         )
         counts[error_annotation_name(missive_type)] = count_missive_expr(
             type_q,
             error_missive_q(prefix=_M),
+            lookup=_M,
         )
     for support in GENERIC_SUPPORT:
         support_q = Q(**missive_type_filter(support, prefix=_M))
-        counts[support_count_name(support)] = count_missive_expr(support_q)
+        counts[support_count_name(support)] = count_missive_expr(support_q, lookup=_M)
         counts[support_count_name(support, "sent")] = count_missive_expr(
             support_q,
             sent_missive_q(prefix=_M),
+            lookup=_M,
         )
         counts[support_count_name(support, "error")] = count_missive_expr(
             support_q,
             error_missive_q(prefix=_M),
+            lookup=_M,
         )
     for status in MissiveStatus:
         counts[status_annotation_name(status)] = count_attempt_expr(
@@ -118,10 +122,10 @@ def count_annotations() -> dict:
     # Direct aggregates rather than a sum of the per-type buckets: a missive
     # whose type is not in MISSIVE_TYPES — never set, or left behind by a
     # renamed type — belongs to no bucket and would vanish from the run.
-    counts["count_total"] = count_missive_expr()
-    counts["count_sent"] = count_missive_expr(sent_missive_q(prefix=_M))
-    counts["count_pending"] = count_missive_expr(pending_missive_q(prefix=_M))
-    counts["count_error"] = count_missive_expr(error_missive_q(prefix=_M))
+    counts["count_total"] = count_missive_expr(lookup=_M)
+    counts["count_sent"] = count_missive_expr(sent_missive_q(prefix=_M), lookup=_M)
+    counts["count_pending"] = count_missive_expr(pending_missive_q(prefix=_M), lookup=_M)
+    counts["count_error"] = count_missive_expr(error_missive_q(prefix=_M), lookup=_M)
     return counts
 
 

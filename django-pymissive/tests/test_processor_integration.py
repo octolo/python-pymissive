@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.missive import Missive
 from django_pymissive.processors.pdf import MissivePdfProcessor
 
@@ -52,11 +53,18 @@ def _make_campaign(**overrides) -> MissiveCampaign:
 
 
 def _make_missive(*, campaign=None, missive_type="email", **overrides) -> Missive:
+    campaign_step = None
+    if campaign is not None:
+        campaign_step, _created = CampaignStep.objects.get_or_create(
+            campaign=campaign,
+            missive_type=missive_type,
+            defaults={"position": campaign.to_campaignstep.count() + 1},
+        )
     defaults = {
         "missive_type": missive_type,
         "subject": "Test subject",
         "body_rich": "<p>hi</p>",
-        "campaign": campaign,
+        "campaign_step": campaign_step,
     }
     defaults.update(overrides)
     return Missive.objects.create(**defaults)

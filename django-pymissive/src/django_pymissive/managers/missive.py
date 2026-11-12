@@ -64,7 +64,7 @@ class MissiveQuerySet(models.QuerySet):
         Opt-in, and deliberately not applied in ``get_queryset()``: the join
         aggregates force a ``GROUP BY`` on the missive's columns (including
         ``body_rich`` / ``body_text``), which a plain lookup — a ``.get(pk=…)``,
-        a webhook ``get_by_external_id``, ``campaign.to_missive`` — would pay
+        a webhook ``get_by_external_id``, or a campaign missive lookup — would pay
         for nothing. Reading a counter without this call still works (see
         :meth:`~django_pymissive.models.missive.Missive._annotation`), at one
         query per instance; annotate here as soon as a list displays them.
@@ -138,7 +138,7 @@ class BaseMissiveManager(models.Manager.from_queryset(MissiveQuerySet)):  # type
 
         return Subquery(
             MissiveScheduledCampaign.objects.filter(
-                campaign=OuterRef("campaign_id"),
+                campaign=OuterRef("campaign_step__campaign_id"),
                 send_date__isnull=False,
             )
             .order_by(f"-{field}", "-id")

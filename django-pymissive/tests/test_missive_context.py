@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.missive import Missive
 from django_pymissive.models.related_object import (
     CampaignRelatedObject,
@@ -21,10 +22,19 @@ pytestmark = pytest.mark.django_db
 
 
 def _make_email_missive(**overrides) -> Missive:
+    campaign = overrides.pop("campaign", None)
+    campaign_step = None
+    if campaign is not None:
+        campaign_step, _created = CampaignStep.objects.get_or_create(
+            campaign=campaign,
+            missive_type="email",
+            defaults={"position": campaign.to_campaignstep.count() + 1},
+        )
     defaults = {
         "missive_type": "email",
         "subject": "ctx",
         "body_rich": "<p>hi</p>",
+        "campaign_step": campaign_step,
     }
     defaults.update(overrides)
     return Missive.objects.create(**defaults)

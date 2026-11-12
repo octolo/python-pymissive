@@ -442,13 +442,6 @@ SENDER_CONTACT_FIELDS = {
     "address": ("sender_address", "address"),
 }
 
-CAMPAIGN_SENDER_NAME_FIELDS = (
-    "sender_email_name",
-    "sender_phone_name",
-    "sender_address_name",
-)
-
-
 _RECIPIENT_GROUPS = ("recipients", "cc", "bcc", "notification")
 _CONTACT_FIELD = {
     "email": "email",

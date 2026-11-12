@@ -30,6 +30,7 @@ def test_changelist_links_to_the_animations_view():
 
 def test_progress_json_and_send_animations_follow_the_missive_types():
     from django_pymissive.models import (
+        CampaignStep,
         Missive,
         MissiveCampaign,
         MissiveScheduledCampaign,
@@ -37,23 +38,31 @@ def test_progress_json_and_send_animations_follow_the_missive_types():
     )
 
     campaign = MissiveCampaign.objects.create(subject="Run")
+    steps = {
+        missive_type: CampaignStep.objects.create(
+            campaign=campaign,
+            position=position,
+            missive_type=missive_type,
+        )
+        for position, missive_type in enumerate(("email", "sms", "notification"), start=1)
+    }
     run = MissiveScheduledCampaign.objects.create(campaign=campaign)
     Missive.objects.create(
-        campaign=campaign,
+        campaign_step=steps["email"],
         scheduler=run,
         missive_type="email",
         subject="Hello",
         status=MissiveStatus.SUCCESS,
     )
     Missive.objects.create(
-        campaign=campaign,
+        campaign_step=steps["sms"],
         scheduler=run,
         missive_type="sms",
         subject="Hello",
         status=MissiveStatus.DRAFT,
     )
     Missive.objects.create(
-        campaign=campaign,
+        campaign_step=steps["notification"],
         scheduler=run,
         missive_type="notification",
         subject="Hello",

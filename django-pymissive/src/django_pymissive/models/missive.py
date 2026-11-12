@@ -104,14 +104,14 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         editable=False,
         verbose_name=_("ID"),
     )
-    campaign = models.ForeignKey(
-        "django_pymissive.MissiveCampaign",
+    campaign_step = models.ForeignKey(
+        "django_pymissive.CampaignStep",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="to_missive",
-        verbose_name=_("Campaign"),
-        help_text=_("Optional campaign this missive belongs to"),
+        verbose_name=_("Campaign step"),
+        help_text=_("Step this missive was built from. Empty for standalone missives."),
     )
     scheduler = models.ForeignKey(
         "django_pymissive.MissiveScheduledCampaign",
@@ -121,6 +121,12 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         related_name="to_missive",
         verbose_name=_("Scheduler"),
         help_text=_("Optional scheduled campaign run that triggered this missive"),
+    )
+    is_internal = models.BooleanField(
+        default=False,
+        db_index=True,
+        verbose_name=_("Internal"),
+        help_text=_("Internal missive, kept apart from campaign sending."),
     )
     thread_id = models.UUIDField(
         default=uuid.uuid4,
@@ -335,13 +341,25 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             models.Index(fields=["thread_type", "-created_at"]),
             # Per-row correlated subquery counting the sibling threads.
             models.Index(fields=["thread_id", "thread_type"]),
-            # Campaign progress: counts grouped by status over the live sends.
-            models.Index(fields=["campaign", "thread_type", "status"]),
+            # Campaign progress: counts grouped by status over one step.
+            models.Index(fields=["campaign_step", "thread_type", "status"]),
         ]
 
     def __str__(self):
         recipient = self.first_recipient or _("Unknown")
         return f"{self.missive_type} - {recipient} ({self.status})"
+
+    @property
+    def campaign(self):
+        """Campaign derived from :attr:`campaign_step`, if any."""
+        step = self.campaign_step if self.campaign_step_id else None
+        return step.campaign if step is not None else None
+
+    @property
+    def campaign_id(self):
+        """Campaign primary key derived from :attr:`campaign_step`, if any."""
+        step = self.campaign_step if self.campaign_step_id else None
+        return step.campaign_id if step is not None else None
 
     @property
     def body_rich_snapshot_html_read_more(self):
@@ -386,8 +404,8 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             support = get_missive_support_from_type(self.missive_type)
             if support:
                 self.missive_support = support
-        # Empty when campaign set — resolved via get_locally_or_campaign (use campaign_id for API)
-        has_campaign = bool(self.campaign_id)
+        # Empty when a step is set — resolved through its configuration.
+        has_campaign = bool(self.campaign_step_id)
         if not self.acknowledgement and not has_campaign:
             self.acknowledgement = AcknowledgementLevel.BASIC_DELIVERY
         if not self.delivery_mode and not has_campaign:
@@ -535,47 +553,6 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
         return self._annotation(name)
 
-    # Missive field → campaign field when names differ (per support).
-    _CAMPAIGN_FIELD_MAP: dict[str, dict[str, str]] = {
-        "email": {
-            "sender_name": "sender_email_name",
-            "reply_to_name": "reply_to_email_name",
-            "acknowledgement": "acknowledgement_email",
-            "body_rich": "email_body_rich",
-            "body_rich_snapshot_html": "email_body_rich_snapshot_html",
-            "body_text": "email_body_text",
-        },
-        "phone": {
-            "sender_name": "sender_phone_name",
-            "body_text": "phone_body_text",
-        },
-        "application": {
-            "sender_name": "sender_phone_name",
-            "body_text": "phone_body_text",
-            "body_rich": "phone_body_rich",
-            "body_rich_snapshot_html": "phone_body_rich_snapshot_html",
-        },
-        "address": {
-            "sender_name": "sender_address_name",
-            "reply_to_name": "reply_to_address_name",
-            "acknowledgement": "acknowledgement_letter",
-            "delivery_mode": "delivery_mode_letter",
-            "priority": "priority_letter",
-            "duplex_printing": "duplex_printing_letter",
-            "color_printing": "color_printing_letter",
-            "body_rich": "first_document",
-            "body_rich_snapshot_html": "first_document_snapshot_html",
-        },
-        "letter": {
-            "duplex_printing": "duplex_printing_letter",
-            "color_printing": "color_printing_letter",
-        },
-        "registered_letter": {
-            "duplex_printing": "duplex_printing_registered_letter",
-            "color_printing": "color_printing_registered_letter",
-        },
-    }
-
     _CAMPAIGN_SOURCED_FIELDS: dict[str, list[str]] = {
         "email": [
             "subject",
@@ -600,6 +577,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "body_rich_snapshot_html",
             "body_text",
             "sender_name",
+            "brand_name",
         ],
         "address": [
             "subject",
@@ -628,7 +606,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         for field in self.get_campaign_sourced_fields(self.missive_support):
             if field not in names and hasattr(self, field):
                 names.append(field)
-        return names + (["additional_context"] if self.campaign_id else [])
+        return names + (["additional_context"] if self.campaign_step_id else [])
 
     @staticmethod
     def _value_is_set(value):
@@ -638,33 +616,66 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """
         return value is not None and value != ""
 
-    def _campaign_field_name(self, field: str) -> str:
-        """Campaign attribute for a missive *field* (type map wins over support)."""
-        mtype = (self.missive_type or "").lower()
-        type_map = self._CAMPAIGN_FIELD_MAP.get(mtype, {})
-        if field in type_map:
-            return type_map[field]
-        support = (self.missive_support or "").lower()
-        return self._CAMPAIGN_FIELD_MAP.get(support, {}).get(field, field)
+    def _typed_step_config(self):
+        """The unified :attr:`campaign_step`, cached on the instance."""
+        if not self.campaign_step_id:
+            return None
+        if self.__dict__.get("_typed_step_config_for") == self.campaign_step_id:
+            return self.__dict__.get("_typed_step_config_cache")
+        step = self.campaign_step
+        self.__dict__["_typed_step_config_cache"] = step
+        self.__dict__["_typed_step_config_for"] = self.campaign_step_id
+        return step
+
+    def _step_config_value(self, field):
+        """Value of *field* on the step, or ``None`` when absent."""
+        step = self._typed_step_config()
+        if step is None:
+            return None
+        if not hasattr(step, field):
+            return None
+        return getattr(step, field)
+
+    def _inherited_additional_context(self):
+        """Step context when set, otherwise the campaign context."""
+        step = self._typed_step_config()
+        if step is not None and step.additional_context:
+            return step.additional_context
+        campaign = self.campaign
+        if campaign is not None and campaign.additional_context:
+            return campaign.additional_context
+        return None
 
     def get_campaign_value(self, field, fallback=None):
-        """Campaign value mapped to a missive *field* (via ``_CAMPAIGN_FIELD_MAP``).
-
-        Unset campaign values (``None``, ``""``) resolve to *fallback* so the
-        semantics match :meth:`get_locally_or_campaign_value`. ``False`` is kept.
-        """
-        if not self.campaign:
-            return fallback
-        campaign_field = self._campaign_field_name(field)
-        value = getattr(self.campaign, campaign_field, None)
+        """Value inherited from :attr:`campaign_step`, then *fallback*."""
+        value = self._step_config_value(field)
         if self._value_is_set(value):
             return value
         return fallback
 
+    def _boolean_still_default(self, field, locally) -> bool:
+        """True when a boolean still has its model default and the step sets it.
+
+        ``duplex_printing`` defaults to ``True``, so a fresh missive would
+        otherwise hide the step's ``False``. An explicit value other than the
+        default still wins. Campaigns without a step keep the previous rule.
+        """
+        if not self.campaign_step_id:
+            return False
+        try:
+            model_field = self._meta.get_field(field)
+        except Exception:
+            return False
+        if not isinstance(model_field, models.BooleanField) or model_field.null:
+            return False
+        if locally != model_field.get_default():
+            return False
+        return self._value_is_set(self._step_config_value(field))
+
     def get_locally_or_campaign_value(self, field, fallback=None):
-        """Local value if set, else campaign field (via ``_CAMPAIGN_FIELD_MAP``)."""
+        """Local value if set, else the step configuration, else the campaign."""
         locally = getattr(self, field, None)
-        if self._value_is_set(locally):
+        if self._value_is_set(locally) and not self._boolean_still_default(field, locally):
             return locally
         return self.get_campaign_value(field, fallback)
 
@@ -680,23 +691,25 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             if self._copy_campaign_field(field):
                 updates.append(field)
         if self._copy_campaign_context():
-            self.additional_context = dict(campaign.additional_context)
+            self.additional_context = dict(self._inherited_additional_context() or {})
             updates.append("additional_context")
         if updates:
             self.save(update_fields=updates)
 
     def _copy_campaign_field(self, field):
-        if not hasattr(self, field) or self._value_is_set(getattr(self, field, None)):
+        if not hasattr(self, field):
+            return False
+        locally = getattr(self, field, None)
+        if self._value_is_set(locally) and not self._boolean_still_default(field, locally):
             return False
         value = self.get_campaign_value(field)
-        if not self._value_is_set(value):
+        if not self._value_is_set(value) or locally == value:
             return False
         setattr(self, field, value)
         return True
 
     def _copy_campaign_context(self):
-        campaign = self.campaign
-        return bool(campaign and campaign.additional_context and not (self.additional_context or {}))
+        return bool(self._inherited_additional_context() and not (self.additional_context or {}))
 
     def clear_campaign_sourced_fields(self, missive):
         """Clear campaign-sourced fields on missive so they will be re-filled from campaign at send.
@@ -705,7 +718,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         refill the cleared fields at send time, so clearing would silently wipe
         the missive's own content (subject, body, …).
         """
-        if not missive.campaign_id:
+        if not missive.campaign_step_id:
             return
         fields_to_clear = missive.campaign_sourced_field_names
         if not fields_to_clear:
@@ -734,7 +747,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
         Does nothing when *missive* has no campaign attached.
         """
-        if not missive.campaign_id:
+        if not missive.campaign_step_id:
             return
         support = (missive.missive_support or "").lower()
         fields = self.get_campaign_sourced_fields(support)
@@ -746,8 +759,9 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             if val is not None:
                 setattr(missive, field, val)
                 updates.append(field)
-        if missive.campaign.additional_context:
-            missive.additional_context = dict(missive.campaign.additional_context)
+        inherited = missive._inherited_additional_context()
+        if inherited:
+            missive.additional_context = dict(inherited)
             if "additional_context" not in updates:
                 updates.append("additional_context")
         if updates:
@@ -872,7 +886,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def resolved_tags(self) -> list:
         """Tags sent to the provider: the missive list, or the campaign list."""
         tags = self._tag_list(self.tags)
-        if tags or not self.campaign_id:
+        if tags or not self.campaign_step_id:
             return tags
         return self._tag_list(getattr(self.campaign, "tags", None))
 
@@ -947,7 +961,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             updated_at__lt=cutoff,
         ).filter(models.Q(external_id__isnull=True) | models.Q(external_id=""))
         if campaign is not None:
-            qs = qs.filter(campaign=campaign)
+            qs = qs.filter(campaign_step__campaign=campaign)
         if scheduler is not None:
             qs = qs.filter(scheduler=scheduler)
         return qs.update(status=MissiveStatus.DRAFT)
@@ -988,13 +1002,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     def check_hand_delivery(self):
         """Hand-delivered missive: sender (name + address) + at least one named recipient.
 
-        Sender name resolution order:
-          1. ``self.sender_name``
-          2. Campaign ``sender_address_name``
-          3. Campaign ``sender_email_name``
-          4. Campaign ``sender_phone_name``
-
-        Sender address: ``self.sender_address`` then campaign ``sender_address``.
+        Sender name and address resolve locally, then from the campaign step.
         Recipient: only a non-empty ``name`` is required (no email/phone/address).
         """
         if not self._has_named_recipient():
@@ -1010,19 +1018,10 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         )
 
     def _hand_delivery_sender_name(self):
-        sender_name = self.sender_name
-        if not sender_name and self.campaign_id and self.campaign is not None:
-            for field in ("sender_address_name", "sender_email_name", "sender_phone_name"):
-                sender_name = getattr(self.campaign, field, None)
-                if sender_name:
-                    break
-        return sender_name
+        return self.get_locally_or_campaign_value("sender_name")
 
     def _hand_delivery_sender_address(self):
-        sender_address = self.sender_address
-        if not sender_address and self.campaign_id and self.campaign is not None:
-            sender_address = self.campaign.sender_address
-        return sender_address
+        return self.get_locally_or_campaign_value("sender_address")
 
     def _campaign_preview_kind(self) -> str:
         """Map missive_type to the campaign preview ``?type=`` kind (email/sms/postal/branded)."""
@@ -1046,7 +1045,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         from ..views.preview import POSTAL_PREVIEW_MISSIVE_TYPES, _missive_brand
 
         if not self.is_persisted:
-            if self.campaign_id and self.campaign is not None:
+            if self.campaign_step_id and self.campaign is not None:
                 kind = self._campaign_preview_kind()
                 return self.campaign.get_browser_preview_path(
                     preview_kind=kind,
@@ -1200,7 +1199,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         return apply_pdf_processors(
             self,
             self.get_first_document_processors(),
-            campaign=self.campaign if self.campaign_id else None,
+            campaign=self.campaign if self.campaign_step_id else None,
             context=kwargs or None,
         )
 
@@ -1246,8 +1245,13 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         return att
 
     def _parent_processors(self, field_name: str):
-        """Fall back to ``campaign.<field_name>`` when set."""
-        if not (self.campaign_id and self.campaign is not None):
+        """Step configuration first, then the campaign, when that chain is set."""
+        step = self._typed_step_config()
+        if step is not None:
+            value = getattr(step, field_name, None)
+            if value:
+                return value
+        if not (self.campaign_step_id and self.campaign is not None):
             return None
         return getattr(self.campaign, field_name, None) or None
 
@@ -1258,7 +1262,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             content,
             self.get_body_processors(),
             missive=self,
-            campaign=self.campaign if self.campaign_id else None,
+            campaign=self.campaign if self.campaign_step_id else None,
             field_name=field_name,
             context=self.missive_context(),
         )
@@ -1347,17 +1351,46 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             text += f"- {attachment['name']}\n{attachment['url']}{SEPARATOR}"
         return text
 
+    def _campaign_document_q(self):
+        """Campaign files included with this missive.
+
+        No step: every campaign file, which is the historical behaviour.
+        A step includes the files linked to it, plus campaign files that are
+        still not linked to any step.
+        """
+        from .attachment import MissiveBaseAttachment
+
+        campaign_id = self.campaign_id
+        if not campaign_id:
+            return models.Q(pk__in=[])
+        if not self.campaign_step_id:
+            return models.Q(campaign_id=campaign_id)
+        assigned = MissiveBaseAttachment.objects.filter(
+            campaign_id=campaign_id,
+            campaign_step__isnull=False,
+        ).values("pk")
+        on_step = MissiveBaseAttachment.objects.filter(
+            campaign_id=campaign_id,
+            campaign_step=self.campaign_step_id,
+        ).values("pk")
+        unassigned = models.Q(campaign_id=campaign_id) & ~models.Q(pk__in=assigned)
+        return models.Q(pk__in=on_step) | unassigned
+
     @property
     def attachments(self):
-        """Campaign + missive attachments. Order: first_document → campaign → missive (``Case/When``)."""
-        from .attachment import MissiveBaseAttachment, FIRST_DOCUMENT_PRIORITY
+        """Campaign + missive attachments.
+
+        The order stays first document, then campaign files by priority,
+        then missive files.
+        """
+        from .attachment import FIRST_DOCUMENT_PRIORITY, MissiveBaseAttachment
 
         q_filter = models.Q(attachment_type=MissiveAttachmentType.ATTACHMENT) | models.Q(
             attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT
         )
         parent_q = models.Q(missive=self)
-        if self.campaign_id:
-            parent_q |= models.Q(campaign=self.campaign)
+        if self.campaign_step_id:
+            parent_q |= self._campaign_document_q()
         qs = MissiveBaseAttachment.objects.filter(parent_q, q_filter)
         return qs.annotate(
             _source_order=models.Case(
@@ -1366,7 +1399,7 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                 default=models.Value(2),
                 output_field=models.IntegerField(),
             )
-        ).order_by("_source_order", "priority")
+        ).order_by("_source_order", "priority", "pk")
 
     @property
     def attachments_physical(self):
@@ -2043,32 +2076,39 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """Clean the missive for email support."""
         if self.additional_config.get("use_provider_template", False):
             return True
-        has_body_missive = self.body_rich or self.body_text
-        has_body_campaign = self.campaign and (self.campaign.email_body_rich or self.campaign.email_body_text)
-        if not has_body_missive and not has_body_campaign:
-            raise ValidationError(
-                {
-                    "body_rich": _("Rich body or plain text body is required (in missive or campaign)"),
-                    "body_text": _("Rich body or plain text body is required (in missive or campaign)"),
-                }
-            )
+        if self.get_locally_or_campaign_value("body_rich") or self.get_locally_or_campaign_value("body_text"):
+            return True
+        raise ValidationError(
+            {
+                "body_rich": _("Rich body or plain text body is required (in missive or campaign)"),
+                "body_text": _("Rich body or plain text body is required (in missive or campaign)"),
+            }
+        )
 
     def clean_support_phone(self):
         """Clean the missive for SMS/phone support."""
-        has_body_missive = self.body_text
-        has_body_campaign = self.campaign and self.campaign.phone_body_text
-        if not has_body_missive and not has_body_campaign:
-            raise ValidationError(
-                {
-                    "body_text": _("Plain text body is required (in missive or campaign)"),
-                }
-            )
+        if self.get_locally_or_campaign_value("body_text"):
+            return True
+        raise ValidationError(
+            {
+                "body_text": _("Plain text body is required (in missive or campaign)"),
+            }
+        )
 
     def clean_support_address(self):
         """Extra validation for address missives: body_rich or attachments."""
+        from .attachment import MissiveBaseAttachment
+        from .choices import MissiveAttachmentType
+
         has_body = self.get_locally_or_campaign_value("body_rich")
         has_attachments = self.pk and self.to_missiveattachment.all().exists()
-        has_campaign_docs = self.campaign and self.campaign.to_campaigndocument.exists()
+        document_types = models.Q(attachment_type=MissiveAttachmentType.ATTACHMENT) | models.Q(
+            attachment_type=MissiveAttachmentType.VIRTUAL_ATTACHMENT
+        )
+        has_campaign_docs = (
+            self.campaign_id
+            and MissiveBaseAttachment.objects.filter(self._campaign_document_q(), document_types).exists()
+        )
         if not has_body and not has_attachments and not has_campaign_docs:
             raise ValidationError(
                 {

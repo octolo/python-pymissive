@@ -43,21 +43,28 @@ def selection_qs(
     *,
     missive_type: str | None = None,
     active_only: bool = False,
+    campaign_step=None,
+    unassigned: bool = False,
 ):
     """Return the selection rows of *campaign*.
 
     ``active_only`` keeps rows with no missive yet and not abandoned, which
-    is what the checkbox lists.
+    is what the checkbox lists. ``campaign_step`` keeps one step. ``unassigned``
+    keeps rows that still have no step.
     """
     qs = CampaignTarget.objects.filter(campaign=campaign)
     if missive_type is not None:
         qs = qs.filter(missive_type=require_missive_type(missive_type))
+    if campaign_step is not None:
+        qs = qs.filter(campaign_step=campaign_step)
+    elif unassigned:
+        qs = qs.filter(campaign_step__isnull=True)
     if active_only:
         qs = qs.filter(CampaignTarget.active_q())
     return qs
 
 
-def select(campaign, missive_type: str, targets) -> int:
+def select(campaign, missive_type: str, targets, *, campaign_step=None) -> int:
     """Select *targets* for ``(campaign, missive_type)``.
 
     *targets* is a saved instance, an iterable of them, or a queryset.
@@ -70,6 +77,20 @@ def select(campaign, missive_type: str, targets) -> int:
     count.
     """
     channel = require_missive_type(missive_type)
+    if campaign_step is None:
+        steps = list(
+            campaign.to_campaignstep.filter(missive_type=channel).order_by("position", "pk")[:2],
+        )
+        if len(steps) != 1:
+            raise ValueError(
+                f"Campaign must define exactly one {channel!r} step when campaign_step is omitted.",
+            )
+        campaign_step = steps[0]
+    if campaign_step is not None:
+        if campaign_step.campaign_id != getattr(campaign, "pk", None):
+            raise ValueError("The step does not belong to this campaign.")
+        if campaign_step.missive_type != channel:
+            raise ValueError(f"Step missive type {campaign_step.missive_type!r} does not match {channel!r}.")
     grouped = group_targets(targets)
     if not grouped:
         return 0
@@ -82,7 +103,12 @@ def select(campaign, missive_type: str, targets) -> int:
             # ignore_conflicts alone would keep the rows safe, but not the
             # count: the database does not say which rows it dropped.
             already = set(
-                selection_qs(campaign, missive_type=channel, active_only=True)
+                selection_qs(
+                    campaign,
+                    missive_type=channel,
+                    active_only=True,
+                    campaign_step=campaign_step,
+                )
                 .filter(
                     content_type=content_type,
                     object_id__in=[object_id for object_id, _target in batch],
@@ -92,6 +118,7 @@ def select(campaign, missive_type: str, targets) -> int:
             rows = [
                 CampaignTarget(
                     campaign=campaign,
+                    campaign_step=campaign_step,
                     missive_type=channel,
                     content_type=content_type,
                     object_id=object_id,
@@ -247,9 +274,17 @@ def iter_targets(
     *,
     active_only: bool = False,
     chunk_size: int = CHUNK_SIZE,
+    campaign_step=None,
+    unassigned: bool = False,
 ):
     """Yield selection rows, prefetching the generic target per chunk."""
-    qs = selection_qs(campaign, missive_type=missive_type, active_only=active_only)
+    qs = selection_qs(
+        campaign,
+        missive_type=missive_type,
+        active_only=active_only,
+        campaign_step=campaign_step,
+        unassigned=unassigned,
+    )
     yield from iter_chunks(qs, chunk_size=chunk_size)
 
 

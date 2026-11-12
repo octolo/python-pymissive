@@ -9,15 +9,13 @@ from django.utils.html import format_html, format_html_join
 from django.utils.translation import gettext_lazy as _
 from django.utils.text import format_lazy
 from django.contrib import messages
-from phonenumber_field.modelfields import PhoneNumberField  # type: ignore[import-untyped]
-from phonenumber_field.formfields import PhoneNumberField as PhoneNumberFormField  # type: ignore[import-untyped]
-from phonenumber_field.formfields import SplitPhoneNumberField  # type: ignore[import-untyped]
 from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
 from django_boosted.decorators import admin_boost_view, admin_boost_action  # type: ignore[import-untyped]
 
 from pymissive.config import MISSIVE_TYPES
 
 from ..models.campaign import MissiveCampaign
+from .campaign_step import CampaignStepInline
 from ..models.attachment import MissiveBaseAttachment
 from ..models.scheduler import MissiveScheduledCampaign
 from ..managers.campaign import MissiveCampaignQuerySet
@@ -52,6 +50,7 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         "updated_at",
     ]
     inlines = [
+        CampaignStepInline,
         MissiveScheduledCampaignInline,
         CampaignAttachmentBaseInline,
         CampaignRelatedObjectInline,
@@ -93,11 +92,6 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         if isinstance(db_field, RichTextField):
             kwargs.setdefault("required", False)
-        if isinstance(db_field, PhoneNumberField):
-            kwargs.setdefault("required", False)
-            if db_field.null:
-                return PhoneNumberFormField(**kwargs)
-            return SplitPhoneNumberField(**kwargs)
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     changeform_actions = {
@@ -120,47 +114,6 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
 
     def change_fieldsets(self):
         """Configure fieldsets for change view."""
-        self.add_to_fieldset(
-            _("Email"),
-            [
-                "sender_email_name",
-                "sender_email",
-                "acknowledgement_email",
-                "reply_to_email_name",
-                "reply_to_email",
-                "email_body_text",
-                "email_body_rich",
-                "email_body_rich_snapshot_html",
-            ],
-        )
-        self.add_to_fieldset(
-            _("SMS / App"),
-            [
-                "sender_phone_name",
-                "sender_phone",
-                "phone_body_text",
-                "phone_body_rich",
-                "phone_body_rich_snapshot_html",
-            ],
-        )
-        self.add_to_fieldset(
-            _("Postal"),
-            [
-                "sender_address_name",
-                "sender_address",
-                "reply_to_address_name",
-                "reply_to_address",
-                "acknowledgement_letter",
-                "delivery_mode_letter",
-                "priority_letter",
-                "duplex_printing_letter",
-                "color_printing_letter",
-                "duplex_printing_registered_letter",
-                "color_printing_registered_letter",
-                "first_document",
-                "first_document_snapshot_html",
-            ],
-        )
         self.add_to_fieldset(
             _("Comment/Timestamps"),
             ["comment", "created_at", "updated_at"],
@@ -311,11 +264,13 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
     @admin_boost_view("redirect", _("Show missives"))
     def handle_show_missives(self, request, obj):
         url = reverse("admin:django_pymissive_missive_changelist")
-        url += f"?campaign={obj.pk}"
+        url += f"?campaign_step__campaign__id__exact={obj.pk}"
         return url
 
     @admin_boost_view("redirect", _("Send missive"))
     def handle_send_missive(self, request, obj):
         url = reverse("admin:django_pymissive_missive_add")
-        url += f"?campaign={obj.pk}"
+        step = obj.to_campaignstep.order_by("position", "pk").first()
+        if step is not None:
+            url += f"?campaign_step={step.pk}"
         return url
