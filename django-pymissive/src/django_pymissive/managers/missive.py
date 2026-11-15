@@ -76,6 +76,21 @@ class MissiveQuerySet(models.QuerySet):
         qs = qs.annotate(**manager._thread_count_annotations())
         return qs
 
+    def delete(self):
+        """Refuse when any selected missive has left the draft state."""
+        from django.db.models.deletion import ProtectedError
+        from django.utils.translation import gettext as _
+
+        from ..models.choices import sent_missive_q
+
+        blocked = self.filter(sent_missive_q())
+        if blocked.exists():
+            raise ProtectedError(
+                _("Cannot delete a missive that has left the draft state."),
+                set(blocked),
+            )
+        return super().delete()
+
     def with_related(self):
         """Prefetch all reverse FKs (recipients, attachments, events, billings, related).
 

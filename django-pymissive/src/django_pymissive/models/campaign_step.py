@@ -21,6 +21,7 @@ from typing import ClassVar
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.deletion import ProtectedError
 from django.utils.translation import gettext_lazy as _
 from django_geoaddress.fields import GeoaddressField
 from phonenumber_field.modelfields import PhoneNumberField
@@ -36,8 +37,10 @@ from ..utils import (
     snapshot_html_read_more,
 )
 from .choices import (
+    MissiveThreadType,
     MissiveType,
     get_missive_support_from_type,
+    sent_missive_q,
 )
 from .mixins import CommentTimestampedModel, ConfigMixin, ProcessorsMixin
 
@@ -192,6 +195,35 @@ class CampaignStep(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         if kwargs.get("update_fields") is None:
             apply_default_sender_fields(self, sender_default_fields(self.support))
         super().save(*args, **kwargs)
+
+    @property
+    def can_remove(self) -> bool:
+        """True while no live missive of this step has left the draft state."""
+        annotated = getattr(self, "has_sent_missives", None)
+        if annotated is None:
+            annotated = self._sent_missives().exists()
+            self.__dict__["has_sent_missives"] = annotated
+        return not annotated
+
+    def delete(self, using=None, keep_parents=False):
+        if not self.can_remove:
+            protected: set[models.Model] = set(self._sent_missives())
+            if not protected:
+                protected.add(self)
+            raise ProtectedError(
+                str(_("Cannot delete a campaign step that has missives which left the draft state.")),
+                protected,
+            )
+        return super().delete(using=using, keep_parents=keep_parents)
+
+    def _sent_missives(self):
+        from .missive import Missive
+
+        return Missive._base_manager.filter(
+            sent_missive_q(),
+            campaign_step=self,
+            thread_type=MissiveThreadType.MISSIVE,
+        )
 
     @property
     def support(self) -> str:

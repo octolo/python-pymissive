@@ -1,7 +1,7 @@
 """QuerySet counters for campaign steps."""
 
 from django.db import models
-from django.db.models import OuterRef, Subquery, Value
+from django.db.models import Exists, OuterRef, Subquery, Value
 from django.db.models.functions import Coalesce
 
 from .campaign import (
@@ -95,6 +95,36 @@ class CampaignStepQuerySet(models.QuerySet):
             last_send_date=latest("send_date"),
             last_ended_at=latest("ended_at"),
         )
+
+    def delete(self):
+        """Refuse when any selected step has a live missive past draft."""
+        from django.db.models.deletion import ProtectedError
+        from django.utils.translation import gettext as _
+
+        from ..models.choices import MissiveThreadType, sent_missive_q
+        from ..models.missive import Missive
+
+        blocked = self.filter(
+            Exists(
+                Missive._base_manager.filter(
+                    sent_missive_q(),
+                    campaign_step_id=OuterRef("pk"),
+                    thread_type=MissiveThreadType.MISSIVE,
+                )
+            )
+        )
+        if blocked.exists():
+            protected = set(
+                Missive._base_manager.filter(
+                    campaign_step_id__in=self.values("pk"),
+                    thread_type=MissiveThreadType.MISSIVE,
+                ).filter(sent_missive_q())
+            )
+            raise ProtectedError(
+                _("Cannot delete a campaign step that has missives which left the draft state."),
+                protected or set(blocked),
+            )
+        return super().delete()
 
 
 class CampaignStepManager(models.Manager.from_queryset(CampaignStepQuerySet)):  # type: ignore[misc]

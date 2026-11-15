@@ -183,7 +183,14 @@ def send_target(campaign, target, missive_type: str, *, campaign_step=None, buil
             .filter(content_type=content_type, object_id=object_id)
             .first()
         )
-        missive = _materialize_row(campaign, target, channel, row, build=build)
+        missive = _materialize_row(
+            campaign,
+            target,
+            channel,
+            row,
+            build=build,
+            campaign_step=campaign_step,
+        )
     if missive is None:
         raise ValidationError(
             _("This target has no reachable recipient on this channel."),
@@ -217,9 +224,11 @@ def _lock_idle_campaign(campaign) -> None:
         )
 
 
-def _materialize_row(campaign, target, channel, row, *, build=None):
+def _materialize_row(campaign, target, channel, row, *, build=None, campaign_step=None):
     chosen = selection_build(row, build=build, campaign=campaign)
-    step = row.campaign_step if row is not None and row.campaign_step_id else None
+    step = campaign_step
+    if step is None and row is not None and row.campaign_step_id:
+        step = row.campaign_step
     missive, _created = draft_services.materialize_missive(
         campaign,
         target,
@@ -257,14 +266,17 @@ def start_selection(campaign, missive_types, *, build: str | None = None):
             raise CampaignAlreadySending(
                 _("A campaign send is already in progress."),
             )
+        has_steps = locked.to_campaignstep.exists()
+        selected_steps = list(locked.to_campaignstep.filter(missive_type__in=chosen)) if has_steps else []
+        if has_steps and not selected_steps:
+            raise ValidationError(_("No campaign step matches the requested missive types."))
         scheduled = locked.to_missivecampaignsend.create(
             scheduled_send_date=timezone.now(),
             external_task_backend=SELECTION_TASK,
             additional_config={"missive_types": chosen},
             build_target_processors=[build] if build else [],
         )
-        selected_steps = locked.to_campaignstep.filter(missive_type__in=chosen)
-        if selected_steps.exists():
+        if selected_steps:
             scheduled.campaign_steps.add(*selected_steps)
     scheduled.start_scheduled_campaign()
     return scheduled

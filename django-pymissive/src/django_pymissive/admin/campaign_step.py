@@ -4,6 +4,8 @@ from typing import cast
 from urllib.parse import urlencode
 
 from django.contrib import admin
+from django.forms.formsets import DELETION_FIELD_NAME
+from django.forms.models import BaseInlineFormSet
 from django.urls import reverse
 from django.utils.html import format_html, format_html_join
 from django.utils.text import format_lazy
@@ -86,11 +88,22 @@ def campaign_step_fieldsets(missive_type, *, include_campaign=False, include_con
     return fieldsets
 
 
+class CampaignStepInlineFormSet(BaseInlineFormSet):
+    """Drop the delete box once a step has a missive past draft."""
+
+    def add_fields(self, form, index):
+        super().add_fields(form, index)
+        step = form.instance
+        if step.pk and not step.can_remove:
+            form.fields.pop(DELETION_FIELD_NAME, None)
+
+
 class CampaignStepInline(admin.StackedInline):
     """One channel's steps, with that channel's fields, on the campaign page."""
 
     extra = 0
     form = CampaignStepForm
+    formset = CampaignStepInlineFormSet
     ordering = ["position", "pk"]
     readonly_fields = ["body_rich_snapshot_html"]
     show_change_link = True
@@ -251,6 +264,11 @@ class CampaignStepAdmin(AdminBoostModel):
     def get_queryset(self, request):
         queryset = cast(CampaignStepQuerySet, super().get_queryset(request))
         return queryset.with_counts(*self.changelist_counters).with_last_run_dates()
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and not obj.can_remove:
+            return False
+        return super().has_delete_permission(request, obj)
 
     def get_fieldsets(self, request, obj=None):
         if obj is None or not obj.missive_type:

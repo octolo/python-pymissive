@@ -19,6 +19,7 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.deletion import ProtectedError
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -28,7 +29,7 @@ from ..fields import JSONField
 from ..managers.campaign_target import CampaignTargetManager
 from ..managers.related_object import object_id_value
 from ..utils import validate_import_paths
-from .choices import MissiveRecipientType, MissiveStatus
+from .choices import PENDING_STATUSES, MissiveRecipientType, MissiveStatus
 
 
 def _target_slot(row):
@@ -259,6 +260,22 @@ class CampaignTarget(models.Model):
             self.abandoned_at = now
             self.abandon_reason = reason
         return bool(updated)
+
+    @property
+    def can_remove(self) -> bool:
+        """True while this row has no missive, or that missive is still a draft."""
+        if not self.missive_id:
+            return True
+        status = self.missive.status
+        return not status or status in PENDING_STATUSES
+
+    def delete(self, using=None, keep_parents=False):
+        if not self.can_remove:
+            raise ProtectedError(
+                str(_("Cannot delete a campaign target whose missive has left the draft state.")),
+                {self.missive},
+            )
+        return super().delete(using=using, keep_parents=keep_parents)
 
     def attach_missive(self, missive) -> None:
         """Point this row at *missive* so its status is readable in one join."""

@@ -10,6 +10,7 @@ from django.core import signing
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.files.base import ContentFile
 from django.db import models, transaction
+from django.db.models.deletion import ProtectedError
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
@@ -1781,6 +1782,19 @@ class Missive(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         if response.get("code") in [200, 204, 404]:
             self.status = MissiveStatus.CANCELLED
             self.save(update_fields=["status"])
+
+    @property
+    def can_remove(self) -> bool:
+        """True while this missive is still a draft."""
+        return not self.status or self.status in PENDING_STATUSES
+
+    def delete(self, using=None, keep_parents=False):
+        if not self.can_remove:
+            raise ProtectedError(
+                str(_("Cannot delete a missive that has left the draft state.")),
+                {self},
+            )
+        return super().delete(using=using, keep_parents=keep_parents)
 
     def delete_missive(self):
         """Remove the sending on the provider (``delete_*``), regardless of submission state."""

@@ -177,7 +177,12 @@ class MissiveEventAdmin(ActionRightsMixin, AdminBoostModel):
         obj.replay()
         messages.success(request, _("Event replayed successfully."))
 
-    @admin_boost_view("adminform", _("Retrieve events"), requires_object=False)
+    @admin_boost_view(
+        "adminform",
+        _("Retrieve events"),
+        requires_object=False,
+        permission="change_missiveevent",
+    )
     def retrieve_events(self, request, form=None):
         """Retrieve provider events between two dates, optionally as a task."""
         self.require_action_rights(request)

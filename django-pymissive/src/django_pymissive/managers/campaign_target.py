@@ -66,5 +66,22 @@ class CampaignTargetQuerySet(models.QuerySet):
             ),
         )
 
+    def delete(self):
+        """Refuse when any selected row points at a missive past draft."""
+        from django.db.models.deletion import ProtectedError
+        from django.utils.translation import gettext as _
+
+        from ..models.choices import sent_missive_q
+        from ..models.missive import Missive
+
+        blocked = self.filter(sent_missive_q("missive"))
+        if blocked.exists():
+            protected = set(Missive._base_manager.filter(pk__in=blocked.values("missive_id")))
+            raise ProtectedError(
+                _("Cannot delete a campaign target whose missive has left the draft state."),
+                protected or set(blocked),
+            )
+        return super().delete()
+
 
 CampaignTargetManager = models.Manager.from_queryset(CampaignTargetQuerySet)

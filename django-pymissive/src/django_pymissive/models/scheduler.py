@@ -343,9 +343,16 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         return self
 
     def selected_campaign_steps(self) -> list:
-        """Selected steps in campaign order; an empty M2M means every step."""
+        """Selected steps in campaign order; an empty M2M means every step.
+
+        ``step_scope`` ``none`` is a stored scope that matched no step. That
+        run stays empty instead of widening to every step of the campaign.
+        """
         steps = list(self.campaign_steps.all())
         if not steps:
+            config = self.additional_config if isinstance(self.additional_config, dict) else {}
+            if config.get("step_scope") == "none":
+                return []
             steps = list(self.campaign.to_campaignstep.all())
         return sorted(
             (step for step in steps if step.campaign_id == self.campaign_id),

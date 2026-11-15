@@ -10,6 +10,8 @@ import pytest
 from django.contrib import admin
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError
+from django.forms.formsets import DELETION_FIELD_NAME
 from django.test import Client, RequestFactory, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -210,6 +212,37 @@ def test_one_recipient_can_be_selected_on_two_steps_of_the_same_type():
     assert first.get_locally_or_campaign_value("body_text") == "INVITE-BODY"
     assert second.get_locally_or_campaign_value("body_text") == "REMINDER-BODY"
 
+
+def test_building_one_step_does_not_reuse_the_other_steps_recipients():
+    from django_pymissive.models.campaign_target import CampaignRecipientTarget
+    from django_pymissive.models.choices import MissiveRecipientType
+    from django_pymissive.processors.build_target import build_target_processor
+
+    campaign = _campaign()
+    invite = _step(campaign, 1, MissiveType.EMAIL, "Invite", subject="Invite", body_text="Invite")
+    reminder = _step(campaign, 2, MissiveType.EMAIL, "Reminder", subject="Reminder", body_text="Reminder")
+    ada = create_campaign_contact(
+        "Ada",
+        "Lovelace",
+        emails=["ada@example.com", "ada.work@example.com"],
+    )
+    select(campaign, "email", ada, campaign_step=invite)
+    CampaignRecipientTarget.objects.create(
+        target=CampaignTarget.objects.get(campaign_step=invite),
+        recipient_type=MissiveRecipientType.RECIPIENT,
+        values=["only-invite@example.com"],
+    )
+
+    limited = build_target_processor(campaign, ada, "email", full_targets=True, campaign_step=reminder)
+    opened = build_target_processor(campaign, ada, "email", full_targets=True, campaign_step=invite)
+
+    assert limited.campaign_step_id == reminder.pk
+    assert list(limited.to_missiverecipient.values_list("email", flat=True)) == [
+        "ada@example.com",
+        "ada.work@example.com",
+    ]
+    assert list(opened.to_missiverecipient.values_list("email", flat=True)) == ["only-invite@example.com"]
+
     existing = CampaignTarget.objects.get(campaign_step=invite)
     with pytest.raises(IntegrityError):
         with transaction.atomic():
@@ -326,6 +359,89 @@ def test_two_emails_can_share_files_in_campaign_priority_order():
     assert first_ids == [alpha.pk, beta.pk]
     assert second_ids == [alpha.pk, beta.pk]
     assert set(first.attachments.values_list("pk", flat=True)) == {alpha.pk, beta.pk}
+
+
+def test_deleting_a_step_does_not_share_its_private_files():
+    campaign = _campaign()
+    email = _step(campaign, 1, MissiveType.EMAIL, "Email")
+    letter = _step(campaign, 2, MissiveType.LETTER, "Letter")
+    only_email = _file(campaign, "email-only.txt")
+    shared = _file(campaign, "shared.txt")
+    untouched = _file(campaign, "global.txt")
+    only_email.campaign_step.add(email)
+    shared.campaign_step.add(email, letter)
+
+    email.delete()
+
+    assert not MissiveBaseAttachment.objects.filter(pk=only_email.pk).exists()
+    shared.refresh_from_db()
+    assert list(shared.campaign_step.values_list("pk", flat=True)) == [letter.pk]
+    letter_ids = list(_missive(campaign, letter, MissiveType.LETTER).attachments.values_list("pk", flat=True))
+    assert only_email.pk not in letter_ids
+    assert shared.pk in letter_ids
+    assert untouched.pk in letter_ids
+
+
+def test_a_step_with_only_drafts_can_be_deleted():
+    campaign = _campaign()
+    step = _step(campaign, 1, MissiveType.EMAIL)
+    draft = _missive(campaign, step, MissiveType.EMAIL)
+
+    step.delete()
+
+    assert not CampaignStep.objects.filter(pk=step.pk).exists()
+    draft.refresh_from_db()
+    assert draft.campaign_step_id is None
+
+
+def test_a_step_that_sent_a_missive_cannot_be_deleted():
+    campaign = _campaign()
+    sent_step = _step(campaign, 1, MissiveType.EMAIL, "Invite")
+    draft_step = _step(campaign, 2, MissiveType.SMS, "Text")
+    sent = _missive(campaign, sent_step, MissiveType.EMAIL)
+    sent.status = MissiveStatus.SUCCESS
+    sent.save(update_fields=["status"])
+    draft = _missive(campaign, draft_step, MissiveType.SMS)
+
+    with pytest.raises(ProtectedError, match="left the draft state"):
+        sent_step.delete()
+    with pytest.raises(ProtectedError, match="left the draft state"):
+        CampaignStep.objects.filter(pk=sent_step.pk).delete()
+
+    assert CampaignStep.objects.filter(pk=sent_step.pk).exists()
+    sent.refresh_from_db()
+    assert sent.campaign_step_id == sent_step.pk
+    draft_step.delete()
+    assert not CampaignStep.objects.filter(pk=draft_step.pk).exists()
+    draft.refresh_from_db()
+    assert draft.campaign_step_id is None
+
+
+def test_step_admin_hides_delete_once_a_missive_left_draft():
+    from django.contrib.auth import get_user_model
+
+    from django_pymissive.admin.campaign_step import EmailCampaignStepInline
+
+    campaign = _campaign()
+    step = _step(campaign, 1, MissiveType.EMAIL, "Invite")
+    sent = _missive(campaign, step, MissiveType.EMAIL)
+    request = RequestFactory().get("/")
+    request.user = get_user_model().objects.create_superuser(
+        username="step-delete",
+        email="step-delete@example.com",
+        password="x",
+    )
+    step_admin = admin.site._registry[CampaignStep]
+
+    assert step_admin.has_delete_permission(request, step) is True
+
+    sent.status = MissiveStatus.SUCCESS
+    sent.save(update_fields=["status"])
+
+    assert step_admin.has_delete_permission(request, CampaignStep.objects.get(pk=step.pk)) is False
+    inline = EmailCampaignStepInline(MissiveCampaign, admin.site)
+    formset = inline.get_formset(request, campaign)(instance=campaign)
+    assert DELETION_FIELD_NAME not in formset.forms[0].fields
 
 
 def test_campaign_step_relation_is_declared_on_attachments():

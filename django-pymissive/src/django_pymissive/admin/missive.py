@@ -128,6 +128,14 @@ class HistoryOrMessageListFilter(admin.SimpleListFilter):
         return queryset.filter(thread_type=MissiveThreadType.MISSIVE)
 
 
+def _can_read_missive(request) -> bool:
+    """View or change. A codename other than ``view`` skips the locked-form POST check."""
+    user = getattr(request, "user", None)
+    if user is None or not user.is_active:
+        return False
+    return user.has_perm("django_pymissive.view_missive") or user.has_perm("django_pymissive.change_missive")
+
+
 @admin.register(Missive)
 class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     """Admin for missive model."""
@@ -565,6 +573,11 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     def is_not_cancelled(self, obj):
         return obj and obj.pk and obj.status != MissiveStatus.CANCELLED
 
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and not obj.can_remove:
+            return False
+        return super().has_delete_permission(request, obj)
+
     def has_change_permission(self, request, obj=None):
         # A locked missive is never editable, whatever rights the user has.
         if request.method == "POST" and missive_admin_locked(obj):
@@ -588,7 +601,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     def handle_resend_missive(self, request, object_id):
         return self.redirect_to_boost_view(request, object_id, "resend_missive")
 
-    @admin_boost_view("confirm", _("Resend"), hidden=True)
+    @admin_boost_view("confirm", _("Resend"), hidden=True, permission="change_missive")
     def resend_missive(self, request, obj, confirmed=False):
         waiting = self.confirm_action(request, obj, confirmed, _("Are you sure you want to resend this missive?"))
         if waiting:
@@ -620,7 +633,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     def handle_send_missive(self, request, object_id):
         return self.redirect_to_boost_view(request, object_id, "send_missive")
 
-    @admin_boost_view("confirm", _("Send"), hidden=True)
+    @admin_boost_view("confirm", _("Send"), hidden=True, permission="change_missive")
     def send_missive(self, request, obj, confirmed=False):
         waiting = self.confirm_action(request, obj, confirmed, _("Are you sure you want to send this missive?"))
         if waiting:
@@ -662,7 +675,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     def handle_delete_missive(self, request, object_id):
         return self.redirect_to_boost_view(request, object_id, "delete_missive")
 
-    @admin_boost_view("confirm", _("Delete sending"), hidden=True)
+    @admin_boost_view("confirm", _("Delete sending"), hidden=True, permission="change_missive")
     def delete_missive(self, request, obj, confirmed=False):
         waiting = self.confirm_action(
             request,
@@ -708,7 +721,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             self.has_action_rights(request, obj) and obj and obj.pk and self.provider_has_service(obj, "retrieve")
         )
 
-    @admin_boost_view("confirm", _("Retrieve from provider"))
+    @admin_boost_view("confirm", _("Retrieve from provider"), permission="change_missive")
     def refresh_from_provider(self, request, obj, confirmed=False):
         """Update this missive from the provider using its uid and external_id."""
         waiting = self.confirm_action(
@@ -853,7 +866,12 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     def has_download_proof_permission(self, request, obj=None):
         return bool(self.has_action_rights(request, obj) and obj and obj.can_proofs())
 
-    @admin_boost_view("message", _("Download proofs"), hidden=True)
+    @admin_boost_view(
+        "message",
+        _("Download proofs"),
+        hidden=True,
+        permission=_can_read_missive,
+    )
     def download_proof(self, request, obj):
         if request.method != "POST":
             return HttpResponse(_("Method not allowed"), status=405)
@@ -884,7 +902,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     def has_save_proofs_permission(self, request, obj=None):
         return bool(self.has_action_rights(request, obj) and obj and obj.can_proofs())
 
-    @admin_boost_view("confirm", _("Save proofs"))
+    @admin_boost_view("confirm", _("Save proofs"), permission="change_missive")
     def save_proofs(self, request, obj, confirmed=False):
         from django.core.files.base import ContentFile
         from ..models.choices import MissiveAttachmentType

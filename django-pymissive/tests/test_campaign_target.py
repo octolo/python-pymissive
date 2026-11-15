@@ -387,33 +387,30 @@ def test_deleting_a_draft_gives_the_checkbox_back():
 
 
 @pytest.mark.django_db
-def test_deleting_a_sent_missive_removes_its_row():
+def test_a_sent_missive_and_its_target_cannot_be_deleted():
+    from django.db.models.deletion import ProtectedError
+
     campaign = _campaign()
     ada = _contact("ada@example.com")
     select(campaign, "email", ada)
     sent, _created = materialize_missive(campaign, ada, "email", build=build_contact_email)
-    CampaignTarget.objects.get().attach_missive(sent)
-    Missive.objects.filter(pk=sent.pk).update(status=MissiveStatus.SUCCESS)
-
-    Missive.objects.get(pk=sent.pk).delete()
-
-    assert not CampaignTarget.objects.filter(campaign=campaign).exists()
-    assert is_selected(campaign, ada, "email") is False
-
-
-@pytest.mark.django_db
-def test_deleting_a_sent_missive_keeps_a_new_selection_of_the_same_target():
-    campaign = _campaign()
-    ada = _contact("ada@example.com")
-    select(campaign, "email", ada)
-    sent, _created = materialize_missive(campaign, ada, "email", build=build_contact_email)
-    CampaignTarget.objects.get().attach_missive(sent)
+    row = CampaignTarget.objects.get()
+    row.attach_missive(sent)
     Missive.objects.filter(pk=sent.pk).update(status=MissiveStatus.SUCCESS)
     select(campaign, "email", ada)
+    row.refresh_from_db()
 
-    Missive.objects.get(pk=sent.pk).delete()
+    with pytest.raises(ProtectedError, match="left the draft state"):
+        Missive.objects.get(pk=sent.pk).delete()
+    with pytest.raises(ProtectedError, match="left the draft state"):
+        Missive.objects.filter(pk=sent.pk).delete()
+    with pytest.raises(ProtectedError, match="left the draft state"):
+        row.delete()
+    with pytest.raises(ProtectedError, match="left the draft state"):
+        CampaignTarget.objects.filter(pk=row.pk).delete()
 
-    assert CampaignTarget.objects.filter(campaign=campaign).count() == 1
+    assert Missive.objects.filter(pk=sent.pk).exists()
+    assert CampaignTarget.objects.filter(pk=row.pk, missive_id=sent.pk).exists()
     assert is_selected(campaign, ada, "email") is True
 
 
@@ -873,6 +870,34 @@ def test_start_selection_rejects_an_unknown_channel():
     campaign = _campaign()
     with pytest.raises(ValidationError):
         start_selection(campaign, ["pigeon"], build=BUILD)
+
+
+@pytest.mark.django_db
+def test_start_selection_rejects_a_channel_the_campaign_does_not_step():
+    campaign = _campaign()
+    with pytest.raises(ValidationError):
+        start_selection(campaign, ["branded"], build=BUILD)
+    assert not MissiveScheduledCampaign.objects.filter(campaign=campaign).exists()
+
+
+@pytest.mark.django_db
+def test_send_target_keeps_the_explicit_step_without_a_selection(settings):
+    settings.PYMISSIVE_DRY_RUN = True
+    settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
+    campaign = _campaign()
+    reminder = CampaignStep.objects.create(
+        campaign=campaign,
+        position=4,
+        missive_type=MissiveType.EMAIL,
+        subject="Reminder",
+        body_text="Reminder",
+    )
+    ada = _contact("ada@example.com")
+
+    send_target(campaign, ada, "email", campaign_step=reminder, build=build_contact_email)
+
+    missive = Missive.objects.get(campaign_step__campaign=campaign)
+    assert missive.campaign_step_id == reminder.pk
 
 
 @pytest.mark.django_db

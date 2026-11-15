@@ -112,6 +112,11 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
     raw_id_fields = ["campaign", "campaign_step", "missive"]
     actions = ["abandon_selected"]
 
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and not obj.can_remove:
+            return False
+        return super().has_delete_permission(request, obj)
+
     def change_fieldsets(self):
         """Configure fieldsets for the change view."""
         self.add_to_fieldset(

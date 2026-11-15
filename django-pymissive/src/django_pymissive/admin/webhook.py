@@ -157,7 +157,12 @@ class MissiveWebhookAdmin(ActionRightsMixin, AdminBoostModel):
     def has_generate_webhook_secret_permission(self, request, obj=None):
         return self.has_action_rights(request, obj)
 
-    @admin_boost_view("adminform", _("Generate webhook secret"), requires_object=False)
+    @admin_boost_view(
+        "adminform",
+        _("Generate webhook secret"),
+        requires_object=False,
+        permission="view_missivewebhook",
+    )
     def generate_webhook_secret(self, request, form=None):
         """Show a secret seeded by provider name, UTC date, and SECRET_KEY."""
         self.require_action_rights(request)

@@ -4,10 +4,12 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 
 from django.core.exceptions import ValidationError
-from django.db.models.signals import m2m_changed, post_save
+from django.db.models import Count
+from django.db.models.signals import m2m_changed, post_save, pre_delete
 from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
 
+from .models.attachment import MissiveBaseAttachment
 from .models.campaign_step import CampaignStep
 from .models.choices import MissiveEventType
 from .models.event import MissiveEvent
@@ -50,6 +52,20 @@ def trigger_billings_on_event(sender, instance, created, **kwargs):
         return
     if instance.missive_id:
         trigger_billings(instance.missive)
+
+
+@receiver(pre_delete, sender=CampaignStep)
+def delete_attachments_exclusive_to_step(sender, instance, **kwargs):
+    """A file limited to this step must not become shared once the step is gone.
+
+    An attachment with no step link is sent with every step. Deleting the
+    step only drops the link, so a file that belonged to it alone would
+    start riding along with the steps that remain.
+    """
+    MissiveBaseAttachment.objects.annotate(step_count=Count("campaign_step")).filter(
+        campaign_step=instance,
+        step_count=1,
+    ).delete()
 
 
 @receiver(m2m_changed, sender=MissiveScheduledCampaign.campaign_steps.through)

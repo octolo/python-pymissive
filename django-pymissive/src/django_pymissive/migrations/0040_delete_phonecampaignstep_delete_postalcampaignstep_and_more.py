@@ -5,17 +5,46 @@ import django_providerkit.fields
 from django.db import migrations, models
 
 
+def scheduled_scope_types(missive_type, additional_config):
+    """Types this run must keep. ``None`` means every step.
+
+    ``*`` is the historical "all types" value. A selection run stored its
+    real list in ``additional_config['missive_types']`` and left the column
+    at ``*``, so that list is the scope. An empty list stays "every step".
+    """
+    concrete = str(missive_type or "")
+    if concrete and concrete != "*":
+        return [concrete]
+    if isinstance(additional_config, dict):
+        listed = [str(value) for value in additional_config.get("missive_types") or [] if value]
+        if listed:
+            return listed
+    return None
+
+
 def prepare_step_relations(apps, schema_editor):
     CampaignStep = apps.get_model("django_pymissive", "CampaignStep")
     CampaignTarget = apps.get_model("django_pymissive", "CampaignTarget")
     Scheduled = apps.get_model("django_pymissive", "MissiveScheduledCampaign")
 
-    for scheduled in Scheduled.objects.exclude(missive_type="*").iterator():
-        steps = CampaignStep.objects.filter(
-            campaign_id=scheduled.campaign_id,
-            missive_type=scheduled.missive_type,
+    for scheduled in Scheduled.objects.iterator():
+        types = scheduled_scope_types(scheduled.missive_type, scheduled.additional_config)
+        if types is None:
+            continue
+        steps = list(
+            CampaignStep.objects.filter(
+                campaign_id=scheduled.campaign_id,
+                missive_type__in=types,
+            )
         )
-        scheduled.campaign_steps.add(*steps)
+        if steps:
+            scheduled.campaign_steps.add(*steps)
+            continue
+        # No matching step must not fall through to "every step".
+        config = dict(scheduled.additional_config or {})
+        config["step_scope"] = "none"
+        scheduled.additional_config = config
+        scheduled.save(update_fields=["additional_config"])
 
     next_positions = {
         row["campaign_id"]: (row["position"] or 0) + 1
@@ -63,7 +92,10 @@ def restore_legacy_scope_fields(apps, schema_editor):
     for scheduled in Scheduled.objects.prefetch_related("campaign_steps").iterator():
         types = set(scheduled.campaign_steps.values_list("missive_type", flat=True))
         scheduled.missive_type = next(iter(types)) if len(types) == 1 else "*"
-        scheduled.save(update_fields=["missive_type"])
+        config = dict(scheduled.additional_config or {})
+        config.pop("step_scope", None)
+        scheduled.additional_config = config
+        scheduled.save(update_fields=["missive_type", "additional_config"])
 
 
 class Migration(migrations.Migration):

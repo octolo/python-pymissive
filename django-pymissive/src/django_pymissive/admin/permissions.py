@@ -11,16 +11,14 @@ from django.urls import reverse
 class ActionRightsMixin(admin.ModelAdmin):
     """Make ``django_boosted`` actions respect the Django change permission.
 
-    The library grants change permission to any admin declaring changeform
-    actions, enforces only ``has_view_permission`` on its boost views, and
-    derives button availability from the ``has_<action>_permission`` hooks —
-    which describe object state, not user rights. Without this, a staff account
-    holding nothing but view permission can trigger a send.
+    A boost view left on the default ``view`` permission also demands
+    ``has_change_permission`` on POST. That hook stays False for an immutable
+    event, a locked missive and a virtual webhook, so those views declare the
+    Django permission codename instead. Their body still calls
+    :meth:`require_action_rights`.
 
-    Submit actions (``@admin_boost_action``) are genuinely enforced: a POST is
-    dispatched only for actions listed by ``get_submit_actions``. Boost views
-    (``@admin_boost_view``) are not, so the mutating ones must call
-    :meth:`require_action_rights` in their own body.
+    Submit actions (``@admin_boost_action``) are dispatched only for actions
+    listed by ``get_submit_actions``.
     """
 
     def has_action_rights(self, request, obj=None) -> bool:

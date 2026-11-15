@@ -166,6 +166,7 @@ def build_target_processor(
         missive_type,
         full_targets=full_targets,
         row=row,
+        campaign_step=campaign_step,
     )
     primary_type = default_recipient_type(missive_type)
     if not ordered or ordered[0][0] != primary_type:
@@ -237,6 +238,7 @@ def resolved_target_contacts(
     *,
     full_targets: bool,
     row=None,
+    campaign_step=None,
 ) -> list[tuple[str, str, object]]:
     """Pure recipient resolution shared by target generation and preview."""
     from pymissive.config import missive_support_for_type
@@ -250,6 +252,7 @@ def resolved_target_contacts(
         missive_type,
         full_targets=full_targets,
         row=row,
+        campaign_step=campaign_step,
     )
     grouped = _usable_grouped_contacts(grouped, support)
     fallback = _target_name(target, build_target_fields().get("name", ())) if target is not None else ""
@@ -288,21 +291,29 @@ def resolve_target_recipients(
     *,
     full_targets: bool = False,
     row=None,
+    campaign_step=None,
 ) -> dict[str, list]:
     """Contacts grouped by recipient type.
 
     *row*, when given, is the selection whose sub-targets are read.
-    Otherwise the live row of *target* on this channel is used. Each
-    sub-target owns its role, even with an empty list, so a contact can
-    be left out. Every other contact of the channel goes to
-    :func:`default_recipient_type`.
+    Otherwise the live row of *target* on this channel is used.
+    *campaign_step* keeps that lookup on one step: another step of the
+    same channel is not a fallback, and a step with no row contributes
+    none of its siblings' lists. Each sub-target owns its role, even
+    with an empty list, so a contact can be left out. Every other
+    contact of the channel goes to :func:`default_recipient_type`.
     """
     from pymissive.config import missive_support_for_type
 
     if row is None:
         from ..models.campaign_target import active_campaign_target
 
-        row = active_campaign_target(campaign, target, missive_type)
+        row = active_campaign_target(
+            campaign,
+            target,
+            missive_type,
+            campaign_step=campaign_step,
+        )
     grouped: dict[str, list] = {}
     owned: set[str] = set()
     if row is not None and row.pk:

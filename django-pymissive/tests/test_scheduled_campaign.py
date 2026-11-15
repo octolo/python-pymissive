@@ -72,6 +72,31 @@ def _scheduled(campaign, **kw) -> MissiveScheduledCampaign:
     return scheduled
 
 
+def test_scheduled_scope_types_keeps_a_wildcard_list_and_a_true_all():
+    from importlib import import_module
+
+    scope = import_module(
+        "django_pymissive.migrations.0040_delete_phonecampaignstep_delete_postalcampaignstep_and_more"
+    ).scheduled_scope_types
+
+    assert scope("email", {}) == ["email"]
+    assert scope("*", {"missive_types": ["email", "sms"]}) == ["email", "sms"]
+    assert scope("*", {}) is None
+    assert scope("*", {"missive_types": []}) is None
+
+
+def test_unmatched_step_scope_does_not_widen_to_every_step():
+    campaign = _campaign()
+    CampaignStep.objects.create(campaign=campaign, position=1, missive_type="email")
+    CampaignStep.objects.create(campaign=campaign, position=2, missive_type="sms")
+    run = _scheduled(
+        campaign,
+        additional_config={"missive_types": ["branded"], "step_scope": "none"},
+    )
+
+    assert run.selected_campaign_steps() == []
+
+
 # ---------------------------------------------------------------------------
 # can_send
 # ---------------------------------------------------------------------------
