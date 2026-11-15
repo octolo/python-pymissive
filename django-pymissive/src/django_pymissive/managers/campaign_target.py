@@ -1,5 +1,7 @@
 """Queryset for campaign selection rows."""
 
+from typing import cast
+
 from django.db import models
 from django.db.models import OuterRef, Subquery, Value
 from django.db.models.functions import Coalesce
@@ -79,7 +81,7 @@ class CampaignTargetQuerySet(models.QuerySet):
             protected = set(Missive._base_manager.filter(pk__in=blocked.values("missive_id")))
             raise ProtectedError(
                 _("Cannot delete a campaign target whose missive has left the draft state."),
-                protected or set(blocked),
+                cast(set[models.Model], protected or set(blocked)),
             )
         return super().delete()
 

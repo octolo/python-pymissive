@@ -87,7 +87,7 @@ class MissiveQuerySet(models.QuerySet):
         if blocked.exists():
             raise ProtectedError(
                 _("Cannot delete a missive that has left the draft state."),
-                set(blocked),
+                cast(set[models.Model], set(blocked)),
             )
         return super().delete()
 

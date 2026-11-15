@@ -1,5 +1,7 @@
 """QuerySet counters for campaign steps."""
 
+from typing import cast
+
 from django.db import models
 from django.db.models import Exists, OuterRef, Subquery, Value
 from django.db.models.functions import Coalesce
@@ -122,7 +124,7 @@ class CampaignStepQuerySet(models.QuerySet):
             )
             raise ProtectedError(
                 _("Cannot delete a campaign step that has missives which left the draft state."),
-                protected or set(blocked),
+                cast(set[models.Model], protected or set(blocked)),
             )
         return super().delete()
 

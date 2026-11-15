@@ -264,16 +264,18 @@ class CampaignTarget(models.Model):
     @property
     def can_remove(self) -> bool:
         """True while this row has no missive, or that missive is still a draft."""
-        if not self.missive_id:
+        missive = self.missive
+        if missive is None:
             return True
-        status = self.missive.status
-        return not status or status in PENDING_STATUSES
+        return not missive.status or missive.status in PENDING_STATUSES
 
     def delete(self, using=None, keep_parents=False):
         if not self.can_remove:
+            missive = self.missive
+            protected: set[models.Model] = {self} if missive is None else {missive}
             raise ProtectedError(
                 str(_("Cannot delete a campaign target whose missive has left the draft state.")),
-                {self.missive},
+                protected,
             )
         return super().delete(using=using, keep_parents=keep_parents)
 
