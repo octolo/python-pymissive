@@ -14,11 +14,7 @@ def generate_webhook_secret(
     *,
     when: date | datetime | None = None,
 ) -> str:
-    """Return a url-safe secret seeded by provider, UTC date, and ``extra``.
-
-    ``extra`` is mouse-motion samples on the CLI, or Django ``SECRET_KEY``
-    in the admin. The same inputs always produce the same token.
-    """
+    """Return a URL-safe secret seeded by provider, UTC date, and ``extra``."""
     name = (provider or "").strip().lower()
     if not name:
         raise ValueError("provider is required")
@@ -32,7 +28,7 @@ def generate_webhook_secret(
 
 
 def collect_mouse_entropy(seconds: float = 5) -> str:
-    """Sample pointer positions for ``seconds``. Needs a display (tkinter)."""
+    """Sample pointer positions for ``seconds``. Needs a display and tkinter."""
     if seconds <= 0:
         raise ValueError("seconds must be greater than 0")
     try:

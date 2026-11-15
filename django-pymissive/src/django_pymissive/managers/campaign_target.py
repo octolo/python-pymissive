@@ -43,7 +43,10 @@ class CampaignTargetQuerySet(models.QuerySet):
         One query for the generic targets of the chunk, one for the
         sub-targets. Reading either afterwards does not hit the database.
         """
-        return self.prefetch_related("target", "to_campaignrecipienttarget")
+        return self.select_related("campaign_step").prefetch_related(
+            "target",
+            "to_campaignrecipienttarget",
+        )
 
     def with_target_count(self):
         """Annotate the number of explicitly selected contact values."""

@@ -10,8 +10,8 @@ For detailed information, refer to:
 
 ### Quick Reference
 
-- Always use `./service.py dev <command>` or `python dev.py <command>` for project tooling
-- Always use `./service.py quality <command>` or `python quality.py <command>` for quality checks
+- Run project tooling from `python-pymissive/`.
+- Use `python -m pytest` for tests and the configured `ruff` and `mypy` commands for quality checks.
 - Maintain clean module organization and separation of concerns
 - Default to English for all code artifacts (comments, docstrings, logging, error strings, documentation snippets, etc.)
 - Follow Python best practices and quality standards

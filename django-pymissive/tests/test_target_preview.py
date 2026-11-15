@@ -1,16 +1,17 @@
 """A campaign target opens the same preview as a missive, without saving one."""
 
+import pytest
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.test import Client
 from django.urls import reverse
-
-import pytest
-
 from django_pymissive.models import CampaignStep, CampaignTarget, Missive, MissiveCampaign, MissiveStatus, MissiveType
 from django_pymissive.models.choices import MissiveRecipientType
+from django_pymissive.processors.build_target import ordered_target_contacts
 from django_pymissive.services import select
+from django_pymissive.services.preview import resolve_preview
+
 from tests.fakeapp.models import Contact
 
 pytestmark = pytest.mark.django_db
@@ -23,8 +24,9 @@ def _campaign():
         position=1,
         missive_type=MissiveType.EMAIL,
         subject="Assemblée",
-        body_rich="<p>token-{{ contact.id }}</p>",
+        body_rich="<p>token-{{ contact.id }}-{{ step_token }}</p>",
         body_text="Bonjour",
+        additional_context={"step_token": "from-step"},
     )
     return campaign
 
@@ -60,10 +62,28 @@ def test_target_preview_renders_the_contact_and_saves_nothing():
     assert response.status_code == 200
     html = response.content.decode()
     assert f"token-{contact.pk}" in html
+    assert "from-step" in html
     assert "ada-preview@example.com" in html
     assert "grace-preview@example.com" in html
     assert Missive.objects.count() == 0
     assert CampaignTarget.objects.get(pk=row.pk).missive_id is None
+
+
+def test_target_resolver_uses_the_same_pure_contacts_as_generation():
+    row, _contact = _row()
+    row.add_recipient(
+        {"name": "Grace", "email": "grace-preview@example.com"},
+        recipient_type=MissiveRecipientType.CC,
+    )
+
+    expected = ordered_target_contacts(row)
+    preview = resolve_preview(row)
+    recipients = preview.runtime_data.recipients
+
+    assert [(recipient.recipient_type, recipient.name, recipient.email) for recipient in recipients] == expected
+    assert preview.runtime_data is preview.missive._preview_runtime
+    assert preview.missive._state.adding
+    assert Missive.objects.count() == 0
 
 
 def test_target_preview_is_staff_only():

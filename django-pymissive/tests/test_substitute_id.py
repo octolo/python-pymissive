@@ -11,7 +11,7 @@ from django_pymissive.forms.missive import RetrieveMissiveForm
 from django_pymissive.models import MissiveRecipientEmail
 from django_pymissive.models.choices import MissiveType
 from django_pymissive.models.missive import Missive
-from django_pymissive.retrieve import lookup_missive, retrieve_from_provider
+from django_pymissive.services.retrieve import lookup_missive, retrieve_from_provider
 from pymissive.providers.maileva import _provider_custom_id
 
 pytestmark = pytest.mark.django_db

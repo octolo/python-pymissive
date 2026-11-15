@@ -21,7 +21,7 @@ _WEBHOOK_HOST_SUFFIXES = (".webhook.office.com", ".logic.azure.com", ".environme
 
 
 class _NoRedirects(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(self, req, fp, code, _msg, headers, _newurl):
         return None
 
 
@@ -46,6 +46,7 @@ class TeamsProvider(MissiveProviderBase):
         "(no channel ID — the URL is tied to the channel when created in Teams)"
     )
     brands = ["teams"]
+    preview_brand = "teams"
     config_keys = ["TEAMS_WEBHOOK_URL"]
     site_url = "https://www.microsoft.com/microsoft-teams"
     documentation_url = (

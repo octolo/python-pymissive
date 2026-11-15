@@ -9,13 +9,13 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
-from .models.choices import (
+from ..models.choices import (
     MissiveRecipientType,
     MissiveSupport,
     get_missive_support_from_type,
 )
-from .models.missive import Missive
-from .models.recipient import MissiveRecipient
+from ..models.missive import Missive
+from ..models.recipient import MissiveRecipient
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def _ingest_retrieve_response(missive: Missive, response: dict, partner_id=None,
         events = response.get("events")
         if events:
             missive.to_missiveevent.all().delete()
-            from .signals import suppress_event_billings
+            from ..signals import suppress_event_billings
 
             with suppress_event_billings():
                 missive.handle_events(events)

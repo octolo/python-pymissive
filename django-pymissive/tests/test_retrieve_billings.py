@@ -10,7 +10,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 
-from django_pymissive.billings import (
+from django_pymissive.services.billings import (
     _process_billing,
     delay_retrieve_billings,
     retrieve_billings,
@@ -167,7 +167,7 @@ def test_retrieve_billings_matches_substitute_id_when_no_external_id():
 
 def test_delay_retrieve_billings_uses_sync_backend(settings):
     settings.PYMISSIVE_CAMPAIGN_TASK_BACKEND = "sync"
-    with patch("django_pymissive.billings.retrieve_billings") as retrieve:
+    with patch("django_pymissive.services.billings.retrieve_billings") as retrieve:
         delay_retrieve_billings(
             provider="maileva",
             missive_type=MissiveType.REGISTERED_LETTER,

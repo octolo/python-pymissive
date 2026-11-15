@@ -14,6 +14,7 @@ from django_pymissive.models.campaign import MissiveCampaign
 from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.choices import MissiveStatus, MissiveType
 from django_pymissive.models.missive import Missive
+from django_pymissive.utils import sender_default_fields
 
 pytestmark = pytest.mark.django_db
 
@@ -211,3 +212,27 @@ def test_retrieved_missive_does_not_refill_sender():
     missive.refresh_from_db()
     assert missive.sender_name is None
     assert missive.sender_email is None
+
+
+def test_sender_default_fields_follow_the_support():
+    assert sender_default_fields("email") == {"sender_name": "name", "sender_email": "email"}
+    assert sender_default_fields("phone") == {"sender_name": "name", "sender_phone": "phone"}
+    assert sender_default_fields("address") == {"sender_name": "name", "sender_address": "address"}
+    assert sender_default_fields("application") == {"sender_name": "name"}
+    assert sender_default_fields(None) == {"sender_name": "name"}
+
+
+@override_settings(PYMISSIVE_DEFAULT_SENDER={})
+def test_step_update_fields_does_not_apply_sender_defaults():
+    campaign = _campaign()
+    step = _step(campaign, MissiveType.EMAIL, subject="Hello")
+    assert not step.sender_email
+
+    with override_settings(PYMISSIVE_DEFAULT_SENDER=_DEFAULTS):
+        step.subject = "Updated"
+        step.save(update_fields=["subject"])
+
+    step.refresh_from_db()
+    assert step.subject == "Updated"
+    assert not step.sender_email
+    assert not step.sender_name

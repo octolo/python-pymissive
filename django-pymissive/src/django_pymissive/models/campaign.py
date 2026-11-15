@@ -1,10 +1,8 @@
 """Missive campaign models."""
 
-import json
 import uuid
 
 from django.core.exceptions import ValidationError
-from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models, transaction
 from django.db.models.deletion import ProtectedError
 from django.urls import reverse
@@ -25,9 +23,9 @@ from ..models.choices import (
 )
 from ..models.mixins import CommentTimestampedModel, ConfigMixin, ProcessorsMixin
 from ..utils import (
+    json_safe,
     serialize_model_for_context,
     snapshot_html_read_more,
-    validate_import_paths,
 )
 
 
@@ -209,7 +207,7 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         metadata = dict(data.get("metadata") or {})
         metadata.pop("processing", None)
         data["metadata"] = metadata
-        campaign = json.loads(json.dumps(data, cls=DjangoJSONEncoder, default=str))
+        campaign = json_safe(data)
         steps = [step.to_snapshot() for step in self.to_campaignstep.order_by("position", "pk")]
         return {
             "version": SNAPSHOT_VERSION,
@@ -219,28 +217,23 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
 
     def clean(self):
         super().clean()
-        validate_import_paths(
-            self,
-            "body_processors",
-            "first_document_processors",
-            "attachment_processors",
-            "build_target_processors",
-        )
+        self._validate_processor_paths("build_target_processors")
 
-    def get_browser_preview_path(self, *, preview_kind: str = "email", brand: str = "") -> str:
+    def get_browser_preview_path(self, *, preview_kind: str = "email", brand: str = "", campaign_step=None) -> str:
         """Relative URL for the preview of this campaign (unauthenticated, see ``PreviewView``).
 
         ``preview_kind`` selects which template will be rendered server-side
-        (email, sms, postal, branded). ``brand`` (discord, slack, teams) picks
+        (email, sms, postal, branded). ``brand`` picks
         the branded template. Returns ``""`` for an unsaved campaign.
         """
         if not self.pk:
             return ""
-        from ..views.preview import campaign_preview_query
+        from ..services.preview import campaign_preview_query
 
         return reverse("django_pymissive:preview", args=["campaign", self.pk]) + campaign_preview_query(
             kind=preview_kind,
             brand=brand,
+            campaign_step=campaign_step,
         )
 
     @property
@@ -341,10 +334,14 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """
         annotated = getattr(self, "has_sent_missives", None)
         if annotated is None:
-            annotated = self.missive_queryset().filter(
-                sent_missive_q(),
-                thread_type=MissiveThreadType.MISSIVE,
-            ).exists()
+            annotated = (
+                self.missive_queryset()
+                .filter(
+                    sent_missive_q(),
+                    thread_type=MissiveThreadType.MISSIVE,
+                )
+                .exists()
+            )
             self.__dict__["has_sent_missives"] = annotated
         return not annotated
 
@@ -550,7 +547,7 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
                 CampaignTarget.objects.filter(campaign=campaign)
                 .filter(CampaignTarget.active_q())
                 .order_by()
-                .values_list("missive_type", flat=True)
+                .values_list("campaign_step__missive_type", flat=True)
                 .distinct()
             )
             scheduled = campaign.to_missivecampaignsend.create(

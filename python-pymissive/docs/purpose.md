@@ -32,7 +32,7 @@ The library uses a provider-based architecture built on ProviderKit:
 - Each messaging service is implemented as a provider inheriting from base provider classes
 - Base provider classes extend `ProviderBase` from ProviderKit
 - Providers are organized in the `providers/` directory by category
-- Shared behaviour lives in `MissiveProviderBase` mixins (`acknowledgement`, `attachments`, `branded`)
+- Shared behaviour lives in `MissiveProviderBase` mixins (`attachments`, `branded`)
 - Provider discovery and management is handled by ProviderKit
 
 ### Available Services

@@ -2,7 +2,7 @@
 
 Covers:
 - can_send (4 logical cases)
-- get_missives + missive_type filter
+- get_missives + campaign-step selection
 - claim_missive / iter_claimed_missives (atomic anti-double-send)
 - process_missives (best-effort: batch continues, failing missive → ERROR)
 - run_with_tracking (atomic send_date claim, ended_at, last_error, processing flag)
@@ -65,7 +65,11 @@ def _missive(campaign, *, missive_type="email", status=MissiveStatus.DRAFT, **kw
 
 
 def _scheduled(campaign, **kw) -> MissiveScheduledCampaign:
-    return MissiveScheduledCampaign.objects.create(campaign=campaign, **kw)
+    campaign_steps = kw.pop("campaign_steps", None)
+    scheduled = MissiveScheduledCampaign.objects.create(campaign=campaign, **kw)
+    if campaign_steps is not None:
+        scheduled.campaign_steps.set(campaign_steps)
+    return scheduled
 
 
 # ---------------------------------------------------------------------------
@@ -164,22 +168,43 @@ def test_get_missives_returns_only_draft():
     assert sched.get_missives().count() == 1
 
 
-def test_get_missives_wildcard_returns_all_types():
+def test_get_missives_with_no_selected_steps_returns_all_campaign_steps():
     c = _campaign()
-    sched = _scheduled(c)  # missive_type = "*" by default
+    sched = _scheduled(c)
     _missive(c, missive_type="email")
     _missive(c, missive_type="sms")
     assert sched.get_missives().count() == 2
 
 
-def test_get_missives_filtered_by_type():
+def test_get_missives_is_restricted_to_selected_steps():
     c = _campaign()
-    sched = _scheduled(c, missive_type="email")
-    _missive(c, missive_type="email")
+    email = _missive(c, missive_type="email")
     _missive(c, missive_type="sms")
+    sched = _scheduled(c, campaign_steps=[email.campaign_step])
     qs = sched.get_missives()
     assert qs.count() == 1
-    assert qs.first().missive_type == "email"
+    assert qs.first() == email
+
+
+def test_get_missives_distinguishes_steps_with_the_same_type():
+    c = _campaign()
+    first = CampaignStep.objects.create(campaign=c, position=1, missive_type="email")
+    second = CampaignStep.objects.create(campaign=c, position=2, missive_type="email")
+    selected = Missive.objects.create(campaign_step=first, missive_type="email", subject="First")
+    Missive.objects.create(campaign_step=second, missive_type="email", subject="Second")
+    sched = _scheduled(c, campaign_steps=[first])
+
+    assert list(sched.get_missives()) == [selected]
+
+
+def test_selected_step_must_belong_to_the_scheduled_campaign():
+    campaign = _campaign()
+    other = _campaign()
+    foreign_step = CampaignStep.objects.create(campaign=other, position=1, missive_type="email")
+    sched = _scheduled(campaign)
+
+    with pytest.raises(ValidationError, match="belong"):
+        sched.campaign_steps.add(foreign_step)
 
 
 # ---------------------------------------------------------------------------
@@ -814,6 +839,48 @@ def test_with_counts_by_status_and_type():
     assert payload["by_type"]["sms"]["by_status"][MissiveStatus.FAILED] == 1
 
 
+def test_retry_failed_adds_live_errors_to_the_pending_count():
+    """The checkbox previews the failures the run will duplicate, not history."""
+    campaign = _campaign()
+    failed = _missive(campaign, missive_type="email", status=MissiveStatus.FAILED)
+    _missive(campaign, missive_type="sms", status=MissiveStatus.ERROR)
+    _missive(
+        campaign,
+        missive_type="email",
+        status=MissiveStatus.FAILED,
+        thread_type=MissiveThreadType.HISTORY,
+    )
+    draft = _missive(campaign, missive_type="email", status=MissiveStatus.DRAFT)
+    retrying = _scheduled(campaign, retry_failed=True)
+    draft.scheduler = retrying
+    draft.save(update_fields=["scheduler"])
+
+    annotated = MissiveScheduledCampaign.objects.with_counts().get(pk=retrying.pk)
+    assert annotated.count_live_error == 2
+    assert annotated.count_pending == 3
+    assert annotated.total_pending_count == 3
+
+    idle = MissiveScheduledCampaign.objects.with_counts().get(pk=_scheduled(campaign).pk)
+    assert idle.count_live_error == 2
+    assert idle.count_pending == 0
+
+    email_only = _scheduled(
+        campaign,
+        retry_failed=True,
+        campaign_steps=[failed.campaign_step],
+    )
+    scoped = MissiveScheduledCampaign.objects.with_counts().get(pk=email_only.pk)
+    assert scoped.count_live_error == 1
+    assert scoped.count_pending == 1
+
+    MissiveScheduledCampaign.objects.filter(pk=retrying.pk).update(
+        send_date=timezone.now(),
+    )
+    started = MissiveScheduledCampaign.objects.with_counts().get(pk=retrying.pk)
+    assert started.count_live_error == 2
+    assert started.count_pending == 1
+
+
 def test_every_counter_reaches_a_non_annotated_instance():
     """The fallback reads the very enumeration ``with_counts()`` applies.
 
@@ -1094,64 +1161,52 @@ def test_format_average_send_speed_rounds_before_picking_the_unit():
     assert format_average_send_speed(59.994) == "59.99 s"
 
 
-def _timed_send(clock, seconds):
-    """``send_fn`` that marks the missive sent and advances *clock* by *seconds*."""
-
-    def _send(missive):
-        Missive.objects.filter(pk=missive.pk).update(status=MissiveStatus.SUCCESS)
-        clock[0] += timezone.timedelta(seconds=seconds)
-
-    return _send
-
-
-def test_average_send_speed_is_stored_at_each_progress_step():
-    """Two steps: the hook sees the speed of the sent count just refreshed."""
+def test_process_missives_leaves_the_wall_clock_average_for_the_end():
     c = _campaign()
-    clock = [timezone.now()]
-    sched = _scheduled(c, send_date=clock[0])
-    for _ in range(4):
+    sched = _scheduled(c, send_date=timezone.now())
+    for _ in range(2):
         _missive(c, scheduler=sched)
     seen = []
 
-    def _hook(run):
-        seen.append((run.sent_count, run.average_send_speed))
+    with override_settings(PYMISSIVE_PROGRESS_HOOK=lambda run: seen.append(run.average_send_speed)):
+        sched.process_missives(
+            lambda missive: Missive.objects.filter(pk=missive.pk).update(status=MissiveStatus.SUCCESS)
+        )
 
-    sched.progress_step = 2
-    with override_settings(PYMISSIVE_PROGRESS_HOOK=_hook), patch("django.utils.timezone.now", lambda: clock[0]):
-        sched.process_missives(_timed_send(clock, 1))
-
-    assert seen == [(2, pytest.approx(1)), (4, pytest.approx(1))]
+    assert seen == [None, None]
     sched.refresh_from_db()
-    assert sched.average_send_speed == pytest.approx(1)
+    assert sched.average_send_speed is None
 
 
-def test_average_send_speed_is_stored_without_a_progress_hook():
+def test_average_send_speed_divides_the_whole_run_by_the_sent_missives():
+    """Time before the send loop counts: this is the wall clock, not each send."""
     c = _campaign()
-    clock = [timezone.now()]
-    sched = _scheduled(c, send_date=clock[0])
-    _missive(c, scheduler=sched)
+    ended = timezone.now()
+    sched = _scheduled(c, send_date=ended - timezone.timedelta(seconds=60))
+    _missive(c, scheduler=sched, status=MissiveStatus.SUCCESS, send_speed=4)
+    _missive(c, scheduler=sched, status=MissiveStatus.SUCCESS, send_speed=4)
+    _missive(c, scheduler=sched, status=MissiveStatus.DRAFT)
 
-    with override_settings(PYMISSIVE_PROGRESS_HOOK=None), patch("django.utils.timezone.now", lambda: clock[0]):
-        sched.process_missives(_timed_send(clock, 2))
+    with patch("django.utils.timezone.now", return_value=ended):
+        sched._finalize_run(None)
 
     sched.refresh_from_db()
-    assert sched.average_send_speed == pytest.approx(2)
+    assert sched.ended_at == ended
+    assert sched.average_send_speed == pytest.approx(30)
+    measured = MissiveScheduledCampaign.objects.with_counts().get(pk=sched.pk).send_speed
+    assert measured == pytest.approx(4)
 
 
-def test_average_send_speed_leaves_out_time_and_sends_before_the_loop():
-    """A minute of build before the loop and an already sent missive do not count."""
+def test_send_speed_average_follows_the_timed_missives():
     c = _campaign()
-    clock = [timezone.now()]
-    sched = _scheduled(c, send_date=clock[0] - timezone.timedelta(seconds=60))
-    _missive(c, scheduler=sched, status=MissiveStatus.SUCCESS)
-    for _ in range(2):
-        _missive(c, scheduler=sched)
+    sched = _scheduled(c)
+    step = c.to_campaignstep.create(position=1, missive_type="email")
+    for speed in (1, 3, None):
+        _missive(c, scheduler=sched, send_speed=speed)
 
-    with override_settings(PYMISSIVE_PROGRESS_HOOK=None), patch("django.utils.timezone.now", lambda: clock[0]):
-        sched.process_missives(_timed_send(clock, 1))
-
-    sched.refresh_from_db()
-    assert sched.average_send_speed == pytest.approx(1)
+    assert CampaignStep.objects.with_counts("send_speed").get(pk=step.pk).send_speed == pytest.approx(2)
+    assert MissiveCampaign.objects.with_counts("send_speed").get(pk=c.pk).send_speed == pytest.approx(2)
+    assert MissiveScheduledCampaign.objects.with_counts().get(pk=sched.pk).send_speed == pytest.approx(2)
 
 
 def test_progress_payload_includes_average_send_speed():
@@ -1159,6 +1214,8 @@ def test_progress_payload_includes_average_send_speed():
     payload = sched.progress_payload()
     assert payload["average_send_speed"] == 1.5
     assert payload["average_send_speed_display"] == "1.50 s"
+    assert payload["send_speed"] is None
+    assert payload["send_speed_display"] == ""
 
 
 def test_process_missives_continues_when_progress_hook_fails():

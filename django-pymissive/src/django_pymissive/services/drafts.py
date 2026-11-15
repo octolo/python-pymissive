@@ -124,15 +124,7 @@ def materialize_missive(
     existing draft was reused. *scheduler*, when given, owns the missive.
     """
     channel = require_missive_type(missive_type)
-    if campaign_step is None:
-        steps = list(
-            campaign.to_campaignstep.filter(missive_type=channel).order_by("position", "pk")[:2],
-        )
-        if len(steps) != 1:
-            raise ValueError(
-                f"Campaign must define exactly one {channel!r} step when campaign_step is omitted.",
-            )
-        campaign_step = steps[0]
+    campaign_step = _materialization_step(campaign, channel, campaign_step)
 
     draft, previous = _draft_and_last_sent(campaign, target, channel, campaign_step=campaign_step)
     if draft is not None:
@@ -141,29 +133,57 @@ def materialize_missive(
     if previous is not None:
         return resend_draft(previous, scheduler=scheduler), True
 
+    missive = _build_missive(
+        campaign,
+        target,
+        channel,
+        build=build,
+        scheduler=scheduler,
+        campaign_step=campaign_step,
+    )
+    return missive, missive is not None
+
+
+def _materialization_step(campaign, channel: str, campaign_step):
+    if campaign_step is not None:
+        return campaign_step
+    steps = list(
+        campaign.to_campaignstep.filter(missive_type=channel).order_by("position", "pk")[:2],
+    )
+    if len(steps) != 1:
+        raise ValueError(
+            f"Campaign must define exactly one {channel!r} step when campaign_step is omitted.",
+        )
+    return steps[0]
+
+
+def _build_missive(campaign, target, channel, *, build, scheduler, campaign_step) -> Missive | None:
     # The link to the target is what existing_draft finds next time: a
     # missive saved without it would be built a second time.
     with transaction.atomic():
-        parameters = inspect.signature(build).parameters.values()
-        accepts_step = any(
-            parameter.name == "campaign_step" or parameter.kind == inspect.Parameter.VAR_KEYWORD
-            for parameter in parameters
-        )
-        missive = build(
-            campaign,
-            target,
-            channel,
-            **({"campaign_step": campaign_step} if campaign_step is not None and accepts_step else {}),
-        )
+        missive = _call_build(build, campaign, target, channel, campaign_step)
         if missive is None:
-            return None, False
-        if missive._state.adding:
-            raise ValueError("build() must return a saved missive, or None to skip")
-        if missive.missive_type != channel:
-            raise ValueError(f"build() returned a {missive.missive_type!r} missive for {channel!r}")
+            return None
+        _validate_built_missive(missive, channel)
         _attach(missive, campaign=campaign, scheduler=scheduler, campaign_step=campaign_step)
         link_target(missive, target)
-    return missive, True
+    return missive
+
+
+def _call_build(build, campaign, target, channel, campaign_step):
+    parameters = inspect.signature(build).parameters.values()
+    accepts_step = any(
+        parameter.name == "campaign_step" or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters
+    )
+    kwargs = {"campaign_step": campaign_step} if campaign_step is not None and accepts_step else {}
+    return build(campaign, target, channel, **kwargs)
+
+
+def _validate_built_missive(missive, channel: str) -> None:
+    if missive._state.adding:
+        raise ValueError("build() must return a saved missive, or None to skip")
+    if missive.missive_type != channel:
+        raise ValueError(f"build() returned a {missive.missive_type!r} missive for {channel!r}")
 
 
 def _draft_and_last_sent(campaign, target, channel, *, campaign_step=None) -> tuple[Missive | None, Missive | None]:
@@ -189,19 +209,32 @@ def _draft_and_last_sent(campaign, target, channel, *, campaign_step=None) -> tu
 
 def _attach(missive, *, campaign=None, scheduler=None, campaign_step=None) -> None:
     """Give *missive* its step and scheduler when missing, in one save."""
-    fields = []
+    _validate_attachment(campaign, campaign_step, missive)
+    fields = _attach_step(missive, campaign_step)
+    fields.extend(_attach_scheduler(missive, scheduler))
+    if fields:
+        missive.save(update_fields=[*fields, "updated_at"])
+
+
+def _validate_attachment(campaign, campaign_step, missive) -> None:
     if campaign is not None and campaign_step is None and not missive.campaign_step_id:
         raise ValueError("campaign_step is required for a campaign missive")
     if campaign is not None and campaign_step is not None and campaign_step.campaign_id != campaign.pk:
         raise ValueError("campaign_step does not belong to campaign")
+
+
+def _attach_step(missive, campaign_step) -> list[str]:
     if campaign_step is not None and not missive.campaign_step_id:
         missive.campaign_step = campaign_step
-        fields.append("campaign_step")
+        return ["campaign_step"]
+    return []
+
+
+def _attach_scheduler(missive, scheduler) -> list[str]:
     if scheduler is not None and missive.scheduler_id != scheduler.pk:
         missive.scheduler = scheduler
-        fields.append("scheduler")
-    if fields:
-        missive.save(update_fields=[*fields, "updated_at"])
+        return ["scheduler"]
+    return []
 
 
 def resend_draft(missive: Missive, *, scheduler=None) -> Missive:
@@ -256,8 +289,9 @@ def build_draft(
     The caller (usually the *build* hook of :func:`materialize_missive`) owns
     where the address, phone or email comes from.
     """
-    from ..shortcuts import send_missive
     from pymissive.config import missive_support_for_type
+
+    from ..shortcuts import send_missive
 
     channel = require_missive_type(missive_type)
     if campaign_step is None:

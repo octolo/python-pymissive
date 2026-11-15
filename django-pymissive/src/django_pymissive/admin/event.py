@@ -11,7 +11,7 @@ from urllib.parse import unquote
 
 from django.contrib import messages
 
-from ..events import delay_retrieve_events, retrieve_events as do_retrieve_events
+from ..services.events import delay_retrieve_events, retrieve_events as do_retrieve_events
 from ..forms.event import RetrieveEventsForm
 from ..models.event import MissiveEvent
 from .permissions import ActionRightsMixin
@@ -23,7 +23,7 @@ class UntreatedListFilter(admin.SimpleListFilter):
     title = _("Untreated")
     parameter_name = "untreated"
 
-    def lookups(self, request, model_admin):
+    def lookups(self, request, _model_admin):
         return [("1", _("Yes")), ("0", _("No"))]
 
     def queryset(self, request, queryset):
@@ -47,18 +47,16 @@ class MissiveEventInline(admin.TabularInline, AdminBoostFormat):
         "event_display",
         "recipient_display",
     ]
-    show_change_link = False
+    show_change_link = True
     can_delete = False
 
     @admin.display(description=_("Event"))
     def event_display(self, obj):
         if not obj or not obj.pk:
             return "-"
-        url = reverse("admin:django_pymissive_missiveevent_change", args=[obj.pk])
         label = obj.get_event_display() or obj.event or "-"
-        event_html = format_html('<a href="{}">{}</a>', url, label)
         reason = (obj.reason or obj.get_reason() or "").strip()
-        return self.format_with_help_text(event_html, reason or None)
+        return self.format_with_help_text(label, reason or None)
 
     @admin.display(description=_("Recipient"))
     def recipient_display(self, obj):

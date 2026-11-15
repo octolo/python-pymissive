@@ -156,12 +156,41 @@ def test_unselect_keeps_rows_that_already_have_a_missive():
 
 
 @pytest.mark.django_db
+def test_unselect_can_target_one_campaign_step():
+    campaign = _campaign()
+    first_step = _email_step(campaign)
+    second_step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=4,
+        missive_type=MissiveType.EMAIL,
+        subject="Reminder",
+        body_text="Reminder",
+    )
+    ada = _contact("ada@example.com")
+    select(campaign, "email", ada, campaign_step=first_step)
+    select(campaign, "email", ada, campaign_step=second_step)
+
+    assert (
+        unselect(
+            campaign,
+            "email",
+            [ada],
+            campaign_step=second_step,
+        )
+        == 1
+    )
+    assert list(
+        CampaignTarget.objects.values_list("campaign_step_id", flat=True),
+    ) == [first_step.pk]
+
+
+@pytest.mark.django_db
 def test_target_cleanup_deletes_pending_rows_and_keeps_missive_history():
     campaign = _campaign()
     ada = _contact("ada@example.com")
     select(campaign, "email", ada)
     select(campaign, "sms", ada)
-    sent = CampaignTarget.objects.get(campaign=campaign, missive_type="email")
+    sent = CampaignTarget.objects.get(campaign=campaign, campaign_step__missive_type="email")
     missive = Missive.objects.create(
         campaign_step=campaign.to_campaignstep.get(missive_type=MissiveType.EMAIL),
         missive_type=MissiveType.EMAIL,
@@ -177,7 +206,7 @@ def test_target_cleanup_deletes_pending_rows_and_keeps_missive_history():
     finally:
         disconnect_target_cleanup(Contact)
 
-    assert not CampaignTarget.objects.filter(campaign=campaign, missive_type="sms").exists()
+    assert not CampaignTarget.objects.filter(campaign=campaign, campaign_step__missive_type="sms").exists()
     sent.refresh_from_db()
     assert sent.missive_id == missive.pk
     assert sent.target is None
@@ -225,7 +254,6 @@ def test_pending_unique_constraint_preserves_text_object_id():
     CampaignTarget.objects.create(
         campaign=campaign,
         campaign_step=step,
-        missive_type=MissiveType.EMAIL,
         content_type=content_type,
         object_id="550e8400-e29b-41d4-a716-446655440000",
         object_str="ghost",
@@ -238,7 +266,6 @@ def test_pending_unique_constraint_preserves_text_object_id():
             CampaignTarget.objects.create(
                 campaign=campaign,
                 campaign_step=step,
-                missive_type=MissiveType.EMAIL,
                 content_type=content_type,
                 object_id="550e8400-e29b-41d4-a716-446655440000",
                 object_str="ghost",
@@ -897,7 +924,7 @@ def test_campaign_counts_stored_contacts_on_active_targets():
     select(campaign, "sms", ada)
     email_targets = CampaignTarget.objects.filter(
         campaign=campaign,
-        missive_type=MissiveType.EMAIL,
+        campaign_step__missive_type=MissiveType.EMAIL,
     ).order_by("pk")
     CampaignRecipientTarget.objects.create(
         target=email_targets[0],
@@ -908,7 +935,7 @@ def test_campaign_counts_stored_contacts_on_active_targets():
         values=["grace@example.com"],
     )
     CampaignRecipientTarget.objects.create(
-        target=CampaignTarget.objects.get(campaign=campaign, missive_type=MissiveType.SMS),
+        target=CampaignTarget.objects.get(campaign=campaign, campaign_step__missive_type=MissiveType.SMS),
         values=["+33612345678"],
     )
 
@@ -1043,6 +1070,36 @@ def test_admin_view_generates_campaign_contacts():
     assert url in changelist.content.decode()
     contact = CampaignContact.objects.first()
     assert (len(contact.emails), contact.phones, len(contact.addresses)) == (3, [], 1)
+
+
+@pytest.mark.django_db
+def test_admin_view_generates_a_campaign_for_the_selected_types():
+    from django.test import Client
+    from django.urls import reverse
+
+    client = Client()
+    client.force_login(_superuser("fake-campaign-generator"))
+    url = reverse("admin:fakeapp_campaigncontact_generate_campaign")
+
+    page = client.get(url)
+    assert page.status_code == 200
+    assert "selectfilter" in page.content.decode()
+    assert "admin/js/SelectFilter2.js" in page.content.decode()
+    response = client.post(
+        url,
+        {"count": 1, "missive_types": ["email", "sms", "letter"], "seed": 4},
+    )
+
+    assert response.status_code == 302
+    campaign = MissiveCampaign.objects.get()
+    steps = {step.missive_type: step for step in campaign.to_campaignstep.all()}
+    assert list(steps) == ["letter", "email", "sms"]
+    email, sms, letter = steps["email"], steps["sms"], steps["letter"]
+    assert email.subject and email.body_text and email.sender_email
+    assert sms.body_text and sms.sender_phone and not sms.sender_email
+    assert letter.body_rich and letter.sender_address and letter.duplex_printing is True
+    changelist = client.get(reverse("admin:fakeapp_campaigncontact_changelist"))
+    assert url in changelist.content.decode()
 
 
 @pytest.mark.django_db
@@ -1350,7 +1407,7 @@ def test_sync_reads_the_singular_or_the_plural_and_add_recipient_appends():
     )
     campaign = _campaign()
     select(campaign, "email", ada)
-    row = CampaignTarget.objects.get(missive_type="email")
+    row = CampaignTarget.objects.get(campaign_step__missive_type="email")
 
     assert row.sync_recipients(first=True) == [emails[0]]
     assert row.sync_recipients(first=False) == emails
@@ -1381,7 +1438,7 @@ def test_sync_reads_the_singular_or_the_plural_and_add_recipient_appends():
     ) == set(emails)
 
     select(campaign, "sms", ada)
-    sms = CampaignTarget.objects.get(missive_type="sms")
+    sms = CampaignTarget.objects.get(campaign_step__missive_type="sms")
     assert sms.sync_recipients(first=True) == ["+33611111111"]
     assert sms.sync_recipients(first=False) == ["+33611111111", "+33622222222"]
 
@@ -1418,6 +1475,7 @@ def test_test_app_select_form_stores_the_chosen_contacts(mode, emails, expected)
     from django.urls import reverse
 
     campaign = _campaign()
+    campaign_step = _email_step(campaign)
     ada = create_campaign_contact("Ada", "Lovelace", emails=emails)
     client = Client()
     client.force_login(_superuser(f"fill-contacts-{mode}-{len(emails)}"))
@@ -1436,6 +1494,10 @@ def test_test_app_select_form_stores_the_chosen_contacts(mode, emails, expected)
     assert page.status_code == 200
     body = page.content.decode()
     assert 'id="campaigncontact_form"' in body
+    assert 'name="campaign"' in body
+    assert "vForeignKeyRawIdAdminField" in body
+    assert 'name="campaign_step"' not in body
+    assert 'name="missive_type"' not in body
     assert 'name="contacts"' in body
     assert 'value="all"' in body
     assert 'value="first"' in body
@@ -1445,13 +1507,14 @@ def test_test_app_select_form_stores_the_chosen_contacts(mode, emails, expected)
         form_url,
         {
             "campaign": campaign.pk,
-            "missive_type": "email",
             "contacts": mode,
         },
     )
 
     assert response.status_code == 302
-    stored = CampaignTarget.objects.get().to_campaignrecipienttarget.get()
+    target = CampaignTarget.objects.get()
+    assert target.campaign_step == campaign_step
+    stored = target.to_campaignrecipienttarget.get()
     assert stored.values == expected
 
 
@@ -1462,6 +1525,7 @@ def test_test_app_unselect_form_drops_the_checked_target():
     from django.urls import reverse
 
     campaign = _campaign()
+    campaign_step = _email_step(campaign)
     ada = create_campaign_contact("Ada", "Lovelace", emails=["ada@example.com"])
     select(campaign, "email", ada)
     client = Client()
@@ -1477,13 +1541,61 @@ def test_test_app_unselect_form_drops_the_checked_target():
 
     response = client.post(
         started["Location"],
-        {"campaign": campaign.pk, "missive_type": "email"},
+        {"campaign_step": campaign_step.pk},
     )
     assert response.status_code == 302
     assert not CampaignTarget.objects.exists()
 
 
-def test_subtarget_rejects_a_value_that_is_not_a_list():
+@pytest.mark.django_db
+def test_test_app_select_form_creates_a_target_per_available_step():
+    from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+    from django.test import Client
+    from django.urls import reverse
+
+    from django_pymissive.managers.related_object import object_id_value
+
+    campaign = _campaign()
+    CampaignStep.objects.create(
+        campaign=campaign,
+        position=4,
+        missive_type=MissiveType.EMAIL,
+        subject="Relance",
+        body_text="Relance",
+        body_rich="<p>Relance</p>",
+    )
+    ada = create_campaign_contact(
+        "Ada",
+        "Lovelace",
+        emails=["ada@example.com"],
+        phones=["+33612345678"],
+        addresses=[{"address_line1": "1 rue A", "postal_code": "75001", "city": "Paris"}],
+    )
+    grace = create_campaign_contact("Grace", "Hopper", emails=["grace@example.com"])
+    client = Client()
+    client.force_login(_superuser("select-every-step"))
+
+    started = client.post(
+        reverse("admin:fakeapp_campaigncontact_changelist"),
+        {
+            "action": "select_for_campaign",
+            ACTION_CHECKBOX_NAME: [str(ada.pk), str(grace.pk)],
+        },
+    )
+    response = client.post(
+        started["Location"],
+        {"campaign": campaign.pk, "contacts": "all"},
+    )
+
+    assert response.status_code == 302
+    rows = CampaignTarget.objects.filter(campaign=campaign)
+    ada_rows = rows.filter(object_id=object_id_value(ada.pk))
+    grace_rows = rows.filter(object_id=object_id_value(grace.pk))
+    assert ada_rows.filter(campaign_step__missive_type="email").count() == 2
+    assert ada_rows.filter(campaign_step__missive_type="sms").count() == 1
+    assert ada_rows.filter(campaign_step__missive_type="letter").count() == 1
+    assert list(grace_rows.values_list("campaign_step__missive_type", flat=True)) == ["email", "email"]
+    assert rows.count() == 6
     from django_pymissive.models.campaign_target import CampaignRecipientTarget
 
     row = CampaignRecipientTarget(recipient_type="cc", values="ada@example.com")
@@ -1592,13 +1704,41 @@ def test_prefetch_pending_targets_matches_the_per_run_lookup(django_assert_num_q
         external_task_backend=SELECTION_TASK,
         additional_config={"missive_types": ["email"]},
     )
+    run.campaign_steps.add(_email_step(campaign))
     expected = MissiveScheduledCampaign.objects.get(pk=run.pk).pending_targets_by_type()
 
-    runs = list(MissiveScheduledCampaign.objects.filter(pk=run.pk))
+    runs = list(
+        MissiveScheduledCampaign.objects.filter(pk=run.pk).prefetch_related(
+            "campaign_steps",
+            "campaign__to_campaignstep",
+        )
+    )
     with django_assert_num_queries(1):
         MissiveScheduledCampaign.prefetch_pending_targets(runs)
     with django_assert_num_queries(0):
         assert runs[0].pending_targets_by_type() == expected == {"email": 2}
+
+
+@pytest.mark.django_db
+def test_pending_targets_only_count_selected_steps():
+    from django_pymissive.models.scheduler import SELECTION_TASK
+
+    campaign = _campaign()
+    first = _email_step(campaign)
+    second = CampaignStep.objects.create(
+        campaign=campaign,
+        position=4,
+        missive_type=MissiveType.EMAIL,
+    )
+    select(campaign, "email", _contact("first@example.com"), campaign_step=first)
+    select(campaign, "email", _contact("second@example.com"), campaign_step=second)
+    run = MissiveScheduledCampaign.objects.create(
+        campaign=campaign,
+        external_task_backend=SELECTION_TASK,
+    )
+    run.campaign_steps.add(first)
+
+    assert run.pending_targets_by_type() == {"email": 1}
 
 
 @pytest.mark.django_db
@@ -1670,6 +1810,7 @@ def test_start_selection_build_becomes_the_run_chain_and_beats_the_campaign(
 
     run.refresh_from_db()
     assert run.build_target_processors == ["tests.test_campaign_target.build_marked"]
+    assert list(run.campaign_steps.all()) == [_email_step(campaign)]
     assert "build" not in run.additional_config
     assert Missive.objects.get(campaign_step__campaign=campaign).subject == "from-target-processor"
 

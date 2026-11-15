@@ -9,7 +9,7 @@ from django.core.management.base import CommandError
 from django.test import Client
 from django.urls import reverse
 
-from django_pymissive.fake_webhooks import (
+from django_pymissive.testing.fake_webhooks import (
     OUTCOMES,
     FakeProviderDisabled,
     delay_fake_webhooks,
@@ -42,7 +42,7 @@ def _sent(external_id, *, provider="fake", status=MissiveStatus.PROCESSING):
 def test_a_sent_fake_missive_receives_a_webhook_and_changes_status(monkeypatch):
     missive = _sent("fake-email-1")
     monkeypatch.setattr(
-        "django_pymissive.fake_webhooks.random.Random.choice",
+        "django_pymissive.testing.fake_webhooks.random.Random.choice",
         lambda *_args: "delivered",
     )
 
@@ -65,7 +65,7 @@ def test_only_sent_fake_missives_are_posted(monkeypatch):
     draft = _sent("fake-email-draft", status=MissiveStatus.DRAFT)
     other = _sent("brevo-1", provider="brevo")
     monkeypatch.setattr(
-        "django_pymissive.fake_webhooks.random.Random.choice",
+        "django_pymissive.testing.fake_webhooks.random.Random.choice",
         lambda *_args: "error",
     )
 
@@ -85,7 +85,7 @@ def test_only_sent_fake_missives_are_posted(monkeypatch):
 def test_a_cancelled_missive_is_left_alone(monkeypatch):
     cancelled = _sent("fake-cancelled", status=MissiveStatus.CANCELLED)
     monkeypatch.setattr(
-        "django_pymissive.fake_webhooks.random.Random.choice",
+        "django_pymissive.testing.fake_webhooks.random.Random.choice",
         lambda *_args: "delivered",
     )
 
@@ -154,7 +154,7 @@ def test_delay_enqueues_the_shared_runner(monkeypatch):
     def record(**kwargs):
         called.update(kwargs)
 
-    monkeypatch.setattr("django_pymissive.fake_webhooks.run_fake_webhooks", record)
+    monkeypatch.setattr("django_pymissive.testing.fake_webhooks.run_fake_webhooks", record)
 
     delay_fake_webhooks(limit=2, seed=4)
 
@@ -168,7 +168,7 @@ def _superuser():
 def test_the_admin_view_enqueues_the_task_and_updates_the_missive(monkeypatch):
     missive = _sent("fake-admin-1")
     monkeypatch.setattr(
-        "django_pymissive.fake_webhooks.random.Random.choice",
+        "django_pymissive.testing.fake_webhooks.random.Random.choice",
         lambda *_args: "delivered",
     )
     client = Client()

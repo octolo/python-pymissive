@@ -20,8 +20,9 @@ import json
 from typing import Any
 
 from django.conf import settings
-from ..utils import import_allowed_string
+from django.core.exceptions import ObjectDoesNotExist
 
+from ..utils import import_allowed_string
 
 DEFAULT_BUILD_TARGET_PROCESSORS: list = [
     "django_pymissive.processors.build_target.build_target_processor",
@@ -159,21 +160,17 @@ def build_target_processor(
     support = missive_support_for_type(missive_type)
     if support not in _SUPPORT_KEYS:
         return None
-    grouped = resolve_target_recipients(
+    ordered = resolved_target_contacts(
         campaign,
         target,
         missive_type,
         full_targets=full_targets,
         row=row,
     )
-    grouped = _usable_grouped_contacts(grouped, support)
     primary_type = default_recipient_type(missive_type)
-    if not grouped.get(primary_type):
+    if not ordered or ordered[0][0] != primary_type:
         return None
-    ordered = _ordered_contacts(grouped, primary_type)
-    fallback_name = _target_name(target, build_target_fields().get("name", ()))
-    first_type, first_value = ordered[0]
-    first_name, first_contact = _split_contact(first_value, support, fallback_name)
+    first_type, first_name, first_contact = ordered[0]
     recipient: dict[str, Any] = {_RECIPIENT_FIELD[support]: first_contact}
     step = campaign_step
     if step is None and row is not None and getattr(row, "campaign_step_id", None):
@@ -190,9 +187,8 @@ def build_target_processor(
     )
     if missive is None:
         return None
-    for recipient_type, value in ordered[1:]:
-        item_name, contact = _split_contact(value, support, fallback_name)
-        _add_recipient(missive, support, item_name, contact, recipient_type=recipient_type)
+    for recipient_type, name, contact in ordered[1:]:
+        _add_recipient(missive, support, name, contact, recipient_type=recipient_type)
     return missive
 
 
@@ -210,30 +206,55 @@ def default_recipient_type(missive_type: str) -> str:
     return _DEFAULT_RECIPIENT_TYPE.get(support, MissiveRecipientType.RECIPIENT)
 
 
+def recipient_field_for_missive_type(missive_type: str) -> str | None:
+    """Recipient model field used by this missive type."""
+    from pymissive.config import missive_support_for_type
+
+    return _RECIPIENT_FIELD.get(missive_support_for_type(missive_type))
+
+
 def ordered_target_contacts(row) -> list[tuple[str, str, object]]:
     """Contacts this row would send, as ``(recipient_type, name, value)``.
 
     Same order as :func:`build_target_processor`. Used by the target preview,
     which must show the recipients without saving a missive.
     """
-    from pymissive.config import missive_support_for_type
-
-    support = missive_support_for_type(str(getattr(row, "missive_type", "") or ""))
-    if support not in _RECIPIENT_FIELD:
-        return []
     target = _linked_object(row)
     full_targets = bool(getattr(settings, "PYMISSIVE_BUILD_TARGET_FULL", False))
-    grouped = resolve_target_recipients(
+    return resolved_target_contacts(
         getattr(row, "campaign", None),
         target,
         row.missive_type,
         full_targets=full_targets,
         row=row,
     )
+
+
+def resolved_target_contacts(
+    campaign,
+    target,
+    missive_type,
+    *,
+    full_targets: bool,
+    row=None,
+) -> list[tuple[str, str, object]]:
+    """Pure recipient resolution shared by target generation and preview."""
+    from pymissive.config import missive_support_for_type
+
+    support = missive_support_for_type(str(missive_type or ""))
+    if support not in _RECIPIENT_FIELD:
+        return []
+    grouped = resolve_target_recipients(
+        campaign,
+        target,
+        missive_type,
+        full_targets=full_targets,
+        row=row,
+    )
     grouped = _usable_grouped_contacts(grouped, support)
     fallback = _target_name(target, build_target_fields().get("name", ())) if target is not None else ""
     contacts = []
-    for recipient_type, value in _ordered_contacts(grouped, default_recipient_type(row.missive_type)):
+    for recipient_type, value in _ordered_contacts(grouped, default_recipient_type(missive_type)):
         name, contact = _split_contact(value, support, fallback)
         contacts.append((recipient_type, name, contact))
     return contacts
@@ -416,7 +437,7 @@ def _linked_object(row):
         return None
     try:
         return row.target
-    except Exception:
+    except ObjectDoesNotExist:
         return None
 
 
@@ -511,19 +532,24 @@ def _resolve_processor(processor: Any) -> tuple[Any, dict]:
 def _call_processor(processor, campaign, target, missive_type, **kwargs):
     row = kwargs.pop("row", None)
     campaign_step = kwargs.pop("campaign_step", None)
-    if hasattr(processor, "process") and callable(processor.process):
-        if row is not None and _accepts_keyword(processor.process, "row"):
-            kwargs["row"] = row
-        if campaign_step is not None and _accepts_keyword(processor.process, "campaign_step"):
-            kwargs["campaign_step"] = campaign_step
-        return processor.process(campaign, target, missive_type, **kwargs)
+    callable_processor = _processor_callable(processor)
+    _add_supported_keyword(kwargs, callable_processor, "row", row)
+    _add_supported_keyword(kwargs, callable_processor, "campaign_step", campaign_step)
+    return callable_processor(campaign, target, missive_type, **kwargs)
+
+
+def _processor_callable(processor):
+    process = getattr(processor, "process", None)
+    if callable(process):
+        return process
     if callable(processor):
-        if row is not None and _accepts_keyword(processor, "row"):
-            kwargs["row"] = row
-        if campaign_step is not None and _accepts_keyword(processor, "campaign_step"):
-            kwargs["campaign_step"] = campaign_step
-        return processor(campaign, target, missive_type, **kwargs)
+        return processor
     raise TypeError(f"Build target processor {processor!r} is not callable and has no .process() method")
+
+
+def _add_supported_keyword(kwargs: dict, processor, name: str, value) -> None:
+    if value is not None and _accepts_keyword(processor, name):
+        kwargs[name] = value
 
 
 def _accepts_keyword(processor, name: str) -> bool:

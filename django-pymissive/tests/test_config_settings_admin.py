@@ -43,7 +43,6 @@ def test_settings_view_lists_configured_and_default_values(settings):
     assert rows["PYMISSIVE_DRY_RUN"].default_value == "false"
     assert rows["PYMISSIVE_DRY_RUN"].configured_value == "false"
     assert "PYMISSIVE_DEFAULT_BODY_PROCESSORS" in rows
-    assert "PYMISSIVE_AUTHENTICATED_ACKNOWLEDGEMENT" in rows
 
     response = _admin_client().get(_url())
     assert response.status_code == 200

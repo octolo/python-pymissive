@@ -158,9 +158,11 @@ def missive_link_q(
 
     q = Q()
     if campaign is not None:
-        q &= Q(**{
-            field("campaign_step__campaign_id"): getattr(campaign, "pk", campaign),
-        })
+        q &= Q(
+            **{
+                field("campaign_step__campaign_id"): getattr(campaign, "pk", campaign),
+            }
+        )
     if support is not None:
         q &= Q(**missive_type_filter(support, prefix=prefix))
     if missive_type is not None:

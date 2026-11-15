@@ -45,7 +45,12 @@ class CommentTimestampedModel(models.Model):
 
 
 class ConfigMixin(models.Model):
-    """``additional_context`` (templates), ``additional_config`` (runtime), ``metadata``."""
+    """Shared config bags with distinct inheritance semantics.
+
+    Campaign missives merge ``additional_context`` and ``additional_config``
+    from campaign to step to missive. ``metadata`` always belongs to the
+    individual row and is never inherited automatically.
+    """
 
     additional_context = JSONField(
         default=dict,
@@ -77,8 +82,8 @@ class ConfigMixin(models.Model):
 _PROCESSOR_HELP = _(
     "Ordered list of processors. When non-empty, REPLACES inherited defaults. "
     "Runtime resolution (first non-empty wins): this object's value, then its "
-    "campaign's value (when this is a missive linked to a campaign), then the "
-    "global setting. Each entry may be a dotted-path string, a "
+    "campaign step and campaign values (when linked), then the global setting. "
+    "Each entry may be a dotted-path string, a "
     '``[path, kwargs]`` pair, or a ``{"processor": path, "kwargs": {...}}`` '
     "dict. When overriding the body chain, include "
     "``django_pymissive.processors.body.django_template.django_template_processor`` "
@@ -86,6 +91,13 @@ _PROCESSOR_HELP = _(
     "the first_document chain, include "
     "``django_pymissive.processors.pdf.weasyprint_renderer.weasyprint_renderer`` "
     "(or your own renderer) as the first entry."
+)
+
+
+PROCESSOR_FIELD_NAMES = (
+    "body_processors",
+    "first_document_processors",
+    "attachment_processors",
 )
 
 
@@ -152,3 +164,9 @@ class ProcessorsMixin(models.Model):
 
     def get_attachment_processors(self) -> list:
         return self._resolve_processors("attachment_processors", self.get_default_attachment_processors)
+
+    def _validate_processor_paths(self, *additional_fields: str) -> None:
+        """Reject processor paths outside the configured import allowlist."""
+        from ..utils import validate_import_paths
+
+        validate_import_paths(self, *PROCESSOR_FIELD_NAMES, *additional_fields)

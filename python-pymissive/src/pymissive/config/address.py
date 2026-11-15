@@ -25,11 +25,6 @@ FIELDS = {
         "description": "Reply To Address",
         "format": "str",
     },
-    "acknowledgement_of_receipt": {
-        "label": "Acknowledgement of Receipt",
-        "description": "Acknowledgement of Receipt",
-        "format": "bool",
-    },
     "color_printing": {
         "label": "Color Printing",
         "description": "Color Printing",

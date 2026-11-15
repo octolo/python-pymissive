@@ -47,7 +47,7 @@ class TargetStateFilter(admin.SimpleListFilter):
     title = _("State")
     parameter_name = "state"
 
-    def lookups(self, request, model_admin):
+    def lookups(self, request, _model_admin):
         return [(key, label) for key, (label, _condition) in TARGET_STATES.items()]
 
     def queryset(self, request, queryset):
@@ -89,7 +89,7 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
     list_display_links = ["object_str"]
     list_filter = [
         TargetStateFilter,
-        "missive_type",
+        "campaign_step__missive_type",
         "created_at",
     ]
     list_select_related = ("campaign", "campaign_step", "content_type", "missive")
@@ -119,7 +119,6 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
             [
                 "campaign",
                 "campaign_step",
-                "missive_type",
                 "content_type",
                 "object_id",
                 "object_url_link_display",

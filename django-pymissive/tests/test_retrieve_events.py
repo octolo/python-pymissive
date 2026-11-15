@@ -10,7 +10,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 
-from django_pymissive.events import delay_retrieve_events, retrieve_events
+from django_pymissive.services.events import delay_retrieve_events, retrieve_events
 from django_pymissive.forms.event import RetrieveEventsForm
 from django_pymissive.models.choices import MissiveType
 
@@ -56,7 +56,7 @@ def test_retrieve_events_calls_provider_and_handles():
     provider._provider.call_service.return_value = [{"event": "delivered"}]
     with (
         patch("django_pymissive.models.provider.MissiveProviderModel") as ProviderModel,
-        patch("django_pymissive.events.handle_events") as handle,
+        patch("django_pymissive.services.events.handle_events") as handle,
     ):
         ProviderModel.objects.get.return_value = provider
         retrieve_events(
@@ -75,7 +75,7 @@ def test_retrieve_events_calls_provider_and_handles():
 
 def test_delay_retrieve_events_uses_sync_backend(settings):
     settings.PYMISSIVE_CAMPAIGN_TASK_BACKEND = "sync"
-    with patch("django_pymissive.events.retrieve_events") as retrieve:
+    with patch("django_pymissive.services.events.retrieve_events") as retrieve:
         delay_retrieve_events(
             provider="brevo",
             missive_type=MissiveType.EMAIL,

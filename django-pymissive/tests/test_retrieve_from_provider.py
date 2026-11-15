@@ -15,16 +15,13 @@ from django.utils import timezone
 from django_pymissive.forms.missive import RetrieveMissiveForm
 from django_pymissive.models import MissiveRecipient
 from django_pymissive.models.choices import (
-    AcknowledgementLevel,
-    MissiveDeliveryMode,
-    MissivePriority,
     MissiveRecipientType,
     MissiveStatus,
     MissiveType,
 )
 from django_pymissive.models.event import MissiveEvent
 from django_pymissive.models.missive import Missive
-from django_pymissive.retrieve import lookup_missive, retrieve_from_provider
+from django_pymissive.services.retrieve import lookup_missive, retrieve_from_provider
 
 pytestmark = pytest.mark.django_db
 
@@ -473,7 +470,7 @@ def test_refresh_from_provider_restores_billed_flag_on_recreated_billings():
         ),
         patch.object(Missive, "handle_events"),
         patch(
-            "django_pymissive.billings.load_provider_billings",
+            "django_pymissive.services.billings.load_provider_billings",
             return_value=[
                 {
                     "billing_amount": Decimal("2.0000"),
@@ -515,7 +512,7 @@ def test_refresh_from_provider_does_not_mark_unbilled_missive():
         ),
         patch.object(Missive, "handle_events"),
         patch(
-            "django_pymissive.billings.load_provider_billings",
+            "django_pymissive.services.billings.load_provider_billings",
             return_value=[
                 {
                     "billing_amount": Decimal("3.0000"),
@@ -626,7 +623,7 @@ def test_events_only_retrieve_keeps_body_recipients_and_billings():
         ),
         patch.object(Missive, "handle_events") as handle_events,
         patch(
-            "django_pymissive.billings.load_provider_billings",
+            "django_pymissive.services.billings.load_provider_billings",
             side_effect=RuntimeError("billing down"),
         ),
     ):
@@ -647,7 +644,6 @@ def test_refresh_from_provider_fills_missing_address_without_duplicating():
         missive_type=MissiveType.REGISTERED_LETTER,
         provider="maileva",
         external_id="ext-addr",
-        acknowledgement=AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT,
         status=MissiveStatus.PROCESSING,
     )
     MissiveRecipient.objects.create(
@@ -792,9 +788,6 @@ def test_refresh_from_provider_does_not_forward_levels():
         missive_type=MissiveType.REGISTERED_LETTER,
         provider="maileva",
         external_id="ext-levels",
-        acknowledgement=AcknowledgementLevel.ACKNOWLEDGEMENT_OF_RECEIPT,
-        delivery_mode=MissiveDeliveryMode.PREMIUM,
-        priority=MissivePriority.URGENT,
         status=MissiveStatus.PROCESSING,
     )
     with (

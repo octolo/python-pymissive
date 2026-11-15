@@ -19,9 +19,9 @@ A failed send returns no ``external_id``. django-pymissive then records an
 ERROR on the missive. Delivery events posted later (``manage.py fake``) are
 unchanged.
 
-Sends are refused unless ``PYMISSIVE_ALLOW_FAKE_PROVIDER`` or
-``PYMISSIVE_FORCE_FAKE_PROVIDER`` is true, so a misconfigured production
-never marks missives as sent without sending them.
+Sends are refused unless ``PYMISSIVE_ALLOW_FAKE_PROVIDER`` is true or
+``PYMISSIVE_FORCE_PROVIDER`` selects this provider, so a misconfigured
+production never marks missives as sent without sending them.
 
 ``handle_webhook_*`` reads a JSON body already shaped like a normalized event
 (``external_id``, ``event``, ``occurred_at``, ``recipient``, ``reason``).
@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from pymissive.config import ALL_EVENTS, MISSIVE_TYPES
-from pymissive.utils import is_disable_send, is_fake_provider_allowed, is_force_fake_provider
+from pymissive.utils import forced_provider_name, is_disable_send, setting_flag
 
 from .base import MissiveProviderBase
 
@@ -45,6 +45,16 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SLEEP_SECONDS = 10
 DEFAULT_FAILURE_RATE = 0.1
+
+
+def is_fake_provider_allowed() -> bool:
+    """Return whether local fake sends are explicitly allowed."""
+    return setting_flag("PYMISSIVE_ALLOW_FAKE_PROVIDER")
+
+
+def is_fake_provider_forced() -> bool:
+    """Return whether the generic provider override selects this provider."""
+    return forced_provider_name() == "fake"
 
 
 class FakeProvider(MissiveProviderBase):
@@ -85,9 +95,10 @@ class FakeProvider(MissiveProviderBase):
         return rate
 
     def _send(self, missive_type: str, **kwargs: Any) -> dict[str, Any]:
-        if not is_fake_provider_allowed() and not is_force_fake_provider():
+        if not is_fake_provider_allowed() and not is_fake_provider_forced():
             raise RuntimeError(
-                "Fake provider is disabled: set PYMISSIVE_ALLOW_FAKE_PROVIDER or PYMISSIVE_FORCE_FAKE_PROVIDER to use it."
+                "Fake provider is disabled: set PYMISSIVE_ALLOW_FAKE_PROVIDER "
+                "or PYMISSIVE_FORCE_PROVIDER=fake to use it."
             )
         external_id = kwargs.get("external_id") or f"fake-{missive_type}-{uuid.uuid4()}"
         if is_disable_send():

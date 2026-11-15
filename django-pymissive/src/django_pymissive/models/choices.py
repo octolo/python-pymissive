@@ -3,21 +3,17 @@
 from collections.abc import Mapping
 from typing import Any, Optional, TypeAlias, cast
 
-from django.conf import settings
 from django.db import models
 from django.db.models import Q
 from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy as _
 
 from pymissive.config import (
-    MISSIVE_ACKNOWLEDGEMENT_LEVELS,
     MISSIVE_TYPES,
     SUCCESSFUL_EVENTS,
     INFO_EVENTS,
     FAILED_EVENTS,
     GENERIC_SUPPORT,
-    DELIVERY_MODES,
-    PRIORITIES,
     missive_support_for_type,
     missive_types_for_support,
 )
@@ -30,10 +26,6 @@ def _text_choices(name: str, members: Mapping[str, ChoiceMember]) -> Any:
     """Create settings-driven TextChoices unsupported by Django's static stubs."""
     factory = cast(Any, models.TextChoices)
     return factory(name, members)
-
-
-def is_enable_setting(setting: str) -> bool:
-    return getattr(settings, f"PYMISSIVE_{setting}".upper(), True)
 
 
 # Python UPPERCASE, DB lowercase (config key), label capitalize
@@ -173,22 +165,6 @@ def _get_event_reason(event_value: Optional[str]) -> ChoiceLabel:
 
 MissiveEventType.get_description = classmethod(lambda cls, event_value: _get_event_reason(event_value))
 
-# Python UPPERCASE, DB lowercase (from config), label capitalize
-MissiveDeliveryMode = _text_choices(
-    "MissiveDeliveryMode",
-    {
-        **{k.upper(): (k, _(k.capitalize())) for k in DELIVERY_MODES if is_enable_setting(k)},
-    },
-)
-
-MissivePriority = _text_choices(
-    "MissivePriority",
-    {
-        **{k.upper(): (k, _(k.capitalize())) for k in PRIORITIES if is_enable_setting(k)},
-    },
-)
-
-
 # Styles by DB value (lowercase) or legacy uppercase
 MISSIVE_STYLE_MAP = {
     **_MISSIVE_EVENT_STYLE_MAP,
@@ -200,13 +176,6 @@ MISSIVE_STYLE_MAP = {
     "partially_failed": "warning",
     "error": "danger",
     "cancelled": "secondary",
-    "low": "info",
-    "normal": "secondary",
-    "high": "warning",
-    "urgent": "danger",
-    "economic": "secondary",
-    "premium": "info",
-    "express": "warning",
     "history": "secondary",
     "message": "primary",
     "missive": "info",
@@ -275,24 +244,6 @@ class WebhookScheme(models.TextChoices):
 
     HTTPS = "https", _("HTTPS")
     HTTP = "http", _("HTTP")
-
-
-def _acknowledgement_members() -> dict[str, ChoiceMember]:
-    members: dict[str, ChoiceMember] = {}
-    for level in MISSIVE_ACKNOWLEDGEMENT_LEVELS:
-        name = level["name"]
-        display_name = level["display_name"]
-        if not isinstance(name, str) or not isinstance(display_name, str):
-            raise TypeError("Acknowledgement names and labels must be strings")
-        if is_enable_setting(name):
-            members[name.upper()] = (name, _(display_name))
-    return members
-
-
-AcknowledgementLevel = _text_choices(
-    "AcknowledgementLevel",
-    _acknowledgement_members(),
-)
 
 
 class MissiveRecipientType(models.TextChoices):

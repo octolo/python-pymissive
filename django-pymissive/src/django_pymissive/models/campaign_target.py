@@ -1,4 +1,4 @@
-"""Pending campaign targets, one row per (campaign, object, missive type).
+"""Pending campaign targets, one row per (campaign step, object).
 
 A selection row is the checkbox: "this object must receive the campaign on
 this channel". The missive is built later, one row at a time, by
@@ -28,18 +28,12 @@ from ..fields import JSONField
 from ..managers.campaign_target import CampaignTargetManager
 from ..managers.related_object import object_id_value
 from ..utils import validate_import_paths
-from .choices import MissiveRecipientType, MissiveStatus, MissiveType
+from .choices import MissiveRecipientType, MissiveStatus
 
 
 def _target_slot(row):
-    """Identity of the live checkbox.
-
-    A step owns the slot when the row has one, so two emails of the same
-    campaign can both be pending. A row with no step keeps the historical
-    slot of ``(campaign, object, missive type)``.
-    """
-    channel = ("step", row.campaign_step_id) if row.campaign_step_id else ("type", row.missive_type)
-    return (row.campaign_id, row.content_type_id, row.object_id, channel)
+    """Identity of the live checkbox."""
+    return (row.campaign_id, row.content_type_id, row.object_id, row.campaign_step_id)
 
 
 def _partition_deleted_targets(rows, drafts, taken):
@@ -54,6 +48,36 @@ def _partition_deleted_targets(rows, drafts, taken):
     return released, dropped
 
 
+def _deleted_draft_ids(rows, using):
+    from .missive import Missive
+
+    return set(
+        Missive._base_manager.using(using)
+        .filter(pk__in={row.missive_id for row in rows}, status=MissiveStatus.DRAFT)
+        .values_list("pk", flat=True)
+    )
+
+
+def _active_target_slots(rows, using):
+    active = (
+        CampaignTarget._base_manager.using(using)
+        .filter(
+            CampaignTarget.active_q(),
+            campaign_id__in={row.campaign_id for row in rows},
+            content_type_id__in={row.content_type_id for row in rows},
+            object_id__in={row.object_id for row in rows},
+            campaign_step_id__in={row.campaign_step_id for row in rows},
+        )
+        .values_list("campaign_id", "content_type_id", "object_id", "campaign_step_id")
+    )
+    return set(active)
+
+
+def _apply_target_deletion(collector, field, rows, using, on_delete) -> None:
+    if rows:
+        on_delete(collector, field, rows, using)
+
+
 def release_or_delete_target(collector, field, sub_objs, using):
     """``on_delete`` of :attr:`CampaignTarget.missive`.
 
@@ -62,42 +86,20 @@ def release_or_delete_target(collector, field, sub_objs, using):
     deleted missive that left draft takes its row along, so a target that
     was sent is never queued again in silence.
     """
-    from .missive import Missive
-
     rows = list(sub_objs)
     if not rows:
         return
-    drafts = set(
-        Missive._base_manager.using(using)
-        .filter(pk__in={row.missive_id for row in rows}, status=MissiveStatus.DRAFT)
-        .values_list("pk", flat=True)
-    )
-    taken = set()
-    active = (
-        CampaignTarget._base_manager.using(using)
-        .filter(
-            CampaignTarget.active_q(),
-            campaign_id__in={row.campaign_id for row in rows},
-            content_type_id__in={row.content_type_id for row in rows},
-            object_id__in={row.object_id for row in rows},
-            missive_type__in={row.missive_type for row in rows},
-        )
-        .values_list("campaign_id", "content_type_id", "object_id", "campaign_step_id", "missive_type")
-    )
-    for campaign_id, content_type_id, object_id, step_id, missive_type in active:
-        channel = ("step", step_id) if step_id else ("type", missive_type)
-        taken.add((campaign_id, content_type_id, object_id, channel))
+    drafts = _deleted_draft_ids(rows, using)
+    taken = _active_target_slots(rows, using)
     released, dropped = _partition_deleted_targets(rows, drafts, taken)
-    if released:
-        models.SET_NULL(collector, field, released, using)
-    if dropped:
-        models.CASCADE(collector, field, dropped, using)
+    _apply_target_deletion(collector, field, released, using, models.SET_NULL)
+    _apply_target_deletion(collector, field, dropped, using, models.CASCADE)
 
 
 class CampaignTarget(models.Model):
-    """One object retained for a campaign, on one missive type.
+    """One object retained for one campaign step.
 
-    ``missive_type`` is the channel (``email``, ``sms``, ``letter``, …).
+    The step determines the channel (``email``, ``sms``, ``letter``, …).
     The business object is a generic link (``content_type`` + ``object_id``),
     so every project shares this table instead of subclassing it.
 
@@ -120,17 +122,9 @@ class CampaignTarget(models.Model):
     campaign_step = models.ForeignKey(
         "django_pymissive.CampaignStep",
         on_delete=models.CASCADE,
-        null=True,
-        blank=True,
         related_name="to_campaigntarget",
         verbose_name=_("Campaign step"),
-        help_text=_("Step this target is selected on. Empty on a campaign that still selects by missive type."),
-    )
-    missive_type = models.CharField(
-        max_length=50,
-        choices=MissiveType.choices,
-        verbose_name=_("Missive type"),
-        help_text=_("Channel this target is selected on (email, sms, letter, …)."),
+        help_text=_("Step this target is selected on."),
     )
     content_type = models.ForeignKey(
         ContentType,
@@ -200,29 +194,20 @@ class CampaignTarget(models.Model):
         verbose_name_plural = _("Campaign targets")
         ordering = ["created_at", "id"]
         indexes = [
-            models.Index(fields=["campaign", "missive_type"], name="campaigntarget_camp_type"),
+            models.Index(fields=["campaign", "campaign_step"], name="campaigntarget_camp_step"),
             models.Index(fields=["content_type", "object_id"], name="campaigntarget_ct_oid"),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["campaign", "content_type", "object_id", "missive_type"],
-                condition=models.Q(
-                    missive__isnull=True,
-                    abandoned_at__isnull=True,
-                    campaign_step__isnull=True,
-                ),
-                name="uniq_campaigntarget_pending",
-            ),
-            models.UniqueConstraint(
                 fields=["campaign", "content_type", "object_id", "campaign_step"],
-                condition=models.Q(
-                    missive__isnull=True,
-                    abandoned_at__isnull=True,
-                    campaign_step__isnull=False,
-                ),
+                condition=models.Q(missive__isnull=True, abandoned_at__isnull=True),
                 name="uniq_campaigntarget_pending_step",
             ),
         ]
+
+    @property
+    def missive_type(self) -> str:
+        return self.campaign_step.missive_type
 
     def __str__(self):
         label = self.object_str or self.object_id or "?"
@@ -236,8 +221,6 @@ class CampaignTarget(models.Model):
         step = self.campaign_step
         if self.campaign_id and step.campaign_id != self.campaign_id:
             raise ValidationError({"campaign_step": _("The step must belong to this campaign.")})
-        if self.missive_type and step.missive_type != self.missive_type:
-            raise ValidationError({"missive_type": _("The missive type must match the step.")})
 
     def _normalize_object_id(self) -> None:
         model = self.content_type.model_class()
@@ -384,12 +367,8 @@ class CampaignTarget(models.Model):
             "campaign_id": self.campaign_id,
             "content_type_id": self.content_type_id,
             "object_id": self.object_id,
+            "campaign_step_id": self.campaign_step_id,
         }
-        if self.campaign_step_id:
-            window["campaign_step_id"] = self.campaign_step_id
-        else:
-            window["missive_type"] = self.missive_type
-            window["campaign_step__isnull"] = True
         return type(self).objects.filter(**window).select_related("missive").order_by("-created_at", "-id")
 
     def thread_missives(self):
@@ -481,7 +460,7 @@ def active_campaign_target(campaign, target, missive_type, *, campaign_step=None
         campaign_id=campaign.pk,
         content_type=ContentType.objects.get_for_model(target),
         object_id=object_id_value(target.pk),
-        missive_type=channel,
+        campaign_step__missive_type=channel,
     )
     if campaign_step is not None:
         rows = rows.filter(campaign_step=campaign_step)

@@ -33,6 +33,9 @@ from django_pymissive.managers.campaign import (
     count_annotations as campaign_count_annotations,
     support_count_name,
 )
+from django_pymissive.managers.campaign_step import (
+    count_annotations as campaign_step_count_annotations,
+)
 from django_pymissive.managers import related_object as related_object_manager
 from django_pymissive.managers.related_object import (
     MissiveRelatedQuerySetMixin,
@@ -48,6 +51,7 @@ from django.contrib.contenttypes.models import ContentType
 from django_pymissive.models.attachment import MissiveBaseAttachment
 from django_pymissive.models.campaign import MissiveCampaign
 from django_pymissive.models.campaign_step import CampaignStep
+from django_pymissive.models.campaign_target import CampaignTarget
 from django_pymissive.models.choices import (
     MissiveAttachmentType,
     MissiveStatus,
@@ -278,6 +282,182 @@ def test_campaign_without_missive_counts_zero_not_null():
     assert annotated.has_sent_missives is False
 
 
+def test_campaign_and_step_counters_follow_the_step_relation():
+    campaign = _campaign()
+    first = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type=MissiveType.EMAIL,
+    )
+    second = CampaignStep.objects.create(
+        campaign=campaign,
+        position=2,
+        missive_type=MissiveType.EMAIL,
+    )
+    first_missive = Missive.objects.create(
+        campaign_step=first,
+        missive_type=MissiveType.EMAIL,
+        status=MissiveStatus.SUCCESS,
+    )
+    second_missive = Missive.objects.create(
+        campaign_step=second,
+        missive_type=MissiveType.EMAIL,
+        status=MissiveStatus.DRAFT,
+    )
+    Missive.objects.create(
+        campaign_step=second,
+        missive_type=MissiveType.EMAIL,
+        status=MissiveStatus.SUCCESS,
+        thread_type=MissiveThreadType.HISTORY,
+    )
+    first_missive.to_missiverecipient.create(
+        name="Alice",
+        email="alice@example.com",
+        status=MissiveStatus.SUCCESS,
+    )
+    second_missive.to_missiverecipient.create(
+        name="Bob",
+        email="bob@example.com",
+        status=MissiveStatus.FAILED,
+    )
+    content_type = ContentType.objects.get_for_model(Contact)
+    pending_contact = _contact()
+    abandoned_contact = _contact()
+    CampaignTarget.objects.create(
+        campaign=campaign,
+        campaign_step=first,
+        content_type=content_type,
+        object_id=pending_contact.pk,
+    )
+    CampaignTarget.objects.create(
+        campaign=campaign,
+        campaign_step=second,
+        content_type=content_type,
+        object_id=abandoned_contact.pk,
+        abandoned_at=timezone.now(),
+    )
+
+    annotated_campaign = MissiveCampaign.objects.with_counts(
+        "count_missive",
+        "count_sent",
+        "count_pending",
+        "count_recipient",
+        "pct_recipient_success",
+    ).get(pk=campaign.pk)
+    annotated_steps = {
+        step.pk: step
+        for step in CampaignStep.objects.with_counts(
+            "count_missive",
+            "count_sent",
+            "count_pending",
+            "count_recipient",
+            "count_target_pending",
+            "count_target_abandoned",
+            "pct_recipient_success",
+        ).filter(campaign=campaign)
+    }
+
+    assert annotated_campaign.count_missive == 3
+    assert annotated_campaign.count_sent == 1
+    assert annotated_campaign.count_pending == 1
+    assert annotated_campaign.count_recipient == 2
+    assert annotated_campaign.pct_recipient_success == 50.0
+    assert annotated_steps[first.pk].count_missive == 1
+    assert annotated_steps[first.pk].count_sent == 1
+    assert annotated_steps[first.pk].count_target_pending == 1
+    assert annotated_steps[first.pk].count_target_abandoned == 0
+    assert annotated_steps[first.pk].pct_recipient_success == 100.0
+    assert annotated_steps[second.pk].count_missive == 2
+    assert annotated_steps[second.pk].count_sent == 0
+    assert annotated_steps[second.pk].count_pending == 1
+    assert annotated_steps[second.pk].count_target_pending == 0
+    assert annotated_steps[second.pk].count_target_abandoned == 1
+    assert annotated_steps[second.pk].pct_recipient_success == 0.0
+
+
+def test_campaign_step_with_counts_validates_and_selects_annotations():
+    selected = CampaignStep.objects.with_counts("count_missive", "pct_recipient_success")
+
+    assert set(selected.query.annotations) == {
+        "count_missive",
+        "count_recipient",
+        "count_recipient_success",
+        "pct_recipient_success",
+    }
+    assert set(campaign_step_count_annotations()) < set(campaign_count_annotations())
+    with pytest.raises(ValueError, match="count_nope"):
+        CampaignStep.objects.with_counts("count_nope")
+
+
+def test_send_speed_average_is_not_weighted_by_recipient_joins():
+    campaign = _campaign()
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type=MissiveType.EMAIL,
+    )
+    first = Missive.objects.create(
+        campaign_step=step,
+        missive_type=MissiveType.EMAIL,
+        send_speed=1,
+    )
+    second = Missive.objects.create(
+        campaign_step=step,
+        missive_type=MissiveType.EMAIL,
+        send_speed=9,
+    )
+    first.to_missiverecipient.create(email="first@example.com")
+    for index in range(3):
+        second.to_missiverecipient.create(email=f"second-{index}@example.com")
+
+    annotated_campaign = MissiveCampaign.objects.with_counts(
+        "send_speed",
+        "count_recipient",
+    ).get(pk=campaign.pk)
+    annotated_step = CampaignStep.objects.with_counts(
+        "send_speed",
+        "count_recipient",
+    ).get(pk=step.pk)
+
+    assert annotated_campaign.count_recipient == 4
+    assert annotated_campaign.send_speed == pytest.approx(5)
+    assert annotated_step.count_recipient == 4
+    assert annotated_step.send_speed == pytest.approx(5)
+
+
+def test_campaign_step_last_run_dates_come_from_its_own_missives():
+    campaign = _campaign()
+    with_run = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type=MissiveType.EMAIL,
+    )
+    without_run = CampaignStep.objects.create(
+        campaign=campaign,
+        position=2,
+        missive_type=MissiveType.SMS,
+    )
+    sent_at = timezone.now()
+    ended_at = sent_at + timezone.timedelta(minutes=1)
+    run = MissiveScheduledCampaign.objects.create(
+        campaign=campaign,
+        send_date=sent_at,
+        ended_at=ended_at,
+    )
+    Missive.objects.create(
+        campaign_step=with_run,
+        scheduler=run,
+        missive_type=MissiveType.EMAIL,
+    )
+
+    steps = {step.pk: step for step in CampaignStep.objects.with_last_run_dates().filter(campaign=campaign)}
+
+    assert steps[with_run.pk].last_send_date == sent_at
+    assert steps[with_run.pk].last_ended_at == ended_at
+    assert steps[without_run.pk].last_send_date is None
+    assert steps[without_run.pk].last_ended_at is None
+
+
 def test_new_counters_ignore_history_threads_legacy_ones_do_not():
     campaign = _campaign()
     _missive(campaign, status=MissiveStatus.SUCCESS)
@@ -363,10 +543,10 @@ def test_the_default_queryset_aggregates_nothing():
 
     # The joins and aggregates every campaign lookup used to pay for.
     opted_in = str(MissiveCampaign.objects.with_counts().query)
-    # Pending targets and stored contact values are per-type subqueries, and
-    # the totals add those counters. The selection table adds no join.
-    assert opted_in.count("JOIN") == 7
-    assert opted_in.count("COUNT(DISTINCT") == 91
+    # Pending targets, stored contact values and send speed use subqueries.
+    # Send speed joins each missive to its step inside its isolated subquery.
+    assert opted_in.count("JOIN") == 8
+    assert opted_in.count("COUNT(DISTINCT") == 80
 
 
 def test_with_counts_annotates_only_the_names_it_is_given():
@@ -441,6 +621,7 @@ def test_campaign_changelist_still_renders_the_opt_in_counters():
     )
     assert response.status_code == 200
     assert b"1 recipient(s)" in response.content
+    assert b"1 step(s)" in response.content
     assert b"100% success" in response.content
 
 

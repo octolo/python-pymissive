@@ -47,7 +47,7 @@ def test_refused_progress_hook_is_not_imported():
 def test_start_selection_checks_allowlist_before_importing_build():
     campaign = MissiveCampaign.objects.create(subject="Run")
 
-    with patch("django_pymissive.utils.import_string") as import_string:
+    with patch("django_pymissive.utils.imports.import_string") as import_string:
         with pytest.raises(ValidationError, match="Cannot import build"):
             start_selection(campaign, ["email"], build="os.system")
 

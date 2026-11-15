@@ -11,36 +11,45 @@ Dotted paths for settings / JSON fields::
 from __future__ import annotations
 
 import math
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from django.conf import settings
 
 from ._base import MissivePdfProcessor
-
 
 DEFAULT_WATERMARK_LINES: list[str] = ["nom", "date", "draft"]
 
 
 def resolve_watermark_text(missive=None, campaign=None) -> list[str]:
     """missive → campaign → ``PYMISSIVE_WATERMARK`` → default lines."""
-    if campaign is None and missive is not None:
-        campaign = getattr(missive, "campaign", None) if getattr(missive, "campaign_id", None) else None
-
-    for source in (missive, campaign):
-        if source is None:
-            continue
-        cfg = getattr(source, "additional_config", None) or {}
-        value = cfg.get("watermark") if isinstance(cfg, dict) else None
+    campaign = _watermark_campaign(missive, campaign)
+    for value in _watermark_values(missive, campaign):
         lines = _coerce_lines(value)
         if lines:
             return lines
-
-    settings_value = getattr(settings, "PYMISSIVE_WATERMARK", None)
-    lines = _coerce_lines(settings_value)
-    if lines:
-        return lines
-
     return list(DEFAULT_WATERMARK_LINES)
+
+
+def _watermark_campaign(missive, campaign):
+    if campaign is not None or missive is None:
+        return campaign
+    if getattr(missive, "campaign_id", None):
+        return getattr(missive, "campaign", None)
+    return None
+
+
+def _watermark_values(missive, campaign):
+    for source in (missive, campaign):
+        if source is not None:
+            yield _watermark_value(source)
+    yield getattr(settings, "PYMISSIVE_WATERMARK", None)
+
+
+def _watermark_value(source):
+    resolver = getattr(source, "resolved_additional_config", None)
+    config = resolver() if callable(resolver) else getattr(source, "additional_config", None) or {}
+    return config.get("watermark") if isinstance(config, dict) else None
 
 
 def _coerce_lines(value: Any) -> list[str]:
@@ -105,7 +114,7 @@ def watermark_processor(
     text: str | Sequence[str] | None = None,
     color: tuple[float, float, float] = (0.85, 0.1, 0.1),
     alpha: float = 0.25,
-    font_size: int | float | None = None,
+    font_size: int | float | None = None,  # noqa: PYI041 - preserve the public signature
     font_name: str = "Helvetica-Bold",
     rotation: float = 45,
     line_spacing: float = 1.25,
@@ -166,14 +175,13 @@ def watermark_processor(
         buf.seek(0)
         return PdfReader(buf).pages[0]
 
-    base = PdfReader(BytesIO(pdf_bytes))
-    writer = PdfWriter()
+    writer = PdfWriter(clone_from=BytesIO(pdf_bytes))
     # Cache overlays by page geometry: typical PDFs have uniform page sizes
     # so we build a single overlay; mixed-size PDFs (e.g. an appended
     # landscape page) still get correctly-sized stamps.
     overlay_cache: dict[tuple, Any] = {}
 
-    for page in base.pages:
+    for page in writer.pages:
         mb = page.mediabox
         width = float(mb.width)
         height = float(mb.height)
@@ -189,7 +197,6 @@ def watermark_processor(
             overlay_cache[key] = overlay_page
 
         page.merge_page(overlay_page)
-        writer.add_page(page)
 
     out = BytesIO()
     writer.write(out)

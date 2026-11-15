@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
@@ -123,14 +123,18 @@ _STANDALONE_ATTACHMENT_INLINE_FIELDSETS: _FieldsetSpec = (
     ),
 )
 
-_CAMPAIGN_ATTACHMENT_INLINE_FIELDSETS: _FieldsetSpec = (
+_CAMPAIGN_ATTACHMENT_INLINE_FIELDSETS = cast(
+    "_FieldsetSpec",
     (
-        _("Campaign steps"),
-        {
-            "fields": ("campaign_step",),
-        },
+        (
+            _("Campaign steps"),
+            {
+                "fields": ("campaign_step",),
+            },
+        ),
+        *tuple(_STANDALONE_ATTACHMENT_INLINE_FIELDSETS),
     ),
-) + _STANDALONE_ATTACHMENT_INLINE_FIELDSETS
+)
 
 
 class MissiveAttachmentBaseInline(admin.StackedInline):
@@ -178,7 +182,7 @@ class CampaignStepFieldMixin:
 
             campaign_id = getattr(request.resolver_match, "kwargs", {}).get("object_id")
             kwargs["queryset"] = CampaignStep.objects.filter(campaign_id=campaign_id)
-        return super().formfield_for_manytomany(db_field, request, **kwargs)
+        return super().formfield_for_manytomany(db_field, request, **kwargs)  # type: ignore[misc]
 
 
 class CampaignAttachmentBaseInline(CampaignStepFieldMixin, admin.StackedInline):

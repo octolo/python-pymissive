@@ -11,7 +11,7 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from django_pymissive.billings import mark_billings_billed
+from django_pymissive.services.billings import mark_billings_billed
 from django_pymissive.models.billing import MissiveBilling
 from django_pymissive.models.choices import MissiveType
 from django_pymissive.models.missive import Missive

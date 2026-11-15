@@ -12,7 +12,7 @@ Usage:
 
 from django.core.management.base import BaseCommand, CommandError
 
-from ...fake_webhooks import FakeProviderDisabled, run_fake_webhooks
+from ...testing.fake_webhooks import FakeProviderDisabled, run_fake_webhooks
 
 
 class Command(BaseCommand):

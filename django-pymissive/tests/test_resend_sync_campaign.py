@@ -252,3 +252,42 @@ def test_clear_is_noop_without_campaign():
     assert new.subject == "Keep me"
     assert new.body_text == "Keep body"
     assert new.sender_name == "Keep Sender"
+
+
+@override_settings(PYMISSIVE_DEFAULT_SENDER={})
+def test_resend_paths_follow_every_email_sourced_field():
+    fields = Missive.get_campaign_sourced_fields("email")
+    step_values = {
+        "subject": "Step subject",
+        "body_rich": "<p>step</p>",
+        "body_rich_snapshot_html": "<p>step snapshot</p>",
+        "body_text": "step text",
+        "sender_name": "Step Sender",
+        "sender_email": "step@example.com",
+        "reply_to_name": "Step Reply",
+        "reply_to_email": "reply-step@example.com",
+    }
+    local_values = {
+        "subject": "Local subject",
+        "body_rich": "<p>local</p>",
+        "body_rich_snapshot_html": "<p>local snapshot</p>",
+        "body_text": "local text",
+        "sender_name": "Local Sender",
+        "sender_email": "local@example.com",
+        "reply_to_name": "Local Reply",
+        "reply_to_email": "reply-local@example.com",
+    }
+    assert set(step_values) == set(fields)
+    campaign = _campaign(subject="Campaign")
+    step = _step(campaign, MissiveType.EMAIL, **step_values)
+    missive = _email_missive(campaign, campaign_step=step, **local_values)
+
+    synced = missive.duplicate_missive(resend=True, sync_campaign=True)
+    synced.refresh_from_db()
+    for name in fields:
+        assert getattr(synced, name) == getattr(step, name)
+
+    cleared = missive.duplicate_missive(resend=True, sync_campaign=False)
+    cleared.refresh_from_db()
+    for name in fields:
+        assert getattr(cleared, name) in (None, "")

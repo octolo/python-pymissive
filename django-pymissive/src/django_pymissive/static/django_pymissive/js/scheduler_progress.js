@@ -30,11 +30,18 @@
         overallErrors: document.getElementById("scheduler-overall-errors"),
         averageSpeed: document.getElementById("scheduler-average-speed"),
         averageSpeedValue: document.getElementById("scheduler-average-speed-value"),
+        measuredSpeed: document.getElementById("scheduler-measured-speed"),
+        measuredSpeedValue: document.getElementById("scheduler-measured-speed-value"),
         cancel: document.getElementById("scheduler-cancel"),
         typeList: document.getElementById("scheduler-type-list"),
         statusList: document.getElementById("scheduler-status-list"),
         jsonPre: document.getElementById("scheduler-json-pre"),
     };
+
+    root.querySelectorAll(".progress-bar[data-progress]").forEach(function (bar) {
+        const value = Math.max(0, Math.min(100, Number(bar.dataset.progress || 0)));
+        bar.style.width = value + "%";
+    });
 
     function formatUpdated() {
         if (!els.updated) {
@@ -137,6 +144,14 @@
             } else {
                 els.averageSpeed.hidden = false;
                 els.averageSpeedValue.textContent = data.average_send_speed_display;
+            }
+        }
+        if (els.measuredSpeed && els.measuredSpeedValue) {
+            if (data.send_speed == null) {
+                els.measuredSpeed.hidden = true;
+            } else {
+                els.measuredSpeed.hidden = false;
+                els.measuredSpeedValue.textContent = data.send_speed_display;
             }
         }
         if (els.overallErrors) {

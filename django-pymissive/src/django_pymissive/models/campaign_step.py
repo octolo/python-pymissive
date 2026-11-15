@@ -5,8 +5,8 @@ turns the channel on: there is no separate activation flag. Steps run in
 ``position`` order. That order is not a workflow: a failure does not block
 the next step, and there is no delay or condition.
 
-Channel content lives directly on this model. Proxy models expose the
-relevant subset for each channel without adding tables or columns.
+Channel content lives directly on this model. Proxy models expose one
+missive type each without adding tables or columns.
 
 Schema changes are not shipped as a migration. The project that deploys
 django-pymissive creates the step table, the attachment M2M table and the two nullable foreign keys
@@ -17,36 +17,29 @@ django-pymissive creates the step table, the attachment M2M table and the two nu
 
 from __future__ import annotations
 
-import json
+from typing import ClassVar
 
 from django.core.exceptions import ValidationError
-from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
-from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django_geoaddress.fields import GeoaddressField
 from phonenumber_field.modelfields import PhoneNumberField
 from pymissive.config import normalize_missive_type
 
 from ..fields import JSONField, RichTextField
+from ..managers.campaign_step import CampaignStepManager
 from ..utils import (
-    SENDER_CONTACT_FIELDS,
     apply_default_sender_fields,
+    json_safe,
+    sender_default_fields,
     serialize_model_for_context,
     snapshot_html_read_more,
 )
 from .choices import (
-    AcknowledgementLevel,
-    MissiveDeliveryMode,
-    MissivePriority,
     MissiveType,
     get_missive_support_from_type,
 )
 from .mixins import CommentTimestampedModel, ConfigMixin, ProcessorsMixin
-
-
-def _json_safe(data: dict) -> dict:
-    return json.loads(json.dumps(data, cls=DjangoJSONEncoder, default=str))
 
 
 class CampaignStep(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
@@ -55,6 +48,8 @@ class CampaignStep(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
     Several steps may share a ``missive_type``. ``position`` is unique per
     campaign and is the only ordering key.
     """
+
+    objects = CampaignStepManager()
 
     campaign = models.ForeignKey(
         "django_pymissive.MissiveCampaign",
@@ -84,27 +79,6 @@ class CampaignStep(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         default="",
         verbose_name=_("Subject"),
         help_text=_("Subject of this step. The campaign label is separate."),
-    )
-    acknowledgement = models.CharField(
-        max_length=50,
-        choices=AcknowledgementLevel.choices,
-        blank=True,
-        null=True,
-        verbose_name=_("Acknowledgement level"),
-    )
-    delivery_mode = models.CharField(
-        max_length=50,
-        choices=MissiveDeliveryMode.choices,
-        blank=True,
-        null=True,
-        verbose_name=_("Delivery mode"),
-    )
-    priority = models.CharField(
-        max_length=20,
-        choices=MissivePriority.choices,
-        blank=True,
-        null=True,
-        verbose_name=_("Priority"),
     )
     duplex_printing = models.BooleanField(
         null=True,
@@ -189,6 +163,7 @@ class CampaignStep(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "still wins."
         ),
     )
+
     class Meta:
         verbose_name = _("Campaign step")
         verbose_name_plural = _("Campaign steps")
@@ -208,17 +183,14 @@ class CampaignStep(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         super().clean()
         if self.missive_type and not normalize_missive_type(self.missive_type):
             raise ValidationError({"missive_type": _("Unknown missive type.")})
+        self._validate_processor_paths("build_target_processors")
 
     def save(self, *args, **kwargs):
         canonical = normalize_missive_type(self.missive_type)
         if canonical:
             self.missive_type = canonical
         if kwargs.get("update_fields") is None:
-            fields = {"sender_name": "name"}
-            mapping = SENDER_CONTACT_FIELDS.get(self.support)
-            if mapping:
-                fields[mapping[0]] = mapping[1]
-            apply_default_sender_fields(self, fields)
+            apply_default_sender_fields(self, sender_default_fields(self.support))
         super().save(*args, **kwargs)
 
     @property
@@ -241,7 +213,7 @@ class CampaignStep(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             "build_target_processors",
         ):
             config_data.pop(field, None)
-        config_data = _json_safe(config_data)
+        config_data = json_safe(config_data)
         attachments = [
             {"id": str(attachment.pk), "position": attachment.priority}
             for attachment in self.attachments.order_by("priority", "pk")
@@ -260,27 +232,25 @@ class CampaignStep(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """Preview URL of this step. Empty when the step is not saved yet."""
         if not self.pk or not self.campaign_id:
             return ""
-        from ..views.preview import campaign_preview_query, preview_kind_for_missive_type
+        from django.urls import reverse
 
-        kind = preview_kind_for_missive_type(self.missive_type)
-        query = campaign_preview_query(kind=kind)
-        return reverse("django_pymissive:preview", args=["campaign", self.campaign_id]) + query + f"&step={self.pk}"
-
-class EmailCampaignStep(CampaignStep):
-    class Meta:
-        proxy = True
-        verbose_name = _("Email campaign step")
-        verbose_name_plural = _("Email campaign steps")
+        return reverse("django_pymissive:preview_campaign_step", args=[self.pk])
 
 
-class PhoneCampaignStep(CampaignStep):
-    class Meta:
-        proxy = True
-        verbose_name = _("Phone campaign step")
-        verbose_name_plural = _("Phone campaign steps")
+class CampaignStepTypeManager(CampaignStepManager):
+    def get_queryset(self):
+        return super().get_queryset().filter(missive_type=self.model.campaign_step_type)
 
 
-class PostalCampaignStep(CampaignStep):
+class TypedCampaignStepMixin:
+    campaign_step_type: ClassVar[str] = ""
+
+    def save(self, *args, **kwargs):
+        self.missive_type = self.campaign_step_type
+        super().save(*args, **kwargs)  # type: ignore[misc]
+
+
+class PostalCampaignStepMixin:
     @property
     def first_document(self):
         return self.body_rich
@@ -299,16 +269,128 @@ class PostalCampaignStep(CampaignStep):
 
     @property
     def first_document_snapshot_html_read_more(self):
-        return self.body_rich_snapshot_html_read_more
+        return snapshot_html_read_more(self.body_rich_snapshot_html)
+
+
+class EmailCampaignStep(TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.EMAIL
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
 
     class Meta:
         proxy = True
-        verbose_name = _("Postal campaign step")
-        verbose_name_plural = _("Postal campaign steps")
+        verbose_name = _("Email campaign step")
+        verbose_name_plural = _("Email campaign steps")
 
 
-class BrandedCampaignStep(CampaignStep):
+class EmailMarketingCampaignStep(TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.EMAIL_MARKETING
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Marketing email campaign step")
+        verbose_name_plural = _("Marketing email campaign steps")
+
+
+class EreCampaignStep(TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.ERE
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Electronic registered email campaign step")
+        verbose_name_plural = _("Electronic registered email campaign steps")
+
+
+class SmsCampaignStep(TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.SMS
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("SMS campaign step")
+        verbose_name_plural = _("SMS campaign steps")
+
+
+class RcsCampaignStep(TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.RCS
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("RCS campaign step")
+        verbose_name_plural = _("RCS campaign steps")
+
+
+class VoiceCallCampaignStep(TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.VOICE_CALL
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Voice call campaign step")
+        verbose_name_plural = _("Voice call campaign steps")
+
+
+class LetterCampaignStep(PostalCampaignStepMixin, TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.LETTER
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Letter campaign step")
+        verbose_name_plural = _("Letter campaign steps")
+
+
+class RegisteredLetterCampaignStep(PostalCampaignStepMixin, TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.REGISTERED_LETTER
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Registered letter campaign step")
+        verbose_name_plural = _("Registered letter campaign steps")
+
+
+class HandDeliveryCampaignStep(PostalCampaignStepMixin, TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.HAND_DELIVERY
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Hand delivery campaign step")
+        verbose_name_plural = _("Hand delivery campaign steps")
+
+
+class NotificationCampaignStep(TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.NOTIFICATION
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Notification campaign step")
+        verbose_name_plural = _("Notification campaign steps")
+
+
+class PushNotificationCampaignStep(TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.PUSH_NOTIFICATION
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = _("Push notification campaign step")
+        verbose_name_plural = _("Push notification campaign steps")
+
+
+class BrandedCampaignStep(TypedCampaignStepMixin, CampaignStep):
+    campaign_step_type: ClassVar[str] = MissiveType.BRANDED
+    objects: ClassVar[CampaignStepTypeManager] = CampaignStepTypeManager()
+
     class Meta:
         proxy = True
         verbose_name = _("Branded campaign step")
         verbose_name_plural = _("Branded campaign steps")
+
+
+PhoneCampaignStep = SmsCampaignStep
+PostalCampaignStep = LetterCampaignStep

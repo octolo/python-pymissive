@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 from io import BytesIO
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -25,7 +26,7 @@ from django_pymissive.processors.pdf import (
     watermark_processor,
     weasyprint_renderer,
 )
-from django_pymissive.processors.pdf.watermark import _auto_font_size
+from django_pymissive.processors.pdf.watermark import _auto_font_size, resolve_watermark_text
 
 # A4 in PostScript points (210 × 297 mm).
 A4_W, A4_H = 595.275591, 841.889764
@@ -50,6 +51,15 @@ def _build_minimal_pdf() -> bytes:
 def _stub_renderer(missive, pdf_bytes, *, campaign=None, context=None, **kwargs):
     """Renderer stub: produces some sentinel bytes regardless of inputs."""
     return b"%PDF-FAKE\n" + (pdf_bytes or b"")
+
+
+def test_watermark_uses_resolved_missive_config():
+    missive = SimpleNamespace(
+        additional_config={},
+        resolved_additional_config=lambda: {"watermark": ["from", "step"]},
+    )
+
+    assert resolve_watermark_text(missive=missive) == ["from", "step"]
 
 
 def _appender(missive, pdf_bytes, *, campaign=None, context=None, suffix=b" + ext", **kwargs):

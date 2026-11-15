@@ -16,7 +16,7 @@ from pymissive.providers.brevo import BrevoAPIProvider
 from pymissive.providers.discord import DiscordProvider
 from pymissive.providers.partner import PartnerProvider
 from pymissive.providers.scaleway import ScalewayProvider
-from pymissive.webhook_auth import authorization_matches, get_webhook_basic_login
+from pymissive.webhook.auth import authorization_matches
 
 
 def _provider(cls, **values):
@@ -62,13 +62,6 @@ def test_webhook_auth_rejects_malformed_and_unknown_authorization():
     assert authorization_matches("secret", authorization="Bearer") is False
     assert authorization_matches("secret", authorization="Basic !!!") is False
     assert authorization_matches("secret", authorization=f"Basic {malformed}") is False
-
-
-def test_webhook_basic_login_falls_back_for_blank_value():
-    provider = Mock()
-    provider._get_config_or_env.return_value = "   "
-
-    assert get_webhook_basic_login(provider) == "pymissive"
 
 
 def test_partner_request_places_get_data_in_query_and_post_data_in_json():

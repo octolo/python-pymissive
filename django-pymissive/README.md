@@ -20,7 +20,7 @@
 ### Technical architecture
 
 - ✅ Django 5.0+ and Python 3.11+ (CI covers Python 3.11–3.13 and Django 5.0–5.2)
-- ✅ Modular structure with mixins (`acknowledgement`, `attachments`, `branded` in `pymissive`)
+- ✅ Modular structure with mixins (`attachments`, `branded` in `pymissive`)
 - ✅ Nearly 800 tests under `tests/`
 - ✅ CI/CD with GitHub Actions
 - ✅ Linted with ruff

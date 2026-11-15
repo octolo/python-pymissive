@@ -11,11 +11,11 @@ from django.utils.dateparse import parse_datetime
 
 from pymissive.config import provider_service_name
 
-from .models.choices import MissiveEventType
-from .models.event import MissiveEvent
-from .models.missive import Missive
-from .signals import suppress_event_billings, trigger_billings
-from .utils import get_recipient
+from ..models.choices import MissiveEventType
+from ..models.event import MissiveEvent
+from ..models.missive import Missive
+from ..signals import suppress_event_billings, trigger_billings
+from ..utils import get_recipient
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def _save_untreated(event, provider) -> bool:
 
 
 # Sending-level lifecycle events that describe the whole missive rather than a
-# single recipient. Some providers (e.g. Maileva registered letter) emit them without any
+# single recipient. Some providers emit them without any
 # recipient attached; status is derived from the latest event of each
 # *recipient*, so a recipient-less event would be ignored and the missive would
 # stay ``DRAFT``. We fan these out to every recipient instead. Only early
@@ -200,7 +200,7 @@ def retrieve_events(*, provider, missive_type, start_date, end_date):
     from django.core.exceptions import ValidationError
     from django.utils.translation import gettext_lazy as _
 
-    from .models.provider import MissiveProviderModel
+    from ..models.provider import MissiveProviderModel
 
     provider_obj = MissiveProviderModel.objects.get(name=str(provider))
     service = provider_service_name("retrieve_events", missive_type)
@@ -209,7 +209,7 @@ def retrieve_events(*, provider, missive_type, start_date, end_date):
     raw = provider_obj._provider.call_service(service, start_date=start_date, end_date=end_date)
     if isinstance(raw, dict):
         raw = raw.get("events") or raw
-    from .signals import suppress_event_billings
+    from ..signals import suppress_event_billings
 
     with suppress_event_billings():
         handle_events(raw, provider_obj, missive_type)
@@ -217,7 +217,7 @@ def retrieve_events(*, provider, missive_type, start_date, end_date):
 
 def delay_retrieve_events(*, provider, missive_type, start_date, end_date):
     """Dispatch :func:`retrieve_events` via the configured task backend."""
-    from .task import get_task_backend
+    from ..task import get_task_backend
 
     get_task_backend().enqueue(
         retrieve_events,

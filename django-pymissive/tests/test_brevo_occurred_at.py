@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from django.utils.dateparse import parse_datetime
 
-from django_pymissive.events import _get_occurred_at
+from django_pymissive.services.events import _get_occurred_at
 from pymissive.providers.brevo import BrevoAPIProvider
 
 
@@ -63,7 +63,7 @@ def test_get_occurred_at_strips_microseconds():
 
 
 def test_get_occurred_at_without_a_timestamp_is_stable():
-    from django_pymissive.events import UNKNOWN_OCCURRED_AT
+    from django_pymissive.services.events import UNKNOWN_OCCURRED_AT
 
     assert _get_occurred_at(None) == UNKNOWN_OCCURRED_AT
     assert _get_occurred_at("") == UNKNOWN_OCCURRED_AT

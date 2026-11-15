@@ -69,7 +69,7 @@ def test_a_string_setting_is_the_provider_for_every_type(settings):
 
 
 def test_force_fake_provider_overrides_every_type(settings):
-    settings.PYMISSIVE_FORCE_FAKE_PROVIDER = True
+    settings.PYMISSIVE_FORCE_PROVIDER = "fake"
     settings.PYMISSIVE_DEFAULT_PROVIDER = "brevo"
     MissiveConfig.objects.create(missive_type=MissiveType.EMAIL, default_provider="brevo")
     MissiveConfig.objects.create(missive_type=MissiveType.SMS, default_provider="smspartner")
@@ -212,6 +212,3 @@ def test_full_save_still_fills_support_and_sender():
     missive.save()
     missive.refresh_from_db()
     assert missive.missive_support
-    assert missive.acknowledgement
-    assert missive.delivery_mode
-    assert missive.priority

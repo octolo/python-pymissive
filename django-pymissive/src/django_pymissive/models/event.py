@@ -143,7 +143,7 @@ class MissiveEvent(CommentTimestampedModel):
         """
         if not self.missive_id:
             raise ValueError("Cannot replay event without associated missive")
-        from ..events import _process_event
+        from ..services.events import _process_event
 
         event = self.trace.get("raw") or self.trace
         if not isinstance(event, dict):

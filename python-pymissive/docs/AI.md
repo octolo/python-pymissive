@@ -102,7 +102,7 @@ These rules must always be followed.
 - Provider-based architecture built on ProviderKit
 - Each messaging service is implemented as a provider inheriting from `MissiveProviderBase`
 - `MissiveProviderBase` extends `ProviderBase` from ProviderKit
-- Providers are organized in the `providers/` directory; shared behaviour lives in `providers/base/` (`acknowledgement`, `attachments`, `branded`)
+- Providers are organized in the `providers/` directory; shared behaviour lives in `providers/base/` (`attachments`, `branded`)
 - Channel types are services in the config; ProviderKit raises if the method is missing
 - Provider discovery and management is handled by ProviderKit
 
@@ -116,11 +116,10 @@ python-missive/
 │   ├── providers/          # Message provider implementations
 │   │   └── base/           # Base provider classes and mixins
 │   ├── utils.py            # Framework-agnostic helpers
-│   ├── config.py           # Configuration utilities
+│   ├── config/             # Configuration models and field definitions
 │   └── cli.py              # CLI interface
 ├── tests/                  # Test suite
 ├── docs/                   # Documentation
-├── service.py              # Main service entry point
 └── pyproject.toml          # Project configuration
 ```
 
@@ -132,11 +131,11 @@ python-missive/
 
 ---
 
-## Command Execution (ABSOLUTE)
+## Command Execution
 
-- **Always use**: `./service.py dev <command>` or `python dev.py <command>`
-- **Always use**: `./service.py quality <command>` or `python quality.py <command>`
-- Never execute commands directly without going through these entry points
+- Run commands from the `python-pymissive/` directory.
+- Run tests with `python -m pytest`.
+- Run quality checks with the configured `ruff` and `mypy` commands.
 
 ---
 

@@ -65,7 +65,4 @@ def test_missive_resolves_snapshot_from_campaign_step():
         missive_support="email",
     )
 
-    assert (
-        missive.get_locally_or_campaign_value("body_rich_snapshot_html")
-        == "<p>Email snapshot</p>"
-    )
+    assert missive.get_locally_or_campaign_value("body_rich_snapshot_html") == "<p>Email snapshot</p>"

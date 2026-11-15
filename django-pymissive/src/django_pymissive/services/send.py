@@ -70,7 +70,6 @@ def materialize_selection(
     scheduler=None,
     on_row=None,
     campaign_step=None,
-    unassigned: bool = False,
 ) -> int:
     """Build a draft for every live selection row of *missive_types*. Sends nothing.
 
@@ -89,7 +88,6 @@ def materialize_selection(
             channel,
             active_only=True,
             campaign_step=campaign_step,
-            unassigned=unassigned,
         ):
             if on_row is not None and on_row(row) is False:
                 return attached
@@ -265,6 +263,9 @@ def start_selection(campaign, missive_types, *, build: str | None = None):
             additional_config={"missive_types": chosen},
             build_target_processors=[build] if build else [],
         )
+        selected_steps = locked.to_campaignstep.filter(missive_type__in=chosen)
+        if selected_steps.exists():
+            scheduled.campaign_steps.add(*selected_steps)
     scheduled.start_scheduled_campaign()
     return scheduled
 
@@ -289,7 +290,7 @@ def run_selection(scheduled_id) -> None:
     def on_row(_row) -> bool:
         return not scheduled.checkpoint()
 
-    steps = list(scheduled.campaign.to_campaignstep.order_by("position", "pk"))
+    steps = list(scheduled.selected_campaign_steps())
     if steps:
         _run_steps(scheduled, steps, on_row)
     else:
@@ -306,7 +307,7 @@ def run_selection(scheduled_id) -> None:
 
 
 def _run_steps(scheduled, steps, on_row) -> None:
-    """Materialize and send one step at a time, then the rows that have no step.
+    """Materialize and send each selected step in campaign order.
 
     A failed missive stays on its step. The next step still runs.
     """
@@ -325,15 +326,6 @@ def _run_steps(scheduled, steps, on_row) -> None:
         scheduled.process_missives(campaign_step=step)
         if scheduled.cancelled_at:
             return
-    materialize_selection(
-        scheduled.campaign,
-        scheduled.selection_channels(),
-        scheduler=scheduled,
-        on_row=on_row,
-        unassigned=True,
-    )
-    if not scheduled.cancelled_at:
-        scheduled.process_missives(campaign_step=None)
 
 
 def _release_unsent_targets(scheduled) -> None:

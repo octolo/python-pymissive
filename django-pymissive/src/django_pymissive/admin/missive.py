@@ -22,10 +22,10 @@ from phonenumber_field.formfields import PhoneNumberField as PhoneNumberFormFiel
 from phonenumber_field.formfields import SplitPhoneNumberField  # type: ignore[import-untyped]
 from urllib.parse import urlencode
 from django_geoaddress.fields import GeoaddressField  # type: ignore[import-untyped]
-from pymissive.utils import is_fake_provider_allowed
-from ..fake_webhooks import delay_fake_webhooks, sent_fake_missives
+from pymissive.providers.fake import is_fake_provider_allowed
+from ..testing.fake_webhooks import delay_fake_webhooks, sent_fake_missives
 from ..forms.missive import RetrieveMissiveForm
-from ..retrieve import retrieve_from_provider as do_retrieve_from_provider
+from ..services.retrieve import retrieve_from_provider as do_retrieve_from_provider
 from ..models.missive import Missive
 from ..managers.missive import MissiveQuerySet
 from ..models.recipient import MissiveRecipient
@@ -57,7 +57,7 @@ class IsBillableListFilter(admin.SimpleListFilter):
     title = _("Is billable")
     parameter_name = "is_billable"
 
-    def lookups(self, request, model_admin):
+    def lookups(self, request, _model_admin):
         return [
             ("1", _("Yes")),
             ("0", _("No")),
@@ -77,7 +77,7 @@ class IsBilledListFilter(admin.SimpleListFilter):
     title = _("Is billed")
     parameter_name = "is_billed"
 
-    def lookups(self, request, model_admin):
+    def lookups(self, request, _model_admin):
         return [
             ("1", _("Yes")),
             ("0", _("No")),
@@ -97,7 +97,7 @@ class HistoryOrMessageListFilter(admin.SimpleListFilter):
     title = _("Thread Type")
     parameter_name = "thread_type"
 
-    def lookups(self, request, model_admin):
+    def lookups(self, request, _model_admin):
         return [
             ("history", _("History")),
             ("message", _("Message")),
@@ -146,7 +146,6 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     list_filter = [
         "missive_type",
         "status",
-        "priority",
         IsBillableListFilter,
         IsBilledListFilter,
         HistoryOrMessageListFilter,
@@ -167,6 +166,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
     ]
     readonly_fields = [
         "missive_support",
+        "body_rich_snapshot_html",
         "created_at",
         "updated_at",
         "external_id",
@@ -181,6 +181,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
         "thread_display",
         "thread_id",
         "thread_type",
+        "send_speed",
         "campaign_target_display",
     ]
     raw_id_fields = [
@@ -306,12 +307,9 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
 
     @admin.display(description=_("Status / Last Event Date"))
     def status_display(self, obj):
-        priority_style = get_missive_style(obj.priority)
-        priority_html = self.format_label(obj.get_priority_display(), size="small", label_type=priority_style)
         status_style = get_missive_style(obj.status)
         status_html = self.format_label(obj.get_status_display(), size="small", label_type=status_style)
-        html = format_html("{} {}", priority_html, status_html)
-        return self.format_with_help_text(html, obj.last_event_date)
+        return self.format_with_help_text(status_html, obj.last_event_date)
 
     @admin.display(description=_("Message(s)/History(s)/Thread"))
     def thread_display(self, obj):
@@ -351,11 +349,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             )
             return redirect(reverse("admin:django_pymissive_missive_change", args=[obj.pk]))
         if not confirmed:
-            return {
-                "confirm": _(
-                    "Run provider preview? This calls the provider API (e.g. preview_registered_letter on Maileva)."
-                )
-            }
+            return {"confirm": _("Run provider preview? This calls the configured provider API.")}
         try:
             response = obj.call_provider_service("preview", **obj.get_serialized_data())
             preview_result = json.dumps(
@@ -440,9 +434,6 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
             [
                 "provider",
                 "missive_type",
-                "acknowledgement",
-                "delivery_mode",
-                "priority",
                 "send_via_task",
             ],
         )
@@ -474,6 +465,7 @@ class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
                 "scheduler",
                 "campaign_target_display",
                 "status",
+                "send_speed",
                 "webhook_url",
                 "external_id_display",
                 "substitute_id",

@@ -70,7 +70,7 @@ _ADDRESS_OFFSET = {
     "height": "30mm",
 }
 
-#: Maileva product → (API mode, version). Chosen by the service, not acknowledgement.
+#: Maileva product → (API mode, version).
 _POSTAL_API = {
     "letter": ("mail", "v3"),
     "registered_letter": ("registered_mail", "v4"),
@@ -83,18 +83,6 @@ def _postal_api(product: str) -> tuple[str, str]:
         return _POSTAL_API[product]
     except KeyError:
         raise ValueError(f"Unknown Maileva postal product: {product!r}") from None
-
-
-def _registered_acknowledgement_of_receipt(kwargs: dict[str, Any]) -> bool:
-    """``registered_mail/v4`` AR flag. Default True when the caller omitted it."""
-    if "acknowledgement_of_receipt" in kwargs:
-        return bool(kwargs["acknowledgement_of_receipt"])
-    ack = kwargs.get("acknowledgement")
-    if ack is None or ack == "":
-        return True
-    if isinstance(ack, bool):
-        return ack
-    return str(ack).strip().lower() != "basic_delivery"
 
 
 # International registered mail (UPU S10), e.g. RW799210633FR.
@@ -444,7 +432,6 @@ __all__ = [
     "_ADDRESS_OFFSET",
     "_POSTAL_API",
     "_postal_api",
-    "_registered_acknowledgement_of_receipt",
     "_UPU_S10_RE",
     "_FR_LR_RE",
     "_MAILEVA_PO_BOX_RE",

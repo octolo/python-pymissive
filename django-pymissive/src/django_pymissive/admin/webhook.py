@@ -9,7 +9,7 @@ from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
 from django_boosted.decorators import admin_boost_view  # type: ignore[import-untyped]
 
 from pymissive.config import provider_service_name
-from pymissive.webhook_secret import generate_webhook_secret as make_webhook_secret
+from pymissive.webhook.secret import generate_webhook_secret as make_webhook_secret
 
 from ..forms.webhook import GenerateWebhookSecretForm
 from ..models.webhook import MissiveWebhook

@@ -150,7 +150,9 @@ def _create_type_batch(campaign, missive_type, count, start_index):
         if campaign_step is None:
             campaign_step = CampaignStep.objects.create(
                 campaign=campaign,
-                position=(campaign.to_campaignstep.order_by("-position").values_list("position", flat=True).first() or 0)
+                position=(
+                    campaign.to_campaignstep.order_by("-position").values_list("position", flat=True).first() or 0
+                )
                 + 1,
                 label=missive_type.replace("_", " ").title(),
                 missive_type=missive_type,

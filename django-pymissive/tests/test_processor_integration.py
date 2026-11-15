@@ -9,6 +9,7 @@ invocation. Uses an in-memory SQLite DB via pytest-django.
 from __future__ import annotations
 
 import pytest
+from django.core.exceptions import ValidationError
 
 from django_pymissive.models.campaign import MissiveCampaign
 from django_pymissive.models.campaign_step import CampaignStep
@@ -296,3 +297,110 @@ def _tag_appender(content, *, missive=None, campaign=None, field_name=None, cont
 
 def _exploding_body_processor(content, **kwargs):
     raise RuntimeError("boom")
+
+
+def test_campaign_step_accepts_an_allowed_processor(settings):
+    settings.PYMISSIVE_ALLOWED_TASK_BACKENDS = ["myapp"]
+    campaign = _make_campaign()
+    step = CampaignStep(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        body_processors=["myapp.hooks.build"],
+        build_target_processors=["django_pymissive.processors.build_target.build_target_processor"],
+    )
+
+    step.full_clean()
+
+
+def test_campaign_step_refuses_a_processor_outside_the_allowlist(settings):
+    settings.PYMISSIVE_ALLOWED_TASK_BACKENDS = ["myapp"]
+    campaign = _make_campaign()
+    step = CampaignStep(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        body_processors=[{"processor": "os.system", "kwargs": {}}],
+    )
+
+    with pytest.raises(ValidationError) as exc:
+        step.full_clean()
+
+    assert list(exc.value.message_dict) == ["body_processors"]
+    assert "os.system" in exc.value.message_dict["body_processors"][0]
+
+
+def test_campaign_step_validates_build_target_processors(settings):
+    settings.PYMISSIVE_ALLOWED_TASK_BACKENDS = ["myapp"]
+    campaign = _make_campaign()
+    step = CampaignStep(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        build_target_processors=["subprocess.run"],
+    )
+
+    with pytest.raises(ValidationError) as exc:
+        step.full_clean()
+
+    assert "build_target_processors" in exc.value.message_dict
+    assert "subprocess.run" in exc.value.message_dict["build_target_processors"][0]
+
+
+def test_processor_chain_prefers_missive_then_step_then_campaign(settings):
+    settings.PYMISSIVE_DEFAULT_BODY_PROCESSORS = ["global.proc"]
+    settings.PYMISSIVE_DEFAULT_FIRST_DOCUMENT_PROCESSORS = ["global.pdf"]
+    settings.PYMISSIVE_DEFAULT_ATTACHMENT_PROCESSORS = ["global.att"]
+    campaign = MissiveCampaign.objects.create(
+        subject="Campaign",
+        body_processors=["campaign.body"],
+        first_document_processors=["campaign.pdf"],
+        attachment_processors=["campaign.att"],
+    )
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        body_processors=["step.body"],
+        first_document_processors=["step.pdf"],
+        attachment_processors=["step.att"],
+    )
+    missive = Missive.objects.create(
+        campaign_step=step,
+        missive_type="email",
+        subject="Hello",
+        body_processors=["missive.body"],
+        first_document_processors=["missive.pdf"],
+        attachment_processors=["missive.att"],
+    )
+
+    assert missive.get_body_processors() == ["missive.body"]
+    assert missive.get_first_document_processors() == ["missive.pdf"]
+    assert missive.get_attachment_processors() == ["missive.att"]
+
+    missive.body_processors = []
+    missive.first_document_processors = []
+    missive.attachment_processors = []
+    missive.save(update_fields=["body_processors", "first_document_processors", "attachment_processors"])
+    missive = Missive.objects.get(pk=missive.pk)
+    assert missive.get_body_processors() == ["step.body"]
+    assert missive.get_first_document_processors() == ["step.pdf"]
+    assert missive.get_attachment_processors() == ["step.att"]
+
+    step.body_processors = []
+    step.first_document_processors = []
+    step.attachment_processors = []
+    step.save(update_fields=["body_processors", "first_document_processors", "attachment_processors"])
+    missive = Missive.objects.get(pk=missive.pk)
+    assert missive.get_body_processors() == ["campaign.body"]
+    assert missive.get_first_document_processors() == ["campaign.pdf"]
+    assert missive.get_attachment_processors() == ["campaign.att"]
+
+    campaign.body_processors = []
+    campaign.first_document_processors = []
+    campaign.attachment_processors = []
+    campaign.save(update_fields=["body_processors", "first_document_processors", "attachment_processors"])
+    missive = Missive.objects.get(pk=missive.pk)
+    assert missive.get_body_processors() == ["global.proc"]
+    assert missive.get_first_document_processors() == ["global.pdf"]
+    assert missive.get_attachment_processors() == ["global.att"]

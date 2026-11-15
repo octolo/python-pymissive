@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 class MailevaApiMixin(MailevaMixinTypingBase):
+    WEBHOOK_BASIC_LOGIN_DEFAULT = "pymissive"
+
     @property
     def address_offset_letter(self) -> dict[str, str]:
         return _ADDRESS_OFFSET
@@ -170,12 +172,10 @@ class MailevaApiMixin(MailevaMixinTypingBase):
         secret = self.get_webhook_secret()
         if not secret:
             return None
-        from pymissive.webhook_auth import (
-            get_webhook_basic_login,
-            maileva_subscription_authentication,
-        )
-
-        return maileva_subscription_authentication(secret, login=get_webhook_basic_login(self))
+        default_login = self.WEBHOOK_BASIC_LOGIN_DEFAULT
+        raw_login = self._get_config_or_env("WEBHOOK_BASIC_LOGIN", default_login)
+        login = str(raw_login or default_login).strip() or default_login
+        return {"basic": {"login": login, "password": secret}}
 
     def get_webhooks_by_resource_type_and_url(self, resource_type: str, url: str) -> list[dict[str, Any]]:
         webhooks = self.retrieve_webhooks()

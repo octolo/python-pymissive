@@ -1,7 +1,8 @@
 """Manager for MissiveScheduledCampaign model."""
 
 from django.db import models
-from django.db.models import Q
+from django.db.models import Exists, F, OuterRef, Q, Subquery, Value
+from django.db.models.functions import Coalesce
 from pymissive.config import GENERIC_SUPPORT, MISSIVE_TYPES
 
 from ..models.choices import (
@@ -56,6 +57,41 @@ def status_annotation_name(status: str) -> str:
 def thread_annotation_name(thread: str) -> str:
     """Count for one thread type (e.g. ``count_thread_history``)."""
     return f"count_thread_{thread}"
+
+
+def live_error_count_expr():
+    """Live failures this run would requeue, on its selected steps.
+
+    ``ERROR``, ``FAILED`` and ``PARTIALLY_FAILED`` with ``thread_type=MISSIVE``.
+    An empty step selection means every step of the campaign. Archived attempts
+    and conversation messages stay out, and the count is not limited to missives
+    already attached to this run: a failure still belongs to the run that
+    produced it until the retry archives it.
+    """
+    from ..models.missive import Missive
+    from ..models.scheduler import MissiveScheduledCampaign
+
+    through = MissiveScheduledCampaign.campaign_steps.through
+    selected_for_this_step = through.objects.filter(
+        missivescheduledcampaign_id=OuterRef(OuterRef("pk")),
+        campaignstep_id=OuterRef("campaign_step_id"),
+    )
+    any_selected_step = through.objects.filter(
+        missivescheduledcampaign_id=OuterRef(OuterRef("pk")),
+    )
+    rows = (
+        Missive._base_manager.filter(
+            campaign_step__campaign_id=OuterRef("campaign_id"),
+            thread_type=MissiveThreadType.MISSIVE,
+            status__in=ERROR_STATUSES,
+        )
+        .filter(~Exists(any_selected_step) | Exists(selected_for_this_step))
+        .order_by()
+        .values("campaign_step__campaign_id")
+        .annotate(n=models.Count("pk"))
+        .values("n")
+    )
+    return Coalesce(Subquery(rows, output_field=models.IntegerField()), Value(0))
 
 
 def count_attempt_expr(*conditions: Q):
@@ -126,6 +162,7 @@ def count_annotations() -> dict:
     counts["count_sent"] = count_missive_expr(sent_missive_q(prefix=_M), lookup=_M)
     counts["count_pending"] = count_missive_expr(pending_missive_q(prefix=_M), lookup=_M)
     counts["count_error"] = count_missive_expr(error_missive_q(prefix=_M), lookup=_M)
+    counts["count_live_error"] = live_error_count_expr()
     return counts
 
 
@@ -143,7 +180,10 @@ class MissiveScheduledCampaignQuerySet(models.QuerySet):
       ``thread_type=MISSIVE`` only, so a counter of that name means the same
       thing on a campaign and on one of its runs. It drives the progress bar,
       and it moves when a row leaves the live set (a draft reclaimed by a newer
-      run, an attempt archived by a retry).
+      run, an attempt archived by a retry). ``count_live_error`` is the live
+      failures on the steps this run would send, including those still attached
+      to an earlier run. ``with_counts`` adds it to ``count_pending`` when
+      ``retry_failed`` is set.
     * **What the run dispatched** — ``count_missive_<status>`` and
       ``count_thread_<type>`` — goes through :func:`count_attempt_expr` and
       keeps the archived attempts, so a finished run never loses the failures it
@@ -163,7 +203,21 @@ class MissiveScheduledCampaignQuerySet(models.QuerySet):
     """
 
     def with_counts(self):
-        return self.annotate(**count_annotations())
+        pending = F("count_pending") + models.Case(
+            models.When(
+                retry_failed=True,
+                send_date__isnull=True,
+                ended_at__isnull=True,
+                cancelled_at__isnull=True,
+                then=F("count_live_error"),
+            ),
+            default=Value(0),
+            output_field=models.IntegerField(),
+        )
+        return self.annotate(
+            **count_annotations(),
+            send_speed=models.Avg(f"{_M}__send_speed"),
+        ).annotate(count_pending=pending)
 
     def sending(self) -> list:
         """Runs a live worker is sending (see ``MissiveScheduledCampaign.is_sending``).

@@ -7,6 +7,11 @@ import unicodedata
 from typing import Iterable
 
 from django.db import transaction
+from pymissive.config import MISSIVE_TYPES
+
+from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
+from django_pymissive.models.channel_config import admin_missive_type_fields
 
 from .models import (
     CampaignContact,
@@ -109,6 +114,27 @@ CITIES: list[tuple[str, str]] = [
 ]
 
 EMAIL_DOMAINS: list[str] = ["example.com", "work.example.com", "mail.example.org"]
+
+CAMPAIGN_LABELS: list[str] = [
+    "Assemblée générale",
+    "Relance adhérents",
+    "Invitation atelier",
+    "Information de service",
+    "Confirmation de rendez-vous",
+]
+
+CAMPAIGN_SUBJECTS: list[str] = [
+    "Votre prochaine échéance",
+    "Une information importante",
+    "Nous vous donnons rendez-vous",
+    "Le détail de votre dossier",
+]
+
+CAMPAIGN_BODIES: list[str] = [
+    "Bonjour, voici les informations prévues pour cette étape de la campagne.",
+    "Nous vous écrivons pour confirmer les détails et répondre à vos questions.",
+    "Ce message résume ce qui change et la suite à donner de votre côté.",
+]
 
 
 def slug(value: str) -> str:
@@ -218,6 +244,68 @@ def ensure_campaign_contacts(total, **kwargs) -> tuple[int, int]:
     missing = total - CampaignContact.objects.count()
     created = len(generate_campaign_contacts(missing, **kwargs)) if missing > 0 else 0
     return created, CampaignContact.objects.count()
+
+
+@transaction.atomic
+def generate_campaigns(count, missive_types, *, seed=None):
+    """Create *count* campaigns, with one step for every selected missive type."""
+    chosen = [missive_type for missive_type in MISSIVE_TYPES if missive_type in set(missive_types)]
+    if not chosen:
+        raise ValueError("Select at least one missive type.")
+    rng = random.Random(seed)
+    campaigns = []
+    for index in range(count):
+        campaign = MissiveCampaign.objects.create(
+            subject=f"{rng.choice(CAMPAIGN_LABELS)} {index + 1}",
+            description=f"<p>{rng.choice(CAMPAIGN_BODIES)}</p>",
+        )
+        for position, missive_type in enumerate(chosen, start=1):
+            CampaignStep.objects.create(
+                campaign=campaign,
+                **_campaign_step_values(rng, missive_type, position),
+            )
+        campaigns.append(campaign)
+    return campaigns
+
+
+def _campaign_step_values(rng, missive_type, position):
+    """Fake content limited to the fields this missive type actually shows."""
+    fields = set(admin_missive_type_fields(missive_type))
+    subject = rng.choice(CAMPAIGN_SUBJECTS)
+    body = rng.choice(CAMPAIGN_BODIES)
+    values = {
+        "position": position,
+        "missive_type": missive_type,
+        "label": MISSIVE_TYPES[missive_type],
+    }
+    if "subject" in fields:
+        values["subject"] = subject
+    if "body_text" in fields:
+        values["body_text"] = body
+    if "body_rich" in fields:
+        values["body_rich"] = f"<p>{body}</p>"
+        values["body_rich_snapshot_html"] = values["body_rich"]
+    if "sender_name" in fields:
+        values["sender_name"] = "Atelier Pymissive"
+    if "sender_email" in fields:
+        values["sender_email"] = "atelier@example.com"
+    if "reply_to_name" in fields:
+        values["reply_to_name"] = "Réponses Pymissive"
+    if "reply_to_email" in fields:
+        values["reply_to_email"] = "reponses@example.com"
+    if "sender_phone" in fields:
+        values["sender_phone"] = "+33601020304"
+    if "sender_address" in fields:
+        values["sender_address"] = _random_address(rng)
+    if "reply_to_address" in fields:
+        values["reply_to_address"] = _random_address(rng)
+    if "brand_name" in fields:
+        values["brand_name"] = "Pymissive"
+    if "duplex_printing" in fields:
+        values["duplex_printing"] = True
+    if "color_printing" in fields:
+        values["color_printing"] = rng.choice([True, False])
+    return values
 
 
 def _random_address(rng):

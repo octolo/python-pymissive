@@ -23,12 +23,11 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from pymissive.providers.fake import FakeProvider
-from pymissive.utils import is_fake_provider_allowed
+from pymissive.providers.fake import FakeProvider, is_fake_provider_allowed
 
-from .models.choices import TERMINAL_STATUSES, MissiveThreadType, sent_missive_q
-from .models.missive import Missive
-from .utils import build_webhook_url, get_base_url
+from ..models.choices import TERMINAL_STATUSES, MissiveThreadType, sent_missive_q
+from ..models.missive import Missive
+from ..utils import build_webhook_url, get_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +157,7 @@ def run_fake_webhooks(*, limit: int | None = None, seed: int | None = None) -> d
 
 def delay_fake_webhooks(*, limit: int | None = None, seed: int | None = None) -> None:
     """Enqueue :func:`run_fake_webhooks` on the configured task backend."""
-    from .task import get_task_backend
+    from ..task import get_task_backend
 
     ensure_fake_provider_allowed()
     get_task_backend().enqueue(run_fake_webhooks, limit=limit, seed=seed)

@@ -4,13 +4,9 @@ from __future__ import annotations
 
 import base64
 
-from pymissive.webhook_auth import (
-    WEBHOOK_BASIC_LOGIN,
+from pymissive.webhook.auth import (
     authorization_matches,
-    brevo_webhook_auth,
-    get_webhook_basic_login,
     get_webhook_secret,
-    maileva_subscription_authentication,
     verify_inbound_webhook,
 )
 
@@ -41,33 +37,6 @@ def test_url_token_matches():
     assert authorization_matches("s3cret", authorization="", url_token="") is False
 
 
-def test_maileva_subscription_payload():
-    payload = maileva_subscription_authentication("s3cret")
-    assert payload == {"basic": {"login": WEBHOOK_BASIC_LOGIN, "password": "s3cret"}}
-    custom = maileva_subscription_authentication("s3cret", login="octolo")
-    assert custom["basic"]["login"] == "octolo"
-
-
-def test_webhook_basic_login_defaults_to_pymissive():
-    assert get_webhook_basic_login(object()) == "pymissive"
-    assert get_webhook_basic_login(_Provider()) == "pymissive"
-
-
-class _LoginProvider:
-    def _get_config_or_env(self, key, default=None):
-        if key == "WEBHOOK_BASIC_LOGIN":
-            return "  octolo  "
-        return default
-
-
-def test_webhook_basic_login_is_configurable():
-    assert get_webhook_basic_login(_LoginProvider()) == "octolo"
-
-
-def test_brevo_auth_payload():
-    assert brevo_webhook_auth("s3cret") == {"type": "bearer", "token": "s3cret"}
-
-
 class _Provider:
     def __init__(self, secret=""):
         self.secret = secret
@@ -85,6 +54,18 @@ def test_verify_is_opt_in():
 def test_get_webhook_secret_strips():
     assert get_webhook_secret(_Provider("  abc  ")) == "abc"
     assert get_webhook_secret(object()) == ""
+
+
+def test_brevo_owns_its_outbound_auth_payload():
+    from unittest.mock import patch
+
+    from pymissive.providers.brevo import BrevoAPIProvider
+
+    provider = BrevoAPIProvider()
+    with patch.object(provider, "get_webhook_secret", return_value="s3cret"):
+        assert provider._webhook_auth_kwargs() == {
+            "auth": {"type": "bearer", "token": "s3cret"},
+        }
 
 
 def test_maileva_create_sends_basic_when_secret_is_set():
@@ -155,6 +136,22 @@ def test_maileva_create_uses_configured_basic_login():
         ["registered_mail/v4/sendings"],
     )
     assert posted[0]["authentication"]["basic"]["login"] == "octolo"
+
+
+def test_maileva_blank_basic_login_uses_its_default():
+    from pymissive.providers.maileva import MailevaProvider
+
+    class _Maileva(MailevaProvider):
+        def _get_config_or_env(self, key, default=None):
+            if key == "WEBHOOK_SECRET":
+                return "s3cret"
+            if key == "WEBHOOK_BASIC_LOGIN":
+                return "   "
+            return default
+
+    assert _Maileva()._webhook_authentication() == {
+        "basic": {"login": "pymissive", "password": "s3cret"},
+    }
 
 
 def test_scaleway_asks_for_a_url_token():

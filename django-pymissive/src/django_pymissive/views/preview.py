@@ -1,11 +1,4 @@
-"""Preview views for missives, campaigns and campaign targets.
-
-Campaign and target previews use an unsaved Missive with ``campaign`` set,
-so templates and compiled bodies use the same code paths as a real missive.
-A target preview also carries that target's object and contacts, and saves nothing.
-"""
-
-from types import SimpleNamespace
+"""HTTP adapters for the shared missive-based preview service."""
 
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.views import redirect_to_login
@@ -15,133 +8,40 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.utils.decorators import method_decorator
-from django.utils.translation import gettext_lazy as _
 from django.views.generic import DetailView, View
 
 from ..models.campaign import MissiveCampaign
+from ..models.campaign_step import CampaignStep
 from ..models.campaign_target import CampaignTarget
-from ..models.choices import (
-    MissiveRecipientType,
-    MissiveStatus,
-    MissiveThreadType,
-    MissiveType,
-)
+from ..models.choices import MissiveRecipientType
 from ..models.missive import Missive
 from ..models.recipient import MissiveRecipient
+from ..services import preview as preview_service
 
-
-MISSIVE_TEMPLATE_MAP = {
-    "email": "django_pymissive/email_preview.html",
-    "email_marketing": "django_pymissive/email_preview.html",
-    "ere": "django_pymissive/email_preview.html",
-    "sms": "django_pymissive/sms_preview.html",
-    "rcs": "django_pymissive/sms_preview.html",
-    "letter": "django_pymissive/postal_preview.html",
-    "registered_letter": "django_pymissive/postal_preview.html",
-    "hand_delivery": "django_pymissive/postal_preview.html",
-}
-
-DEFAULT_TEMPLATE = "django_pymissive/base_preview.html"
-BRANDED_PREVIEW_TEMPLATE = "django_pymissive/branded_preview.html"
-
-# Allowlist: the brand is interpolated into a template path.
-BRANDED_PREVIEW_BRANDS = frozenset({"discord", "slack", "teams"})
-
-POSTAL_PREVIEW_MISSIVE_TYPES = frozenset(
-    k for k, v in MISSIVE_TEMPLATE_MAP.items() if v == "django_pymissive/postal_preview.html"
-)
-
-
-def missive_is_postal_like(m: Missive) -> bool:
-    return (getattr(m, "missive_type", None) or "").lower() in POSTAL_PREVIEW_MISSIVE_TYPES
+DEFAULT_TEMPLATE = preview_service.DEFAULT_TEMPLATE
+POSTAL_PREVIEW_MISSIVE_TYPES = preview_service.POSTAL_PREVIEW_MISSIVE_TYPES
+build_preview_context = preview_service.build_preview_context
+campaign_preview_query = preview_service.campaign_preview_query
+_missive_brand = preview_service.missive_brand
+missive_for_campaign_preview = preview_service.missive_for_campaign_preview
+missive_for_target_preview = preview_service.missive_for_target_preview
+preview_kind_for_missive_type = preview_service.preview_kind_for_missive_type
+template_for_missive = preview_service.template_for_missive
 
 
 _PREVIEW_MODEL = {
     "missive": Missive,
     "campaign": MissiveCampaign,
+    "campaign_step": CampaignStep,
     "target": CampaignTarget,
 }
-
-_PREVIEW_RECIPIENT_FIELDS = ("email", "phone", "address", "notification_id")
-
-
-def _normalize_brand(value) -> str:
-    """Return a preview brand, or ``""`` when it is not one we ship a template for."""
-    brand = str(value or "").strip().lower()
-    return brand if brand in BRANDED_PREVIEW_BRANDS else ""
-
-
-def _provider_brand_candidates(provider) -> list:
-    """Names that may identify the application: provider name, then its brands."""
-    if not provider:
-        return []
-    inner = getattr(provider, "_provider", None)
-    candidates = []
-    if inner is not None:
-        candidates.append(getattr(inner, "name", None))
-        brands = getattr(inner, "brands", None) or []
-        if isinstance(brands, (list, tuple)):
-            candidates.extend(brands)
-    candidates.append(getattr(provider, "_value", None))
-    if isinstance(provider, str):
-        candidates.append(provider)
-    return candidates
-
-
-def _missive_brand(missive: Missive) -> str:
-    """Application the missive is sent through (discord, slack, teams).
-
-    The provider decides, not ``missive_type``: a Discord notification is
-    still ``notification``. ``brand_name`` is the sender's own brand
-    (the company), so it is not used here.
-    """
-    for candidate in _provider_brand_candidates(getattr(missive, "provider", None)):
-        brand = _normalize_brand(candidate)
-        if brand:
-            return brand
-    return ""
 
 
 def _brand_from_request(request, post_data=None) -> str:
     raw = request.GET.get("brand")
     if not raw and post_data is not None:
         raw = post_data.get("_preview_brand")
-    return _normalize_brand(raw)
-
-
-def campaign_preview_query(*, kind: str, brand: str = "") -> str:
-    """Query string selecting a campaign preview template (``?type=…&brand=…``)."""
-    params = [f"type={(kind or 'email').lower()}"]
-    normalized = _normalize_brand(brand)
-    if (kind or "").lower() == "branded" and normalized:
-        params.append(f"brand={normalized}")
-    return "?" + "&".join(params)
-
-
-def preview_kind_for_missive_type(missive_type: str) -> str:
-    """Map a missive type to the campaign preview kind (email/sms/postal/branded)."""
-    mt = (missive_type or "").lower()
-    if mt in POSTAL_PREVIEW_MISSIVE_TYPES:
-        return "postal"
-    if mt in ("sms", "rcs"):
-        return "sms"
-    if mt == "branded":
-        return "branded"
-    return "email"
-
-
-def _campaign_preview_kind_to_missive_type(kind: str) -> str:
-    """Map campaign ?type= (email|sms|postal|branded) to a concrete MissiveType value."""
-    k = (kind or "email").lower()
-    if k == "sms":
-        return str(MissiveType.SMS)
-    if k == "branded":
-        return str(MissiveType.BRANDED)
-    if k in ("postal", "letter", "hand_delivery"):
-        return str(MissiveType.LETTER)
-    if k == "registered_letter":
-        return str(MissiveType.REGISTERED_LETTER)
-    return str(MissiveType.EMAIL)
+    return preview_service.normalize_brand(raw)
 
 
 def campaign_step_from_request(request, campaign):
@@ -151,140 +51,31 @@ def campaign_step_from_request(request, campaign):
         return None
     from ..models.campaign_step import CampaignStep
 
-    return CampaignStep.objects.filter(pk=raw, campaign_id=campaign.pk).first()
+    step = CampaignStep.objects.filter(pk=raw, campaign_id=campaign.pk).first()
+    if step is None:
+        raise Http404("Campaign step not found")
+    return step
 
 
-def missive_for_campaign_preview(
-    campaign: MissiveCampaign,
-    preview_kind: str,
-    *,
-    brand: str | None = None,
-    campaign_step=None,
-) -> Missive:
-    """Unsaved missive linked to ``campaign`` so getters and compilation match a real missive.
-
-    The unsaved missive routes ``base_url + get_browser_preview_path()`` and the
-    ``show_*`` snippets through ``self.campaign`` automatically (see
-    ``Missive.get_browser_preview_path``), so no special context override is needed.
-
-    *campaign_step* identifies the preview. Its missive type wins over
-    *preview_kind*, and its configuration is what the compiled body reads.
-    """
-    if campaign_step is not None:
-        missive_type = campaign_step.missive_type
-    else:
-        missive_type = _campaign_preview_kind_to_missive_type(preview_kind)
-        campaign_step = campaign.to_campaignstep.filter(missive_type=missive_type).order_by("position", "pk").first()
-    missive = Missive(
-        campaign_step=campaign_step,
-        missive_type=missive_type,
-        status=MissiveStatus.DRAFT,
-        thread_type=MissiveThreadType.MISSIVE,
-    )
-    brand = _normalize_brand(brand)
-    if brand:
-        missive.provider = brand
-    missive._ensure_missive_defaults()
-    return missive
-
-
-def _target_object(row: CampaignTarget):
-    if not row.content_type_id or not row.object_id:
-        return None
+def _resolve_preview(*args, **kwargs) -> preview_service.ResolvedPreview:
     try:
-        return row.target
-    except Exception:
-        return None
+        return preview_service.resolve_preview(*args, **kwargs)
+    except preview_service.AmbiguousPreviewStep as exc:
+        raise Http404(str(exc)) from exc
 
 
-def _preview_recipient(recipient_type: str, name: str, field: str, contact):
-    values: dict[str, object] = {key: "" for key in _PREVIEW_RECIPIENT_FIELDS}
-    values["address"] = None
-    values[field] = contact
-    return SimpleNamespace(recipient_type=recipient_type, name=name or "", pk=None, **values)
+def _admin_preview_denied(request, permission):
+    """Staff with the model view permission, or a login redirect.
 
-
-def missive_for_target_preview(row: CampaignTarget) -> Missive:
-    """Unsaved missive of this target: campaign content, its object, its contacts.
-
-    Nothing is written. The object is injected as a related object so templates
-    see ``{{ contact }}`` the way a generated missive would. Recipients stay on
-    the instance (``_preview_recipients``) because the row has no missive yet.
-    """
-    from pymissive.config import missive_support_for_type
-
-    from ..processors.build_target import _RECIPIENT_FIELD, ordered_target_contacts
-
-    kind = preview_kind_for_missive_type(row.missive_type)
-    step = row.campaign_step if row.campaign_step_id else None
-    missive = missive_for_campaign_preview(row.campaign, kind, campaign_step=step)
-    target = _target_object(row)
-    if target is not None:
-        setattr(missive, "_preview_related_objects", [target])
-    field = _RECIPIENT_FIELD.get(missive_support_for_type(row.missive_type))
-    setattr(
-        missive,
-        "_preview_recipients",
-        (
-            [
-                _preview_recipient(recipient_type, name, field, contact)
-                for recipient_type, name, contact in ordered_target_contacts(row)
-            ]
-            if field
-            else []
-        ),
-    )
-    return missive
-
-
-def _target_preview_denied(request):
-    """Staff with view permission, or a login redirect. ``None`` when allowed.
-
-    The target pk is an integer, unlike the unguessable missive UUID, so this
-    page cannot be public.
+    Targets and campaign steps have sequential primary keys, so their preview
+    URLs cannot be public.
     """
     user = request.user
     if not user.is_authenticated or not user.is_staff:
         return redirect_to_login(request.get_full_path())
-    if not user.has_perm("django_pymissive.view_campaigntarget"):
+    if not user.has_perm(permission):
         raise PermissionDenied
     return None
-
-
-def template_for_missive(missive: Missive) -> list[str]:
-    """Template candidates for ``missive``, first existing one wins.
-
-    Discord, Slack and Teams use their preview whenever the provider (or one
-    of its brands) matches, whatever the missive type. A branded missive with
-    no known application falls back to the generic branded preview.
-    """
-    brand = _missive_brand(missive)
-    mt = (missive.missive_type or "").lower()
-    if brand or mt == "branded":
-        names = [BRANDED_PREVIEW_TEMPLATE]
-        if brand:
-            names.insert(0, f"django_pymissive/branded/{brand}_preview.html")
-        return names
-    return [MISSIVE_TEMPLATE_MAP.get(mt, DEFAULT_TEMPLATE)]
-
-
-def build_preview_context(missive: Missive, post_data=None, postal_recipient_pk=None) -> dict:
-    """Type-specific template context (email headers, SMS sender, postal meta).
-
-    Unknown types return ``{}``. A builder that fails raises: this context is
-    also the postal PDF chrome, and swallowing the error used to render an
-    empty preview instead of the real fault.
-    """
-    mt = (missive.missive_type or "").lower()
-    if _missive_brand(missive) or mt == "branded":
-        return _build_branded_context(missive)
-    if mt in ("email", "email_marketing", "ere"):
-        return _build_email_context(missive)
-    if mt in ("sms", "rcs"):
-        return _build_sms_context(missive, post_data)
-    if mt in POSTAL_PREVIEW_MISSIVE_TYPES:
-        return _build_postal_context(missive, post_data, postal_recipient_pk)
-    return {}
 
 
 def _build_form(model, post_data, pk=None):
@@ -353,190 +144,6 @@ def _apply_raw_form_data(instance, form, post_data):
                 pass
 
 
-def _format_recipient_email(r):
-    return r.email or (str(r.phone) if r.phone else str(r.address) if r.address else "")
-
-
-def _phone_from_post(post_data, prefix):
-    """Phone from POST (single key or prefix_0/prefix_1)."""
-    val = post_data.get(prefix, "")
-    if val:
-        return str(val).strip()
-    region = post_data.get(f"{prefix}_0", "")
-    national = post_data.get(f"{prefix}_1", "")
-    if not (region and national):
-        return ""
-    try:
-        import phonenumbers
-
-        parsed = phonenumbers.parse(national.strip(), region.strip())
-        return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
-    except Exception:
-        return f"{region} {national}".strip()
-
-
-def _build_sms_context(instance, post_data=None):
-    """SMS sender context; fallback to POST when instance is empty."""
-    sender = getattr(instance, "sender", None) or getattr(instance, "phone_sender", {}) or {}
-    ctx = {
-        "sender": sender,
-    }
-    if post_data and (not sender.get("phone") or not sender.get("name")):
-        updated = dict(sender)
-        if not updated.get("phone"):
-            updated["phone"] = _phone_from_post(post_data, "sender_phone")
-        if not updated.get("name"):
-            updated["name"] = post_data.get("sender_phone_name", "") or post_data.get("sender_name", "")
-        ctx["sender"] = updated
-    return ctx
-
-
-def _geoaddress_lines(addr):
-    """Extract displayable address lines from a GeoaddressField value."""
-    if not addr:
-        return []
-    if isinstance(addr, str):
-        return [addr] if addr.strip() else []
-    if isinstance(addr, dict):
-        return _geoaddress_dict_lines(addr)
-    return [str(addr)]
-
-
-def _geoaddress_dict_lines(addr):
-    order = (
-        "address_line_1",
-        "address_line_2",
-        "address_line_3",
-        "postal_code",
-        "city",
-        "state",
-        "region",
-        "country",
-    )
-    lines = _nonempty_strings(addr.get(key) for key in order)
-    return lines or _nonempty_strings(addr.values())
-
-
-def _nonempty_strings(values):
-    return [str(value).strip() for value in values if value and str(value).strip()]
-
-
-def _build_postal_context(instance, post_data=None, postal_recipient_pk=None):
-    """Postal sender/recipient/delivery context."""
-    sender = getattr(instance, "sender", None) or {}
-    recipients = _postal_recipients(instance)
-    letter_recipient, letter_recipient_pk = _select_postal_recipient(recipients, postal_recipient_pk)
-    return {
-        "sender": sender,
-        "sender_address": _address_value(instance, sender, "sender_address"),
-        "postal_recipients": recipients,
-        "postal_letter_recipient": letter_recipient,
-        "postal_letter_recipient_pk": letter_recipient_pk,
-        "acknowledgement_display": instance.get_acknowledgement_display() or "",
-        "delivery_mode_display": instance.get_delivery_mode_display() or "",
-        "priority_display": instance.get_priority_display() or "",
-    }
-
-
-def _address_value(instance, value, fallback_attribute):
-    address = value.get("address") if isinstance(value, dict) else None
-    return address or getattr(instance, fallback_attribute, None)
-
-
-def _postal_recipients(instance):
-    preview = getattr(instance, "_preview_recipients", None)
-    if preview is not None:
-        return [
-            {"pk": recipient.pk, "name": recipient.name or "", "address": recipient.address}
-            for recipient in preview
-            if recipient.recipient_type == MissiveRecipientType.RECIPIENT
-        ]
-    recipient_manager = getattr(instance, "to_missiverecipient", None)
-    if recipient_manager is None or not getattr(instance, "is_persisted", False):
-        return []
-    queryset = recipient_manager.filter(recipient_type=MissiveRecipientType.RECIPIENT).order_by("name", "pk")
-    return [{"pk": recipient.pk, "name": recipient.name or "", "address": recipient.address} for recipient in queryset]
-
-
-def _select_postal_recipient(recipients, recipient_pk):
-    if not recipients:
-        return None, None
-    target = _optional_int(recipient_pk)
-    recipient = next(
-        (candidate for candidate in recipients if candidate["pk"] == target),
-        recipients[0],
-    )
-    return recipient, recipient["pk"]
-
-
-def _optional_int(value):
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _build_branded_context(instance):
-    author = (getattr(instance, "brand_name", None) or getattr(instance, "sender_name", None) or "").strip()
-    return {
-        "brand": _missive_brand(instance),
-        "author": author,
-        "author_initial": (author[:1] or "B").upper(),
-    }
-
-
-def _build_email_context(instance):
-    """Email header context; recipients from to_missiverecipient when saved."""
-    context = {
-        "sender": _email_sender(instance),
-        "reply_to": _email_reply_to(instance),
-        "to_recipients": [],
-        "cc_recipients": [],
-        "bcc_recipients": [],
-    }
-    preview = getattr(instance, "_preview_recipients", None)
-    if preview is not None:
-        _append_email_recipients(context, preview)
-        return context
-    recipient_manager = getattr(instance, "to_missiverecipient", None)
-    if recipient_manager is None or not getattr(instance, "is_persisted", False):
-        return context
-    _append_email_recipients(context, recipient_manager.all())
-    return context
-
-
-def _email_sender(instance):
-    sender = getattr(instance, "sender", None) or getattr(instance, "email_sender", None) or {}
-    return sender if isinstance(sender, dict) else {}
-
-
-def _email_reply_to(instance):
-    reply_to = getattr(instance, "reply_to", None) or getattr(instance, "email_reply_to", None)
-    if not isinstance(reply_to, dict):
-        return reply_to
-    has_value = (reply_to.get("email") or "").strip() or (reply_to.get("name") or "").strip()
-    return reply_to if has_value else None
-
-
-def _append_email_recipients(context, recipients):
-    context_keys = {
-        MissiveRecipientType.RECIPIENT: "to_recipients",
-        MissiveRecipientType.CC: "cc_recipients",
-        MissiveRecipientType.BCC: "bcc_recipients",
-    }
-    for recipient in recipients:
-        key = context_keys.get(recipient.recipient_type)
-        if key:
-            context[key].append(
-                {
-                    "name": recipient.name or "",
-                    "email": _format_recipient_email(recipient),
-                }
-            )
-
-
 class PreviewView(DetailView):
     """GET preview: ``missive`` uses the saved row; ``campaign`` and ``target`` build one.
 
@@ -551,7 +158,7 @@ class PreviewView(DetailView):
 
     context_object_name = "missive"
     _key: str
-    _missive_for_preview: Missive
+    _resolved_preview: preview_service.ResolvedPreview
     recipient_pk: int | None
 
     def setup(self, request, *args, **kwargs):
@@ -572,88 +179,104 @@ class PreviewView(DetailView):
             self.recipient_pk = None
 
     def get(self, request, *args, **kwargs):
-        if self._key == "target":
-            denied = _target_preview_denied(request)
-            if denied is not None:
-                return denied
+        denied = self._preview_denied(request)
+        if denied is not None:
+            return denied
+
         self.object = self.get_object()
-        if self._key == "target" and self.object.missive_id:
-            return redirect(self.object.get_browser_preview_path())
-        if self.recipient_pk is not None and self._key != "missive":
-            raise Http404
-        if self._key == "missive" and self.recipient_pk is None and missive_is_postal_like(self.object):
-            first = (
-                MissiveRecipient.objects.filter(
-                    missive_id=self.object.pk,
-                    recipient_type=MissiveRecipientType.RECIPIENT,
-                )
-                .order_by("name", "pk")
-                .first()
-            )
-            if first is not None:
-                return redirect(
-                    "django_pymissive:preview_recipient",
-                    campaign_or_missive="missive",
-                    pk=self.object.pk,
-                    recipient_pk=first.pk,
-                )
-        if self.recipient_pk is not None:
-            ok = MissiveRecipient.objects.filter(
-                pk=self.recipient_pk,
-                missive_id=self.object.pk,
-                recipient_type=MissiveRecipientType.RECIPIENT,
-            ).exists()
-            if not ok:
-                raise Http404
+        target_redirect = self._target_redirect()
+        if target_redirect is not None:
+            return target_redirect
+
+        self._validate_recipient_scope()
+        postal_redirect = self._postal_recipient_redirect()
+        if postal_redirect is not None:
+            return postal_redirect
+
+        self._validate_recipient()
         return super().get(request, *args, **kwargs)
 
-    def get_missive_for_preview(self) -> Missive:
-        if hasattr(self, "_missive_for_preview"):
-            return self._missive_for_preview
+    def _preview_denied(self, request):
+        preview_permission = {
+            "target": "django_pymissive.view_campaigntarget",
+            "campaign_step": "django_pymissive.view_campaignstep",
+        }.get(self._key)
+        if preview_permission is None:
+            return None
+        return _admin_preview_denied(request, preview_permission)
+
+    def _target_redirect(self):
+        if self._key == "target" and self.object.missive_id:
+            return redirect(self.object.get_browser_preview_path())
+        return None
+
+    def _validate_recipient_scope(self):
+        if self.recipient_pk is not None and self._key != "missive":
+            raise Http404
+
+    def _postal_recipient_redirect(self):
+        if (
+            self._key != "missive"
+            or self.recipient_pk is not None
+            or not preview_service.missive_is_postal_like(self.object)
+        ):
+            return None
+        first = (
+            MissiveRecipient.objects.filter(
+                missive_id=self.object.pk,
+                recipient_type=MissiveRecipientType.RECIPIENT,
+            )
+            .order_by("name", "pk")
+            .first()
+        )
+        if first is None:
+            return None
+        return redirect(
+            "django_pymissive:preview_recipient",
+            campaign_or_missive="missive",
+            pk=self.object.pk,
+            recipient_pk=first.pk,
+        )
+
+    def _validate_recipient(self):
+        if self.recipient_pk is None:
+            return
+        exists = MissiveRecipient.objects.filter(
+            pk=self.recipient_pk,
+            missive_id=self.object.pk,
+            recipient_type=MissiveRecipientType.RECIPIENT,
+        ).exists()
+        if not exists:
+            raise Http404
+
+    def get_resolved_preview(self):
+        if hasattr(self, "_resolved_preview"):
+            return self._resolved_preview
         if self._key == "campaign":
             kind = (self.request.GET.get("type") or "email").lower()
             step = campaign_step_from_request(self.request, self.object)
-            self._missive_for_preview = missive_for_campaign_preview(
+            self._resolved_preview = _resolve_preview(
                 self.object,
-                kind,
+                preview_kind=kind,
                 brand=_brand_from_request(self.request),
                 campaign_step=step,
             )
-        elif self._key == "target":
-            self._missive_for_preview = missive_for_target_preview(self.object)
         else:
-            self._missive_for_preview = self.object
-        return self._missive_for_preview
+            self._resolved_preview = _resolve_preview(self.object)
+        return self._resolved_preview
+
+    def get_missive_for_preview(self) -> Missive:
+        return self.get_resolved_preview().missive
 
     def get_template_names(self):
         if not getattr(self, "object", None):
             return [DEFAULT_TEMPLATE]
-        return template_for_missive(self.get_missive_for_preview())
+        return self.get_resolved_preview().template_names
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        missive = self.get_missive_for_preview()
-        context["missive"] = missive
-
-        if self._key == "campaign":
-            context["campaign"] = self.object
-            step = campaign_step_from_request(self.request, self.object)
-            channel = step.missive_type if step is not None else (self.request.GET.get("type") or "email").lower()
-            context["campaign_step"] = step
-            context["campaign_preview_kind"] = channel
-            if step is not None:
-                context["title"] = _("Preview: {} — {}").format(self.object, step)
-            else:
-                context["title"] = _("Preview: {} ({})").format(self.object, channel)
-        else:
-            context["title"] = _("Preview: {}").format(self.object if self._key == "target" else missive)
-
         rp = self.recipient_pk if self._key == "missive" else None
-        extra = build_preview_context(missive, postal_recipient_pk=rp)
-        if extra:
-            context.update(extra)
-        context["provider_address_css"] = missive.get_provider_address_css()
-        context["sandbox_compiled_body"] = True
+        context.update(preview_service.build_render_context(self.get_resolved_preview(), postal_recipient_pk=rp))
         return context
 
 
@@ -661,7 +284,7 @@ class PreviewView(DetailView):
 class PreviewFormView(View):
     """POST preview from admin forms (optional); same missive-based rendering as ``PreviewView``."""
 
-    http_method_names = ["post"]
+    http_method_names = ("post",)
 
     def _get_config(self):
         key = self.kwargs.get("campaign_or_missive", "")
@@ -692,41 +315,20 @@ class PreviewFormView(View):
         if key == "campaign":
             preview_kind = self._preview_kind_for_campaign(request.POST)
             step = campaign_step_from_request(request, instance)
-            missive = missive_for_campaign_preview(
+            preview = _resolve_preview(
                 instance,
-                preview_kind,
+                preview_kind=preview_kind,
                 brand=_brand_from_request(request, request.POST),
                 campaign_step=step,
             )
-            label = getattr(instance, "name", None) or getattr(instance, "subject", None) or "Campaign"
-            if step is not None:
-                title = _("Preview: {} — {}").format(label, step)
-                preview_kind = step.missive_type
-            else:
-                title = _("Preview: {} ({})").format(label, preview_kind)
-            context = {
-                "missive": missive,
-                "campaign": instance,
-                "campaign_preview_kind": preview_kind,
-                "title": title,
-            }
         else:
             if isinstance(instance, Missive):
                 instance._ensure_missive_defaults()
-            missive = instance
-            mt = self._preview_kind_for_missive(missive, request.POST)
-            context = {
-                "missive": missive,
-                "title": _("Preview: {}").format(mt or "Missive"),
-            }
+            self._preview_kind_for_missive(instance, request.POST)
+            preview = _resolve_preview(instance)
 
-        template_name = template_for_missive(missive)
-        extra = build_preview_context(missive, post_data=request.POST, postal_recipient_pk=None)
-        if extra:
-            context.update(extra)
-        context["provider_address_css"] = missive.get_provider_address_css()
-        context["sandbox_compiled_body"] = True
-        return TemplateResponse(request, template_name, context)
+        context = preview_service.build_render_context(preview, post_data=request.POST)
+        return TemplateResponse(request, preview.template_names, context)
 
 
 @method_decorator(staff_member_required, name="dispatch")
@@ -759,6 +361,7 @@ class DownloadPDFView(DetailView):
         self.object = self.get_object()
 
         if self._key == "missive":
+            preview = _resolve_preview(self.object)
             rp = self.recipient_pk
             if rp is not None:
                 ok = MissiveRecipient.objects.filter(
@@ -768,7 +371,7 @@ class DownloadPDFView(DetailView):
                 ).exists()
                 if not ok:
                     raise Http404
-            elif missive_is_postal_like(self.object):
+            elif preview_service.missive_is_postal_like(self.object):
                 first = (
                     MissiveRecipient.objects.filter(
                         missive_id=self.object.pk,
@@ -780,15 +383,19 @@ class DownloadPDFView(DetailView):
                 rp = first.pk if first else None
             else:
                 rp = None
-            pdf_bytes = self.object.body_to_pdf(postal_recipient_pk=rp)
+            pdf_bytes = preview.missive.body_to_pdf(postal_recipient_pk=rp)
             filename = f"missive-{self.object.pk}.pdf"
+        elif self._key == "campaign_step":
+            preview = _resolve_preview(self.object)
+            pdf_bytes = preview.missive.body_to_pdf(postal_recipient_pk=None)
+            filename = f"campaign-step-{self.object.pk}.pdf"
         else:
             if self.recipient_pk is not None:
                 raise Http404
             preview_kind = (request.GET.get("type") or "postal").lower()
             step = campaign_step_from_request(request, self.object)
-            missive = missive_for_campaign_preview(self.object, preview_kind, campaign_step=step)
-            pdf_bytes = missive.body_to_pdf(postal_recipient_pk=None)
+            preview = _resolve_preview(self.object, preview_kind=preview_kind, campaign_step=step)
+            pdf_bytes = preview.missive.body_to_pdf(postal_recipient_pk=None)
             filename = f"campaign-{self.object.pk}.pdf"
 
         response = HttpResponse(pdf_bytes, content_type="application/pdf")

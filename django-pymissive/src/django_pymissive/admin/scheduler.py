@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, cast
 
 from django import forms
 from django.contrib import admin, messages
@@ -64,12 +64,34 @@ def protect_sending_runs(request, runs, protected):
 
 
 class ScheduledCampaignInlineFormSet(BaseInlineFormSet):
+    def add_fields(self, form, index):
+        super().add_fields(form, index)
+        field = form.fields.get("campaign_steps")
+        if isinstance(field, forms.ModelMultipleChoiceField) and field.queryset is not None:
+            field.queryset = field.queryset.filter(campaign_id=self.instance.pk)
+
     def clean(self):
         super().clean()
         for form in self.forms:
             should_delete = form.cleaned_data.get(DELETION_FIELD_NAME, False)
             if self.can_delete and should_delete and form.instance.pk and form.instance.is_sending:
                 raise ValidationError(SENDING_RUN_DELETE_MESSAGE)
+
+
+class ScheduledCampaignForm(forms.ModelForm):
+    class Meta:
+        model = MissiveScheduledCampaign
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        field = self.fields.get("campaign_steps")
+        if (
+            isinstance(field, forms.ModelMultipleChoiceField)
+            and field.queryset is not None
+            and self.instance.campaign_id
+        ):
+            field.queryset = field.queryset.filter(campaign_id=self.instance.campaign_id)
 
 
 class CancelRunForm(forms.Form):
@@ -97,7 +119,7 @@ _SCHEDULED_CAMPAIGN_INLINE_FIELDSETS: _FieldsetSpec = (
         None,
         {
             "fields": (
-                "missive_type",
+                "campaign_steps",
                 "scheduled_send_date",
                 "retry_failed",
                 "progress_hook",
@@ -143,21 +165,24 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
     """Admin for missive scheduled campaign model."""
 
     view_on_site = True
+    form = ScheduledCampaignForm
 
     list_display = [
         "campaign",
-        "missive_type",
+        "campaign_steps_display",
         "scheduled_send_date",
         "send_date",
         "ended_at",
         "progress_display",
         "average_send_speed_display",
+        "send_speed_display",
         "by_type_display",
         "by_status_display",
         "task_object_display",
         "comment",
     ]
-    list_filter = ["missive_type"]
+    list_filter = ["campaign_steps"]
+    filter_horizontal = ["campaign_steps"]
     readonly_fields = [
         "campaign",
         "send_date",
@@ -167,6 +192,7 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         "campaign_snapshot",
         "progress_display",
         "average_send_speed_display",
+        "send_speed_display",
         "by_type_display",
         "by_status_display",
         "created_at",
@@ -177,7 +203,7 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         readonly = list(super().get_readonly_fields(request, obj))
         if obj and not obj.can_send:
             for field in (
-                "missive_type",
+                "campaign_steps",
                 "scheduled_send_date",
                 "progress_hook",
                 "progress_step",
@@ -199,12 +225,20 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         # A partial save cannot restore worker-owned fields read before the
         # worker updated them. In particular, updated_at is a heartbeat and
         # must only be touched by the worker.
-        if form.changed_data:
-            obj.save(update_fields=form.changed_data)
+        concrete_fields = [name for name in form.changed_data if name != "campaign_steps"]
+        if concrete_fields:
+            obj.save(update_fields=concrete_fields)
 
     def get_queryset(self, request):
         queryset = cast(MissiveScheduledCampaignQuerySet, super().get_queryset(request))
-        return queryset.with_counts()
+        return queryset.with_counts().prefetch_related("campaign_steps", "campaign__to_campaignstep")
+
+    @admin.display(description=_("Campaign steps"))
+    def campaign_steps_display(self, obj):
+        selected = list(obj.campaign_steps.all())
+        if not selected:
+            return _("All")
+        return ", ".join(str(step) for step in selected)
 
     def get_deleted_objects(self, objs, request):
         deleted, model_count, perms_needed, protected = super().get_deleted_objects(objs, request)
@@ -222,7 +256,7 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
             {
                 "fields": (
                     "campaign",
-                    "missive_type",
+                    "campaign_steps",
                     "scheduled_send_date",
                     "retry_failed",
                     "progress_hook",
@@ -242,6 +276,7 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
             [
                 "progress_display",
                 "average_send_speed_display",
+                "send_speed_display",
                 "by_type_display",
                 "by_status_display",
             ],
@@ -378,7 +413,6 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         new_scheduled = MissiveScheduledCampaign.objects.create(
             campaign=obj.campaign,
             scheduled_send_date=timezone.now(),
-            missive_type=obj.missive_type,
             task_content_type=obj.task_content_type,
             task_object_id=obj.task_object_id,
             task_object_arguments=obj.task_object_arguments,
@@ -389,6 +423,7 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
             build_target_processors=obj.build_target_processors,
             comment=obj.comment,
         )
+        new_scheduled.campaign_steps.set(obj.campaign_steps.all())
         messages.success(request, _("New scheduled send created."))
         return redirect(
             reverse(
@@ -414,7 +449,6 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         new_scheduled = MissiveScheduledCampaign.objects.create(
             campaign=obj.campaign,
             scheduled_send_date=obj.scheduled_send_date,
-            missive_type=obj.missive_type,
             task_content_type=obj.task_content_type,
             task_object_id=obj.task_object_id,
             task_object_arguments=obj.task_object_arguments,
@@ -425,6 +459,7 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
             build_target_processors=obj.build_target_processors,
             comment=obj.comment,
         )
+        new_scheduled.campaign_steps.set(obj.campaign_steps.all())
         messages.success(request, _("Scheduled send duplicated — you can edit it before starting."))
         return redirect(
             reverse(
@@ -506,6 +541,10 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
     def average_send_speed_display(self, obj):
         return format_average_send_speed(obj.average_send_speed) or "-"
 
+    @admin.display(description=_("Send speed"), ordering="send_speed")
+    def send_speed_display(self, obj):
+        return format_average_send_speed(obj.send_speed) or "-"
+
     @admin.display(description=_("Per channel"))
     def by_type_display(self, obj):
         parts = []
@@ -549,41 +588,17 @@ class MissiveScheduledCampaignInline(admin.StackedInline):
     """Inline for missive scheduled campaign model."""
 
     model = MissiveScheduledCampaign
+    form = ScheduledCampaignForm
     formset = ScheduledCampaignInlineFormSet
     extra = 0
-    fieldsets: ClassVar[_FieldsetSpec] = cast(
-        "_FieldsetSpec",
-        (
-            (
-                None,
-                {
-                    "fields": (
-                        "change_link",
-                        "missive_type",
-                        "scheduled_send_date",
-                    ),
-                },
-            ),
-        )
-        + tuple(_SCHEDULED_CAMPAIGN_INLINE_FIELDSETS[1:]),
-    )
+    show_change_link = True
+    fieldsets = _SCHEDULED_CAMPAIGN_INLINE_FIELDSETS
     readonly_fields = [
-        "change_link",
         "send_date",
         "ended_at",
         "cancelled_at",
         "cancel_reason",
     ]
-
-    @admin.display(description="")
-    def change_link(self, obj):
-        if not obj.pk:
-            return "-"
-        url = reverse(
-            "admin:django_pymissive_missivescheduledcampaign_change",
-            args=[obj.pk],
-        )
-        return format_html('<a href="{}">{}</a>', url, _("Open scheduled send →"))
 
     def has_change_permission(self, request, obj=None):
         # Inlines only see the parent campaign, so per-run rules cannot apply

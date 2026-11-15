@@ -4,6 +4,10 @@ from typing import cast
 from urllib.parse import urlencode
 
 from django.contrib import admin
+from django.contrib.admin.helpers import AdminForm
+from django.core.exceptions import PermissionDenied
+from django.db.models import Max
+from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils.html import format_html, format_html_join
 from django.utils.translation import gettext_lazy as _
@@ -15,9 +19,29 @@ from django_boosted.decorators import admin_boost_view, admin_boost_action  # ty
 from pymissive.config import MISSIVE_TYPES
 
 from ..models.campaign import MissiveCampaign
-from .campaign_step import CampaignStepInline
+from .campaign_step import (
+    CAMPAIGN_STEP_INLINE_BY_TYPE,
+    BrandedCampaignStepInline,
+    CampaignStepAdmin,
+    CampaignStepInline,
+    campaign_step_fieldsets,
+    EmailCampaignStepInline,
+    EmailMarketingCampaignStepInline,
+    EreCampaignStepInline,
+    HandDeliveryCampaignStepInline,
+    LetterCampaignStepInline,
+    NotificationCampaignStepInline,
+    PushNotificationCampaignStepInline,
+    RcsCampaignStepInline,
+    RegisteredLetterCampaignStepInline,
+    SmsCampaignStepInline,
+    VoiceCallCampaignStepInline,
+)
+from ..forms.campaign_step import CampaignStepTypeForm
 from ..models.attachment import MissiveBaseAttachment
-from ..models.scheduler import MissiveScheduledCampaign
+from ..models.campaign_step import CampaignStep
+from ..models.channel_config import admin_missive_type_fields
+from ..models.scheduler import MissiveScheduledCampaign, format_average_send_speed
 from ..managers.campaign import MissiveCampaignQuerySet
 from ..fields import RichTextField
 from ..utils import recalculate_attachment_priorities
@@ -46,14 +70,26 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
     readonly_fields = [
         "named_id",
         "current_scheduler_display",
+        "description_snapshot_html",
         "created_at",
         "updated_at",
     ]
     inlines = [
-        CampaignStepInline,
-        MissiveScheduledCampaignInline,
+        LetterCampaignStepInline,
+        RegisteredLetterCampaignStepInline,
+        HandDeliveryCampaignStepInline,
+        EreCampaignStepInline,
+        EmailCampaignStepInline,
+        EmailMarketingCampaignStepInline,
+        SmsCampaignStepInline,
+        RcsCampaignStepInline,
+        VoiceCallCampaignStepInline,
+        NotificationCampaignStepInline,
+        PushNotificationCampaignStepInline,
+        BrandedCampaignStepInline,
         CampaignAttachmentBaseInline,
         CampaignRelatedObjectInline,
+        MissiveScheduledCampaignInline,
     ]
 
     #: Counters the changelist columns below read. Named one by one because
@@ -72,6 +108,8 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         "pct_recipient_failed",
         "pct_recipient_success",
         "pct_recipient_processing",
+        "count_step",
+        "send_speed",
         *(f"count_type_{type_key}" for type_key in MISSIVE_TYPES),
     )
 
@@ -79,6 +117,16 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         """Annotate the counters :attr:`changelist_counters` enumerates."""
         queryset = cast(MissiveCampaignQuerySet, super().get_queryset(request))
         return queryset.with_counts(*self.changelist_counters)
+
+    def get_inline_instances(self, request, obj=None):
+        inlines = super().get_inline_instances(request, obj)
+        active_types = set(obj.to_campaignstep.values_list("missive_type", flat=True)) if obj is not None else set()
+        return [
+            inline
+            for inline in inlines
+            if (not isinstance(inline, CampaignStepInline) or inline.missive_type in active_types)
+            and (not isinstance(inline, MissiveScheduledCampaignInline) or bool(active_types))
+        ]
 
     def save_formset(self, request, form, formset, change):
         super().save_formset(request, form, formset, change)
@@ -133,27 +181,13 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
             classes=("wide", "collapse"),
         )
 
-    @admin_boost_view("redirect", _("Preview (email)"))
-    def handle_preview_email(self, request, obj):
-        base = reverse("django_pymissive:preview", args=["campaign", obj.pk])
-        return f"{base}?type=email"
-
-    @admin_boost_view("redirect", _("Preview (SMS)"))
-    def handle_preview_sms(self, request, obj):
-        base = reverse("django_pymissive:preview", args=["campaign", obj.pk])
-        return f"{base}?type=sms"
-
-    @admin_boost_view("redirect", _("Preview (postal)"))
-    def handle_preview_postal(self, request, obj):
-        base = reverse("django_pymissive:preview", args=["campaign", obj.pk])
-        return f"{base}?type=postal"
+    @admin_boost_view("redirect", _("Preview"))
+    def handle_preview(self, request, obj):
+        url = reverse("admin:django_pymissive_campaignstep_changelist")
+        return f"{url}?{urlencode({'campaign__id__exact': obj.pk})}"
 
     def subject_display(self, obj):
-        missive_recipients = [
-            format_lazy(_("{} missive(s)"), obj.count_missive),
-            format_lazy(_("{} recipient(s)"), obj.count_recipient),
-        ]
-        return self.format_with_help_text(obj.subject, " | ".join(str(s) for s in missive_recipients))
+        return self.format_with_help_text(obj.subject, format_lazy(_("{} step(s)"), obj.count_step))
 
     @admin.display(description=_("Types"))
     def types_display(self, obj):
@@ -172,11 +206,7 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
 
     @admin.display(description=_("Stats"))
     def stats_display(self, obj):
-        """Display missive/recipient counts and status percentages."""
-        related_counts = [
-            format_lazy(_("{} missive(s)"), obj.count_missive),
-            format_lazy(_("{} event(s)"), obj.count_event),
-        ]
+        """Display recipient status percentages and the event count."""
         rates = [
             self.format_label(
                 format_lazy(_("{}% failed"), f"{getattr(obj, 'pct_recipient_failed', 0):.0f}"),
@@ -195,7 +225,11 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
             ),
         ]
         rates_html = format_html_join(" ", "{}", ((rate,) for rate in rates))
-        return self.format_with_help_text(rates_html, " | ".join(str(s) for s in related_counts))
+        details = [str(format_lazy(_("{} event(s)"), obj.count_event))]
+        speed = format_average_send_speed(obj.send_speed)
+        if speed:
+            details.append(speed)
+        return self.format_with_help_text(rates_html, " | ".join(details))
 
     @admin.display(description=_("Targets"))
     def targets_display(self, obj):
@@ -213,7 +247,14 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
                 ("abandoned", _("{} abandoned"), obj.count_target_abandoned),
             )
         ]
-        return format_html_join(" | ", "{}", ((link,) for link in links))
+        details = [
+            format_lazy(_("{} missive(s)"), obj.count_missive),
+            format_lazy(_("{} recipient(s)"), obj.count_recipient),
+        ]
+        return self.format_with_help_text(
+            format_html_join(" | ", "{}", ((link,) for link in links)),
+            " | ".join(str(detail) for detail in details),
+        )
 
     @admin.display(description=_("Last send date"))
     def last_send_date_display(self, obj):
@@ -266,6 +307,71 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         url = reverse("admin:django_pymissive_missive_changelist")
         url += f"?campaign_step__campaign__id__exact={obj.pk}"
         return url
+
+    @admin_boost_view("adminform", _("Add campaign step"), permission="change")
+    def add_campaign_step(self, request, obj, form=None):
+        self.require_action_rights(request, obj)
+        if not request.user.has_perm(f"{CampaignStep._meta.app_label}.add_{CampaignStep._meta.model_name}"):
+            raise PermissionDenied
+
+        missive_type = request.GET.get("missive_type", "")
+        inline_class = CAMPAIGN_STEP_INLINE_BY_TYPE.get(missive_type)
+        if inline_class is None:
+            if form is None:
+                return {
+                    "form": CampaignStepTypeForm(),
+                    "save_label": _("Continue"),
+                    "has_change_permission": True,
+                }
+            url = reverse(
+                "admin:django_pymissive_missivecampaign_add_campaign_step",
+                args=[obj.pk],
+            )
+            return redirect(f"{url}?{urlencode({'missive_type': form.cleaned_data['missive_type']})}")
+
+        if form is None:
+            position = (obj.to_campaignstep.aggregate(value=Max("position"))["value"] or 0) + 1
+            step = inline_class.model(
+                campaign=obj,
+                missive_type=missive_type,
+                position=position,
+            )
+            step_admin = CampaignStepAdmin(inline_class.model, self.admin_site)
+            form_class = step_admin.get_form(
+                request,
+                step,
+                fields=[
+                    "position",
+                    "label",
+                    *admin_missive_type_fields(missive_type),
+                    *step_admin.config_fields,
+                ],
+            )
+            step_form = form_class(
+                request.POST or None,
+                request.FILES or None,
+                instance=step,
+            )
+            return {
+                "form": step_form,
+                "adminform": AdminForm(
+                    step_form,
+                    campaign_step_fieldsets(missive_type, include_config=True),
+                    {},
+                    readonly_fields=step_admin.get_readonly_fields(request, step),
+                    model_admin=step_admin,
+                ),
+                "save_label": _("Add campaign step"),
+                "has_change_permission": True,
+            }
+
+        step = form.save(commit=False)
+        step.campaign = obj
+        step.missive_type = missive_type
+        step.save()
+        form.save_m2m()
+        messages.success(request, _("Campaign step added successfully."))
+        return self.redirect_to_change(obj)
 
     @admin_boost_view("redirect", _("Send missive"))
     def handle_send_missive(self, request, obj):

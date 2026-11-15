@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 from django.test import Client
 from django.urls import reverse
-
 from django_pymissive.models.campaign import MissiveCampaign
 from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.choices import MissiveStatus, MissiveType
@@ -143,3 +142,4 @@ def test_unsaved_branded_missive_preview_url_carries_the_brand():
 
     assert "type=branded" in path
     assert "brand=slack" in path
+    assert f"step={step.pk}" in path

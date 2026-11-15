@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 from django.utils import timezone
 
-from django_pymissive.events import _process_event
+from django_pymissive.services.events import _process_event
 from django_pymissive.models import MissiveRecipientEmail, MissiveType
 from django_pymissive.models.event import MissiveEvent
 from django_pymissive.models.missive import Missive

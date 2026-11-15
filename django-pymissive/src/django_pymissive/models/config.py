@@ -41,7 +41,7 @@ def _set_typed_provider(by_type, key, provider):
 def _provider_setting() -> tuple[str, dict[str, str]]:
     """Return ``(fallback, per_type)`` from ``PYMISSIVE_DEFAULT_PROVIDER``.
 
-    A string is only the fallback. Dict entries such as ``{"email": "brevo"}``
+    A string is only the fallback. Dict entries such as ``{"email": "provider_a"}``
     are the per-type providers. A plain string never becomes a config row.
     Entries that cannot be used (another type, an unknown missive type, an
     empty provider) are skipped with a warning, so a typo does not go unseen.
@@ -106,7 +106,7 @@ def default_provider_for_type(missive_type: str) -> str:
 
     A string is the provider for every type. A list may mix that default
     with per-type overrides, for example
-    ``["fake", {"email": "brevo"}, {"sms": "smspartner"}]``.
+    ``["provider_a", {"email": "provider_b"}, {"sms": "provider_c"}]``.
     The last non-empty string in the list is the fallback. A type named in
     a dict wins over it.
     """
@@ -118,7 +118,7 @@ def default_provider_for_type(missive_type: str) -> str:
 class MissiveConfig(models.Model):
     """Default provider configuration per missive type.
     When a missive has no provider set, the default for its type is used.
-    Allows live switching (e.g. Brevo down -> change to SendGrid).
+    Allows live switching when a provider is unavailable.
     """
 
     missive_type = models.CharField(
@@ -132,7 +132,7 @@ class MissiveConfig(models.Model):
         package_name="pymissive",
         blank=True,
         verbose_name=_("Default provider"),
-        help_text=_("Provider name (e.g. brevo, sendgrid). Leave empty for no default."),
+        help_text=_("Provider name. Leave empty for no default."),
     )
 
     class Meta:

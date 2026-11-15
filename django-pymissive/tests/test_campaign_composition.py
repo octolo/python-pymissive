@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from unittest.mock import patch
 
 import pytest
+from django.contrib import admin
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.test import Client
+from django.test import Client, RequestFactory, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from django_pymissive.models.attachment import MissiveBaseAttachment
@@ -15,10 +18,20 @@ from django_pymissive.models.campaign import MissiveCampaign, campaign_from_snap
 from django_pymissive.models.campaign_step import (
     BrandedCampaignStep,
     CampaignStep,
+    EmailCampaignStep,
+    PhoneCampaignStep,
     PostalCampaignStep,
 )
 from django_pymissive.models.campaign_target import CampaignTarget
-from django_pymissive.models.choices import MissiveDeliveryMode, MissiveStatus, MissiveType
+from django_pymissive.models.channel_config import (
+    admin_missive_type_exclusions,
+    admin_missive_type_fields,
+    campaign_sourced_fields,
+)
+from django_pymissive.models.choices import (
+    MissiveStatus,
+    MissiveType,
+)
 from django_pymissive.models.missive import Missive
 from django_pymissive.models.scheduler import MissiveScheduledCampaign
 from django_pymissive.services.drafts import materialize_missive
@@ -75,21 +88,24 @@ def test_missive_campaign_is_derived_from_step_only():
     assert "campaign" not in {field.name for field in Missive._meta.get_fields()}
 
 
-def test_campaign_step_count_annotations_include_total_sum():
+def test_campaign_step_count_is_a_direct_total():
     campaign = _campaign()
     _step(campaign, 1, MissiveType.EMAIL)
     _step(campaign, 2, MissiveType.EMAIL)
     _step(campaign, 3, MissiveType.SMS)
+    total = MissiveCampaign.objects.with_counts("count_step")
 
-    annotated = MissiveCampaign.objects.with_counts(
+    annotated = total.get(pk=campaign.pk)
+    detailed = MissiveCampaign.objects.with_counts(
         "count_step_email",
         "count_step_sms",
         "count_step",
     ).get(pk=campaign.pk)
 
-    assert annotated.count_step_email == 2
-    assert annotated.count_step_sms == 1
-    assert annotated.count_step == 3
+    assert "count_step_email" not in total.query.annotations
+    assert annotated.count_step == detailed.count_step == 3
+    assert detailed.count_step_email == 2
+    assert detailed.count_step_sms == 1
 
 
 def test_two_email_steps_keep_their_own_content():
@@ -140,7 +156,6 @@ def test_two_postal_steps_keep_their_own_options():
         body_rich="<p>LETTER-A</p>",
         duplex_printing=False,
         color_printing=True,
-        delivery_mode=MissiveDeliveryMode.EXPRESS,
     )
     registered = _step(
         campaign,
@@ -150,7 +165,6 @@ def test_two_postal_steps_keep_their_own_options():
         body_rich="<p>LETTER-B</p>",
         duplex_printing=True,
         color_printing=False,
-        delivery_mode=MissiveDeliveryMode.ECONOMIC,
     )
 
     first = _missive(campaign, letter, MissiveType.LETTER)
@@ -159,11 +173,9 @@ def test_two_postal_steps_keep_their_own_options():
     assert first.get_locally_or_campaign_value("body_rich") == "<p>LETTER-A</p>"
     assert first.get_locally_or_campaign_value("duplex_printing") is False
     assert first.get_locally_or_campaign_value("color_printing") is True
-    assert first.get_delivery_mode() == MissiveDeliveryMode.EXPRESS
     assert second.get_locally_or_campaign_value("body_rich") == "<p>LETTER-B</p>"
     assert second.get_locally_or_campaign_value("duplex_printing") is True
     assert second.get_locally_or_campaign_value("color_printing") is False
-    assert second.get_delivery_mode() == MissiveDeliveryMode.ECONOMIC
 
     postal_proxy = PostalCampaignStep.objects.get(pk=letter.pk)
     assert postal_proxy.first_document == "<p>LETTER-A</p>"
@@ -204,7 +216,6 @@ def test_one_recipient_can_be_selected_on_two_steps_of_the_same_type():
             CampaignTarget.objects.create(
                 campaign=campaign,
                 campaign_step=invite,
-                missive_type=MissiveType.EMAIL,
                 content_type_id=existing.content_type_id,
                 object_id=existing.object_id,
             )
@@ -348,6 +359,19 @@ def test_branded_steps_do_not_reuse_phone_fields():
     assert app.get_locally_or_campaign_value("brand_name") == "Octolo"
 
 
+def test_campaign_step_type_proxy_forces_and_filters_its_exact_type():
+    from django_pymissive.models.campaign_step import RcsCampaignStep
+
+    campaign = _campaign()
+    _step(campaign, 1, MissiveType.SMS, "SMS")
+    rcs = RcsCampaignStep(campaign=campaign, position=2, missive_type=MissiveType.EMAIL, label="RCS")
+
+    rcs.save()
+
+    assert rcs.missive_type == MissiveType.RCS
+    assert list(RcsCampaignStep.objects.values_list("pk", flat=True)) == [rcs.pk]
+
+
 def test_snapshot_records_the_ordered_steps_and_their_files():
     campaign = _campaign()
     _step(
@@ -394,6 +418,91 @@ def test_preview_is_identified_by_the_step():
     assert "1. Invite" in html
 
 
+def test_campaign_step_has_its_own_preview_url():
+    from django.contrib.auth import get_user_model
+
+    campaign = _campaign()
+    step = _step(campaign, 1, MissiveType.EMAIL, "Invite", body_text="INVITE-BODY")
+    expected_url = reverse("django_pymissive:preview_campaign_step", args=[step.pk])
+    client = Client()
+    client.force_login(
+        get_user_model().objects.create_superuser(
+            username="step-preview",
+            email="step-preview@example.com",
+            password="x",
+        )
+    )
+
+    response = client.get(step.get_browser_preview_path())
+
+    assert step.get_browser_preview_path() == expected_url
+    assert response.status_code == 200
+    assert "INVITE-BODY" in response.content.decode()
+
+
+def test_campaign_admin_preview_links_to_its_filtered_step_list():
+    from django.contrib.auth import get_user_model
+    from django_pymissive.admin.campaign import MissiveCampaignAdmin
+    from django_pymissive.admin.campaign_step import CampaignStepAdmin
+
+    campaign = _campaign()
+    step = _step(campaign, 1, MissiveType.EMAIL, "Invite")
+    request = RequestFactory().get("/")
+    request.user = get_user_model().objects.create_superuser(
+        username="campaign-preview-list",
+        email="campaign-preview-list@example.com",
+        password="x",
+    )
+
+    campaign_admin = MissiveCampaignAdmin(MissiveCampaign, admin.site)
+    step_admin = CampaignStepAdmin(CampaignStep, admin.site)
+    step_list_url = reverse("admin:django_pymissive_campaignstep_changelist")
+
+    response = campaign_admin.handle_preview(request, str(campaign.pk))
+    client = Client()
+    client.force_login(request.user)
+    step_list = client.get(step_list_url, {"campaign__id__exact": campaign.pk})
+    target_list = client.get(
+        reverse("admin:django_pymissive_campaigntarget_changelist"),
+        {"campaign_step__id__exact": step.pk, "state": "pending"},
+    )
+
+    assert response.status_code == 302
+    assert response.url == f"{step_list_url}?campaign__id__exact={campaign.pk}"
+    assert step_list.status_code == 200
+    assert target_list.status_code == 200
+    assert list(step_list.context["cl"].queryset) == [step]
+    first_column = str(step_admin.position_type_display(step))
+    content = step_list.content.decode()
+    assert f"1. {step.get_missive_type_display()}" in first_column
+    assert campaign.subject in first_column
+    assert f"1. {step.get_missive_type_display()}" in content
+    assert campaign.subject in content
+    assert "0 missive(s)" in content
+    assert "0 pending" in content
+    assert step.get_browser_preview_path() in content
+    assert step.get_browser_preview_path() in str(step_admin.preview_display(step))
+
+
+def test_campaign_preview_requires_a_step_when_the_channel_is_ambiguous():
+    campaign = _campaign()
+    invite = _step(campaign, 1, MissiveType.EMAIL, "Invite", body_text="INVITE-BODY")
+    _step(campaign, 2, MissiveType.EMAIL, "Reminder", body_text="REMINDER-BODY")
+    url = reverse("django_pymissive:preview", args=["campaign", campaign.pk])
+
+    assert Client().get(url, {"type": "email"}).status_code == 404
+    assert Client().get(url, {"type": "email", "step": invite.pk}).status_code == 200
+
+
+def test_campaign_preview_rejects_a_step_from_another_campaign():
+    campaign = _campaign()
+    other_campaign = _campaign()
+    foreign_step = _step(other_campaign, 1, MissiveType.EMAIL, "Foreign", body_text="FOREIGN")
+    url = reverse("django_pymissive:preview", args=["campaign", campaign.pk])
+
+    assert Client().get(url, {"type": "email", "step": foreign_step.pk}).status_code == 404
+
+
 def test_channel_fields_only_exist_on_steps_and_old_snapshots_stay_readable():
     campaign = _campaign()
     campaign_fields = {field.name for field in MissiveCampaign._meta.fields}
@@ -429,3 +538,491 @@ def test_progress_is_available_per_step_and_per_type():
     assert payload["by_step"][0]["sent"] == 1
     assert payload["by_step"][1]["total"] == 1
     assert payload["by_step"][1]["sent"] == 0
+
+
+_PARIS = {
+    "address_line1": "1 rue de la Paix",
+    "postal_code": "75002",
+    "city": "Paris",
+    "country": "France",
+}
+_LYON = {
+    "address_line1": "2 place Bellecour",
+    "postal_code": "69002",
+    "city": "Lyon",
+    "country": "France",
+}
+_NANTES = {
+    "address_line1": "3 cours des 50 Otages",
+    "postal_code": "44000",
+    "city": "Nantes",
+    "country": "France",
+}
+_STEP_VALUES = {
+    "subject": "Step subject",
+    "body_rich": "<p>step</p>",
+    "body_rich_snapshot_html": "<p>step snapshot</p>",
+    "body_text": "step text",
+    "sender_name": "Step Sender",
+    "sender_email": "step@example.com",
+    "reply_to_name": "Step Reply",
+    "reply_to_email": "reply-step@example.com",
+    "sender_phone": "+33611111111",
+    "brand_name": "step-brand",
+    "sender_address": _PARIS,
+    "reply_to_address": _PARIS,
+}
+_LOCAL_VALUES = {
+    "subject": "Local subject",
+    "body_rich": "<p>local</p>",
+    "body_rich_snapshot_html": "<p>local snapshot</p>",
+    "body_text": "local text",
+    "sender_name": "Local Sender",
+    "sender_email": "local@example.com",
+    "reply_to_name": "Local Reply",
+    "reply_to_email": "reply-local@example.com",
+    "sender_phone": "+33622222222",
+    "brand_name": "local-brand",
+    "sender_address": _LYON,
+    "reply_to_address": _LYON,
+}
+_RESYNC_VALUES = {
+    "subject": "Resync subject",
+    "body_rich": "<p>resync</p>",
+    "body_rich_snapshot_html": "<p>resync snapshot</p>",
+    "body_text": "resync text",
+    "sender_name": "Resync Sender",
+    "sender_email": "resync@example.com",
+    "reply_to_name": "Resync Reply",
+    "reply_to_email": "reply-resync@example.com",
+    "sender_phone": "+33633333333",
+    "brand_name": "resync-brand",
+    "sender_address": _NANTES,
+    "reply_to_address": _NANTES,
+}
+_SUPPORTS = [
+    ("email", MissiveType.EMAIL),
+    ("phone", MissiveType.SMS),
+    ("application", MissiveType.BRANDED),
+    ("address", MissiveType.LETTER),
+]
+_ADMIN_CONTENT_FIELDS = {
+    MissiveType.EMAIL: [
+        "subject",
+        "sender_name",
+        "sender_email",
+        "reply_to_name",
+        "reply_to_email",
+        "body_text",
+        "body_rich",
+        "body_rich_snapshot_html",
+    ],
+    MissiveType.SMS: ["sender_name", "sender_phone", "body_text"],
+    MissiveType.LETTER: [
+        "sender_name",
+        "sender_address",
+        "reply_to_name",
+        "reply_to_address",
+        "duplex_printing",
+        "color_printing",
+        "body_rich",
+        "body_rich_snapshot_html",
+    ],
+    MissiveType.BRANDED: [
+        "brand_name",
+        "subject",
+        "sender_name",
+        "body_text",
+        "body_rich",
+        "body_rich_snapshot_html",
+    ],
+}
+_ADMIN_CONTENT_FIELDS.update(
+    {
+        missive_type: list(_ADMIN_CONTENT_FIELDS[MissiveType.EMAIL])
+        for missive_type in (MissiveType.EMAIL_MARKETING, MissiveType.ERE)
+    }
+)
+_ADMIN_CONTENT_FIELDS.update(
+    {
+        missive_type: list(_ADMIN_CONTENT_FIELDS[MissiveType.SMS])
+        for missive_type in (MissiveType.RCS, MissiveType.VOICE_CALL)
+    }
+)
+_ADMIN_CONTENT_FIELDS.update(
+    {
+        missive_type: list(_ADMIN_CONTENT_FIELDS[MissiveType.LETTER])
+        for missive_type in (MissiveType.REGISTERED_LETTER, MissiveType.HAND_DELIVERY)
+    }
+)
+_ADMIN_CONTENT_FIELDS.update(
+    {
+        missive_type: ["subject", "sender_name", "body_text", "body_rich", "body_rich_snapshot_html"]
+        for missive_type in (MissiveType.NOTIFICATION, MissiveType.PUSH_NOTIFICATION)
+    }
+)
+_ADMIN_TYPES = [
+    (MissiveType.EMAIL, "email"),
+    (MissiveType.EMAIL_MARKETING, "email"),
+    (MissiveType.ERE, "email"),
+    (MissiveType.SMS, "phone"),
+    (MissiveType.RCS, "phone"),
+    (MissiveType.VOICE_CALL, "phone"),
+    (MissiveType.LETTER, "address"),
+    (MissiveType.REGISTERED_LETTER, "address"),
+    (MissiveType.HAND_DELIVERY, "address"),
+    (MissiveType.NOTIFICATION, "application"),
+    (MissiveType.PUSH_NOTIFICATION, "application"),
+    (MissiveType.BRANDED, "application"),
+]
+
+
+def _same(left, right) -> bool:
+    if hasattr(left, "as_e164") or hasattr(right, "as_e164"):
+        return str(left or "") == str(right or "")
+    if isinstance(left, Mapping) and isinstance(right, Mapping):
+        return dict(left) == dict(right)
+    return left == right
+
+
+def _values(names, source):
+    return {name: source[name] for name in names}
+
+
+@pytest.mark.parametrize("support,missive_type", _SUPPORTS)
+@override_settings(PYMISSIVE_DEFAULT_SENDER={})
+def test_sourced_fields_resolve_copy_resync_and_clear(support, missive_type):
+    names = [name for name in campaign_sourced_fields(support) if name not in {"duplex_printing", "color_printing"}]
+    campaign = _campaign()
+    step = _step(campaign, 1, missive_type, **_values(names, _STEP_VALUES))
+    inherited = _missive(campaign, step, missive_type)
+    local = Missive.objects.create(
+        campaign_step=step,
+        missive_type=missive_type,
+        status=MissiveStatus.DRAFT,
+        **_values(names, _LOCAL_VALUES),
+    )
+
+    for name in names:
+        assert _same(inherited.get_locally_or_campaign_value(name), getattr(step, name))
+        assert _same(local.get_locally_or_campaign_value(name), getattr(local, name))
+        assert not _same(getattr(local, name), getattr(step, name))
+
+    inherited.set_locally_ifnull()
+    inherited.refresh_from_db()
+    for name in names:
+        assert _same(getattr(inherited, name), getattr(step, name))
+
+    for name, value in _values(names, _RESYNC_VALUES).items():
+        setattr(step, name, value)
+    step.save(update_fields=names)
+    step.refresh_from_db()
+    inherited = Missive.objects.get(pk=inherited.pk)
+    inherited.apply_campaign_config(inherited)
+    inherited.refresh_from_db()
+    for name in names:
+        assert _same(getattr(inherited, name), getattr(step, name))
+
+    inherited.clear_campaign_sourced_fields(inherited)
+    inherited.refresh_from_db()
+    for name in names:
+        field = inherited._meta.get_field(name)
+        expected = None if field.null else field.get_default()
+        assert _same(getattr(inherited, name), expected)
+    assert inherited.additional_context == {}
+
+
+@override_settings(PYMISSIVE_DEFAULT_SENDER={})
+def test_step_false_duplex_and_true_color_are_copied_then_cleared():
+    campaign = _campaign()
+    step = _step(
+        campaign,
+        1,
+        MissiveType.LETTER,
+        duplex_printing=False,
+        color_printing=True,
+    )
+    missive = _missive(campaign, step, MissiveType.LETTER)
+
+    assert missive.duplex_printing is True
+    assert missive.color_printing is False
+    assert missive.get_locally_or_campaign_value("duplex_printing") is False
+    assert missive.get_locally_or_campaign_value("color_printing") is True
+
+    missive.set_locally_ifnull()
+    missive.refresh_from_db()
+    assert missive.duplex_printing is False
+    assert missive.color_printing is True
+
+    step.duplex_printing = True
+    step.color_printing = False
+    step.save(update_fields=["duplex_printing", "color_printing"])
+    missive = Missive.objects.get(pk=missive.pk)
+    missive.apply_campaign_config(missive)
+    missive.refresh_from_db()
+    assert missive.duplex_printing is True
+    assert missive.color_printing is False
+
+    missive.clear_campaign_sourced_fields(missive)
+    missive.refresh_from_db()
+    assert missive.duplex_printing is True
+    assert missive.color_printing is False
+
+
+@override_settings(PYMISSIVE_DEFAULT_SENDER={})
+def test_explicit_boolean_overrides_step_and_absent_step_keeps_local_values():
+    campaign = _campaign()
+    step = _step(campaign, 1, MissiveType.LETTER, duplex_printing=True, color_printing=False)
+    linked = _missive(campaign, step, MissiveType.LETTER)
+    linked.duplex_printing = False
+    linked.color_printing = True
+
+    assert linked.get_locally_or_campaign_value("duplex_printing") is False
+    assert linked.get_locally_or_campaign_value("color_printing") is True
+
+    standalone = Missive.objects.create(missive_type=MissiveType.LETTER, subject="Alone")
+    standalone.subject = "Kept"
+    standalone.duplex_printing = False
+    standalone.clear_campaign_sourced_fields(standalone)
+
+    assert standalone.campaign_step_id is None
+    assert standalone.get_locally_or_campaign_value("duplex_printing") is False
+    assert standalone.get_locally_or_campaign_value("color_printing") is False
+    assert standalone.subject == "Kept"
+    assert standalone.duplex_printing is False
+
+
+def test_campaign_sourced_fields_returns_an_independent_list():
+    fields = campaign_sourced_fields("email")
+    fields.append("status")
+    assert "status" not in campaign_sourced_fields("email")
+    assert campaign_sourced_fields("unknown") == []
+
+
+def test_snapshot_round_trip_keeps_the_full_document():
+    campaign = _campaign(metadata={"note": "frozen"})
+    step = _step(
+        campaign,
+        1,
+        MissiveType.EMAIL,
+        "Email",
+        subject="Hello",
+        body_text="BODY",
+        build_target_processors=["myapp.build"],
+    )
+    snap = campaign.to_snapshot()
+
+    assert json.loads(json.dumps(snap)) == snap
+    assert set(snap) == {"version", "campaign", "steps"}
+    assert snap["campaign"]["metadata"] == {"note": "frozen"}
+    step_snap = snap["steps"][0]
+    assert set(step_snap) == {
+        "id",
+        "position",
+        "label",
+        "missive_type",
+        "build_target_processors",
+        "config",
+        "attachments",
+    }
+    assert step_snap["id"] == step.pk
+    assert step_snap["config"]["subject"] == "Hello"
+    assert step_snap["config"]["body_text"] == "BODY"
+    assert "id" not in step_snap["config"]
+    assert "campaign_id" not in step_snap["config"]
+    assert "position" not in step_snap["config"]
+    assert "build_target_processors" not in step_snap["config"]
+
+
+def test_campaign_admin_splits_steps_into_one_inline_per_missive_type():
+    from django.contrib.auth import get_user_model
+    from django.contrib.admin.utils import flatten_fieldsets
+
+    from django_pymissive.admin.campaign_step import (
+        BrandedCampaignStepInline,
+        EmailCampaignStepInline,
+        EmailMarketingCampaignStepInline,
+        EreCampaignStepInline,
+        HandDeliveryCampaignStepInline,
+        LetterCampaignStepInline,
+        NotificationCampaignStepInline,
+        PushNotificationCampaignStepInline,
+        RcsCampaignStepInline,
+        RegisteredLetterCampaignStepInline,
+        SmsCampaignStepInline,
+        VoiceCallCampaignStepInline,
+    )
+
+    campaign = _campaign()
+    inline_types = [
+        (LetterCampaignStepInline, MissiveType.LETTER),
+        (RegisteredLetterCampaignStepInline, MissiveType.REGISTERED_LETTER),
+        (HandDeliveryCampaignStepInline, MissiveType.HAND_DELIVERY),
+        (EreCampaignStepInline, MissiveType.ERE),
+        (EmailCampaignStepInline, MissiveType.EMAIL),
+        (EmailMarketingCampaignStepInline, MissiveType.EMAIL_MARKETING),
+        (SmsCampaignStepInline, MissiveType.SMS),
+        (RcsCampaignStepInline, MissiveType.RCS),
+        (VoiceCallCampaignStepInline, MissiveType.VOICE_CALL),
+        (NotificationCampaignStepInline, MissiveType.NOTIFICATION),
+        (PushNotificationCampaignStepInline, MissiveType.PUSH_NOTIFICATION),
+        (BrandedCampaignStepInline, MissiveType.BRANDED),
+    ]
+    expected = {
+        inline_cls: _step(campaign, position, missive_type, str(missive_type)).pk
+        for position, (inline_cls, missive_type) in enumerate(inline_types, start=1)
+    }
+    request = RequestFactory().get("/")
+    request.user = get_user_model().objects.create_superuser(username="steps", email="steps@example.com", password="x")
+    inlines = admin.site._registry[MissiveCampaign].get_inline_instances(request, campaign)
+    by_type = {type(inline): inline for inline in inlines}
+
+    assert [type(inline) for inline in inlines[:12]] == list(expected)
+    formsets, _inline_instances = admin.site._registry[MissiveCampaign]._create_formsets(request, campaign, change=True)
+    assert len({formset.prefix for formset in formsets[:12]}) == 12
+    for inline_cls, pk, formset in zip(expected, expected.values(), formsets[:12], strict=True):
+        inline = by_type[inline_cls]
+        assert list(formset.get_queryset().values_list("pk", flat=True)) == [pk]
+        assert flatten_fieldsets(inline.get_fieldsets(request, campaign)) == [
+            "position",
+            "label",
+            *_ADMIN_CONTENT_FIELDS[inline.missive_type],
+        ]
+        assert "missive_type" not in formset.form.base_fields
+
+
+def test_campaign_admin_only_shows_active_step_inlines_without_direct_add():
+    from django.contrib.auth import get_user_model
+
+    from django_pymissive.admin.campaign_step import CampaignStepInline, EmailCampaignStepInline
+
+    campaign = _campaign()
+    _step(campaign, 1, MissiveType.EMAIL, "Email")
+    request = RequestFactory().get("/")
+    request.user = get_user_model().objects.create_superuser(
+        username="active-steps",
+        email="active-steps@example.com",
+        password="x",
+    )
+
+    inlines = admin.site._registry[MissiveCampaign].get_inline_instances(request, campaign)
+    step_inlines = [inline for inline in inlines if isinstance(inline, CampaignStepInline)]
+
+    assert [type(inline) for inline in step_inlines] == [EmailCampaignStepInline]
+    assert step_inlines[0].has_add_permission(request, campaign) is False
+
+
+def test_campaign_admin_only_shows_scheduler_inline_when_steps_exist():
+    from django.contrib.auth import get_user_model
+
+    from django_pymissive.admin.scheduler import MissiveScheduledCampaignInline
+
+    campaign = _campaign()
+    request = RequestFactory().get("/")
+    request.user = get_user_model().objects.create_superuser(
+        username="scheduler-inline",
+        email="scheduler-inline@example.com",
+        password="x",
+    )
+    model_admin = admin.site._registry[MissiveCampaign]
+
+    assert not any(
+        isinstance(inline, MissiveScheduledCampaignInline)
+        for inline in model_admin.get_inline_instances(request, campaign)
+    )
+
+    _step(campaign, 1, MissiveType.EMAIL, "Email")
+
+    inlines = model_admin.get_inline_instances(request, campaign)
+    assert isinstance(inlines[-1], MissiveScheduledCampaignInline)
+
+
+def test_campaign_step_add_view_selects_type_then_saves_the_proxy_form():
+    from django.contrib.auth import get_user_model
+
+    campaign = _campaign()
+    user = get_user_model().objects.create_superuser(
+        username="add-step",
+        email="add-step@example.com",
+        password="x",
+    )
+    client = Client()
+    client.force_login(user)
+    url = reverse(
+        "admin:django_pymissive_missivecampaign_add_campaign_step",
+        args=[campaign.pk],
+    )
+
+    chooser = client.get(url)
+    selected = client.post(url, {"missive_type": MissiveType.LETTER})
+    form_page = client.get(url, {"missive_type": MissiveType.LETTER})
+
+    assert chooser.status_code == 200
+    assert list(chooser.context["adminform"].form.fields) == ["missive_type"]
+    assert selected.status_code == 302
+    assert selected.url == f"{url}?missive_type=letter"
+    fields = form_page.context["adminform"].form.fields
+    assert "missive_type" not in fields
+    assert "subject" not in fields
+    assert "color_printing" in fields
+    assert "body_rich" in fields
+    assert "body_rich_snapshot_html" not in fields
+    assert ("position", "label") in form_page.context["adminform"].fieldsets[0][1]["fields"]
+    assert ("sender_name", "sender_address") in form_page.context["adminform"].fieldsets[1][1]["fields"]
+    assert ("reply_to_name", "reply_to_address") in form_page.context["adminform"].fieldsets[1][1]["fields"]
+
+    saved = client.post(
+        f"{url}?missive_type=letter",
+        {
+            "position": "1",
+            "label": "Postal",
+        },
+    )
+
+    assert saved.status_code == 302
+    step = campaign.to_campaignstep.get()
+    assert step.missive_type == MissiveType.LETTER
+    assert step.label == "Postal"
+
+
+@pytest.mark.parametrize("missive_type,support", _ADMIN_TYPES)
+def test_campaign_step_admin_keeps_the_channel_form(missive_type, support):
+    from django.contrib.admin.utils import flatten_fieldsets
+
+    assert EmailCampaignStep not in admin.site._registry
+    assert PhoneCampaignStep not in admin.site._registry
+    assert PostalCampaignStep not in admin.site._registry
+    assert BrandedCampaignStep not in admin.site._registry
+    model_admin = admin.site._registry[CampaignStep]
+    step = CampaignStep(missive_type=missive_type)
+    fieldsets = model_admin.get_fieldsets(RequestFactory().get("/"), step)
+    shown = flatten_fieldsets([fieldsets[1]])
+
+    assert str(fieldsets[1][0]) == "Content"
+    assert str(fieldsets[2][0]) == "Configuration"
+    assert list(fieldsets[0][1]["fields"]) == ["campaign", ("position", "label"), "missive_type"]
+    assert shown == _ADMIN_CONTENT_FIELDS[missive_type]
+    assert shown == admin_missive_type_fields(missive_type)
+    assert list(fieldsets[2][1]["fields"]) == [
+        "metadata",
+        "additional_context",
+        "additional_config",
+        "body_processors",
+        "first_document_processors",
+        "attachment_processors",
+        "build_target_processors",
+    ]
+    excluded = set(admin_missive_type_exclusions(missive_type))
+    assert set(campaign_sourced_fields(support)) - set(shown) == excluded
+    assert set(shown) <= set(campaign_sourced_fields(support))
+    assert "body_rich_snapshot_html" in model_admin.get_readonly_fields(RequestFactory().get("/"), step)
+    if support == "address":
+        form = model_admin.get_form(RequestFactory().get("/"), step)
+        assert str(form.base_fields["body_rich"].label) == "First document"
+
+
+def test_all_html_snapshots_are_readonly_in_admin():
+    request = RequestFactory().get("/")
+
+    assert "description_snapshot_html" in admin.site._registry[MissiveCampaign].get_readonly_fields(request)
+    assert "body_rich_snapshot_html" in admin.site._registry[Missive].get_readonly_fields(request)

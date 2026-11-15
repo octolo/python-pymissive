@@ -5,7 +5,7 @@ from typing import cast
 
 from django.db import models
 from django.db.models import Exists, F, Q, Value
-from django.db.models.expressions import Subquery, OuterRef
+from django.db.models.expressions import OuterRef, Subquery
 from django.db.models.functions import Coalesce, NullIf
 from pymissive.config import GENERIC_SUPPORT, MISSIVE_TYPES
 
@@ -61,7 +61,7 @@ def pct_expr(cnt):
     )
 
 
-def support_count_annotations() -> dict:
+def support_count_annotations(lookup: str = _M) -> dict:
     """``count_support_<support>``, ``_sent`` and ``_error`` for each support.
 
     Derived from ``missive_type`` rather than the ``missive_support`` column: rows
@@ -70,20 +70,45 @@ def support_count_annotations() -> dict:
     """
     annotations = {}
     for support in GENERIC_SUPPORT:
-        type_q = Q(**missive_type_filter(support, prefix=_M))
-        annotations[support_count_name(support)] = count_missive_expr(type_q)
+        type_q = Q(**missive_type_filter(support, prefix=lookup))
+        annotations[support_count_name(support)] = count_missive_expr(type_q, lookup=lookup)
         annotations[support_count_name(support, "sent")] = count_missive_expr(
             type_q,
-            sent_missive_q(prefix=_M),
+            sent_missive_q(prefix=lookup),
+            lookup=lookup,
         )
         annotations[support_count_name(support, "error")] = count_missive_expr(
             type_q,
-            error_missive_q(prefix=_M),
+            error_missive_q(prefix=lookup),
+            lookup=lookup,
         )
     return annotations
 
 
-def missive_count_annotations() -> dict:
+def missive_send_speed_average(parent_lookup: str):
+    """Mean missive duration without weighting rows duplicated by other joins."""
+    from ..models.missive import Missive
+
+    average = (
+        Missive._base_manager.filter(
+            **{
+                parent_lookup: OuterRef("pk"),
+                "send_speed__isnull": False,
+            },
+        )
+        .order_by()
+        .values(parent_lookup)
+        .annotate(value=models.Avg("send_speed"))
+        .values("value")
+    )
+    return Subquery(average, output_field=models.FloatField())
+
+
+def missive_count_annotations(
+    lookup: str = _M,
+    *,
+    send_speed_parent_lookup: str = "campaign_step__campaign_id",
+) -> dict:
     """Counters reached through ``to_campaignstep__to_missive``.
 
     Two families, and the difference matters:
@@ -103,59 +128,52 @@ def missive_count_annotations() -> dict:
     Only the historical family is campaign-specific.
     """
     return {
-        "count_missive": models.Count(_M, distinct=True),
-        "count_sent": count_missive_expr(sent_missive_q(prefix=_M)),
-        "count_pending": count_missive_expr(pending_missive_q(prefix=_M)),
-        "count_error": count_missive_expr(error_missive_q(prefix=_M)),
+        "count_missive": models.Count(lookup, distinct=True),
+        "count_sent": count_missive_expr(sent_missive_q(prefix=lookup), lookup=lookup),
+        "count_pending": count_missive_expr(pending_missive_q(prefix=lookup), lookup=lookup),
+        "count_error": count_missive_expr(error_missive_q(prefix=lookup), lookup=lookup),
         **{
             f"count_thread_{thread.value.lower()}": models.Count(
-                _M,
-                filter=Q(**{f"{_M}__thread_type": thread}),
+                lookup,
+                filter=Q(**{f"{lookup}__thread_type": thread}),
                 distinct=True,
             )
             for thread in MissiveThreadType
         },
-        **support_count_annotations(),
+        **support_count_annotations(lookup),
         **{
             f"count_missive_{status.value.lower()}": models.Count(
-                _M,
-                filter=Q(**{f"{_M}__status": status}),
+                lookup,
+                filter=Q(**{f"{lookup}__status": status}),
                 distinct=True,
             )
             for status in MissiveStatus
         },
         **{
             f"count_type_{type_key}": models.Count(
-                _M,
-                filter=Q(**{f"{_M}__missive_type": type_key}),
+                lookup,
+                filter=Q(**{f"{lookup}__missive_type": type_key}),
+                distinct=True,
+            )
+            for type_key in MISSIVE_TYPES
+        },
+        "send_speed": missive_send_speed_average(send_speed_parent_lookup),
+    }
+
+
+def step_count_annotations() -> dict:
+    """``count_step`` and ``count_step_<type>`` for each registered missive type."""
+    return {
+        "count_step": models.Count("to_campaignstep", distinct=True),
+        **{
+            f"count_step_{type_key}": models.Count(
+                "to_campaignstep",
+                filter=Q(to_campaignstep__missive_type=type_key),
                 distinct=True,
             )
             for type_key in MISSIVE_TYPES
         },
     }
-
-
-def step_count_annotations() -> dict:
-    """``count_step_<type>`` for each registered missive type."""
-    return {
-        f"count_step_{type_key}": models.Count(
-            "to_campaignstep",
-            filter=Q(to_campaignstep__missive_type=type_key),
-            distinct=True,
-        )
-        for type_key in MISSIVE_TYPES
-    }
-
-
-def step_total_expr():
-    """Total step definitions as the sum of the per-type annotations."""
-    from django.db.models.expressions import CombinedExpression
-
-    parts = [F(f"count_step_{type_key}") for type_key in MISSIVE_TYPES]
-    total: F | CombinedExpression = parts[0]
-    for part in parts[1:]:
-        total = total + part
-    return total
 
 
 def pending_target_type_annotations() -> dict:
@@ -164,17 +182,16 @@ def pending_target_type_annotations() -> dict:
 
     active = CampaignTarget.active_q()
     return {
-        f"count_target_pending_{type_key}": target_count_expr(active & Q(missive_type=type_key))
+        f"count_target_pending_{type_key}": target_count_expr(
+            active & Q(campaign_step_id__in=campaign_step_ids_for_type(type_key))
+        )
         for type_key in MISSIVE_TYPES
     }
 
 
 def target_value_type_annotations() -> dict:
     """``count_target_<type>`` for stored contact values on active targets."""
-    return {
-        f"count_target_{type_key}": target_value_count_expr(type_key)
-        for type_key in MISSIVE_TYPES
-    }
+    return {f"count_target_{type_key}": target_value_count_expr(type_key) for type_key in MISSIVE_TYPES}
 
 
 def pending_target_total_expr():
@@ -225,6 +242,17 @@ def target_count_expr(condition):
     )
 
 
+def campaign_step_ids_for_type(missive_type: str):
+    """Campaign-step ids for one type without joining each target subquery."""
+    from ..models.campaign_step import CampaignStep
+
+    return Subquery(
+        CampaignStep.objects.filter(missive_type=missive_type)
+        .order_by()
+        .values("pk")
+    )
+
+
 def target_value_count_expr(missive_type: str):
     """Stored contact values on active campaign targets of one missive type.
 
@@ -238,7 +266,7 @@ def target_value_count_expr(missive_type: str):
         CampaignTarget.objects.filter(
             CampaignTarget.active_q(),
             campaign_id=OuterRef(OuterRef("pk")),
-            missive_type=missive_type,
+            campaign_step_id__in=campaign_step_ids_for_type(missive_type),
         )
         .order_by()
         .values("pk")
@@ -254,6 +282,22 @@ def target_value_count_expr(missive_type: str):
         Subquery(count, output_field=models.IntegerField()),
         Value(0),
     )
+
+
+def missive_related_count_annotations(lookup: str = _M) -> dict:
+    """Recipient and event counters below one missive relation."""
+    return {
+        "count_recipient": models.Count(f"{lookup}__to_missiverecipient", distinct=True),
+        "count_event": models.Count(f"{lookup}__to_missiveevent", distinct=True),
+        **{
+            f"count_recipient_{status.value.lower()}": models.Count(
+                f"{lookup}__to_missiverecipient",
+                distinct=True,
+                filter=Q(**{f"{lookup}__to_missiverecipient__status": status}),
+            )
+            for status in MissiveStatus
+        },
+    }
 
 
 def related_count_annotations() -> dict:
@@ -272,21 +316,12 @@ def related_count_annotations() -> dict:
     counters, added in a second ``annotate`` so it does not scan again.
     """
     return {
-        "count_recipient": models.Count(f"{_M}__to_missiverecipient", distinct=True),
-        "count_event": models.Count(f"{_M}__to_missiveevent", distinct=True),
+        **missive_related_count_annotations(),
         "count_related_object": models.Count("to_campaignrelatedobject", distinct=True),
         "count_attachment": models.Count("to_campaigndocument", distinct=True),
         **pending_target_type_annotations(),
         **target_value_type_annotations(),
         "count_target_abandoned": target_count_expr(Q(abandoned_at__isnull=False)),
-        **{
-            f"count_recipient_{status.value.lower()}": models.Count(
-                f"{_M}__to_missiverecipient",
-                distinct=True,
-                filter=Q(**{f"{_M}__to_missiverecipient__status": status}),
-            )
-            for status in MissiveStatus
-        },
     }
 
 
@@ -318,7 +353,6 @@ def derived_count_annotations() -> dict:
     return {
         "count_target_pending": pending_target_total_expr(),
         "count_target": target_value_total_expr(),
-        "count_step": step_total_expr(),
         **pct_annotations(),
     }
 
@@ -336,6 +370,36 @@ def count_annotations() -> dict:
         **related_count_annotations(),
         **derived_count_annotations(),
     }
+
+
+def _validate_count_names(names, counters: dict, derived: dict) -> set:
+    wanted = set(names)
+    unknown = wanted - counters.keys() - derived.keys()
+    if unknown:
+        raise ValueError(
+            f"Unknown campaign counters: {', '.join(sorted(unknown))}",
+        )
+    return wanted
+
+
+def _add_derived_count_dependencies(wanted: set, derived: dict) -> None:
+    for name in derived:
+        if name.startswith("pct_"):
+            wanted.update(("count_recipient", name.replace("pct_", "count_", 1)))
+    if "count_target_pending" in derived:
+        wanted.update(pending_target_type_annotations())
+    if "count_target" in derived:
+        wanted.update(target_value_type_annotations())
+
+
+def _select_count_annotations(names, counters: dict, derived: dict) -> tuple[dict, dict]:
+    if not names:
+        return counters, derived
+    wanted = _validate_count_names(names, counters, derived)
+    selected_derived = {key: derived[key] for key in derived if key in wanted}
+    _add_derived_count_dependencies(wanted, selected_derived)
+    selected_counters = {key: value for key, value in counters.items() if key in wanted}
+    return selected_counters, selected_derived
 
 
 class MissiveCampaignQuerySet(models.QuerySet):
@@ -367,28 +431,11 @@ class MissiveCampaignQuerySet(models.QuerySet):
             **step_count_annotations(),
             **related_count_annotations(),
         }
-        derived = derived_count_annotations()
-        if names:
-            wanted = set(names)
-            unknown = wanted - counters.keys() - derived.keys()
-            if unknown:
-                raise ValueError(
-                    f"Unknown campaign counters: {', '.join(sorted(unknown))}",
-                )
-            derived = {key: derived[key] for key in derived if key in wanted}
-            # A percentage divides its own recipient counter by count_recipient,
-            # so asking for one has to bring both along. The pending total is
-            # the sum of the per-type counters, so it brings every part along.
-            for name in derived:
-                if name.startswith("pct_"):
-                    wanted |= {"count_recipient", name.replace("pct_", "count_", 1)}
-            if "count_target_pending" in derived:
-                wanted.update(pending_target_type_annotations())
-            if "count_target" in derived:
-                wanted.update(target_value_type_annotations())
-            if "count_step" in derived:
-                wanted.update(step_count_annotations())
-            counters = {key: value for key, value in counters.items() if key in wanted}
+        counters, derived = _select_count_annotations(
+            names,
+            counters,
+            derived_count_annotations(),
+        )
         return self.annotate(
             **counters,
             # Second annotate: these read counters declared above, and an

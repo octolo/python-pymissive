@@ -1,6 +1,6 @@
 from django import template
 
-from ..preview_sandbox import sandboxed_preview_srcdoc
+from ..services.preview_sandbox import sandboxed_preview_srcdoc
 
 register = template.Library()
 

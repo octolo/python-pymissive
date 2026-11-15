@@ -37,12 +37,12 @@ class GenerateWebhookSecretForm(forms.Form):
         self.fields["webhook_url"] = forms.CharField(
             required=False,
             label=_("Webhook URL"),
-            help_text=_("For providers that send Authorization (Brevo, Maileva)."),
+            help_text=_("For providers that send an Authorization header."),
         )
         self.fields["webhook_url_token"] = forms.CharField(
             required=False,
             label=_("Webhook URL with token"),
-            help_text=_("For providers that cannot set headers (Scaleway, SMS Partner)."),
+            help_text=_("For providers that cannot set an Authorization header."),
         )
         self.order_fields(
             [

@@ -13,10 +13,10 @@ from django.utils.translation import gettext as _
 
 from pymissive.config import provider_service_name
 
-from .models.billing import MissiveBilling
-from .models.missive import Missive
+from ..models.billing import MissiveBilling
+from ..models.missive import Missive
+from ..utils import get_base_url, get_recipient
 from .retrieve import lookup_missive
-from .utils import get_base_url, get_recipient
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def _lookup_billing_missive(bill) -> Missive | None:
 
 def load_provider_billings(**kwargs) -> list:
     """Fetch billing lines from the provider. Empty when unsupported or unpaid."""
-    from .models.provider import MissiveProviderModel
+    from ..models.provider import MissiveProviderModel
 
     provider = kwargs.get("provider")
     provider = MissiveProviderModel.objects.get(name=provider)
@@ -97,7 +97,7 @@ def retrieve_billings(*, provider, missive_type, start_date, end_date):
     from django.core.exceptions import ValidationError
     from django.utils.translation import gettext_lazy as _
 
-    from .models.provider import MissiveProviderModel
+    from ..models.provider import MissiveProviderModel
 
     provider_obj = MissiveProviderModel.objects.get(name=str(provider))
     service = provider_service_name("retrieve_billings", missive_type)
@@ -119,7 +119,7 @@ def retrieve_billings(*, provider, missive_type, start_date, end_date):
 
 def delay_retrieve_billings(*, provider, missive_type, start_date, end_date):
     """Dispatch :func:`retrieve_billings` via the configured task backend."""
-    from .task import get_task_backend
+    from ..task import get_task_backend
 
     get_task_backend().enqueue(
         retrieve_billings,
