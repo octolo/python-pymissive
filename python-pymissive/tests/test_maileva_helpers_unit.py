@@ -70,24 +70,6 @@ def test_postal_api_rejects_unknown_product():
         helpers._postal_api("parcel")
 
 
-@pytest.mark.parametrize(
-    ("kwargs", "expected"),
-    [
-        ({}, True),
-        ({"acknowledgement": None}, True),
-        ({"acknowledgement": ""}, True),
-        ({"acknowledgement": True}, True),
-        ({"acknowledgement": False}, False),
-        ({"acknowledgement": "basic_delivery"}, False),
-        ({"acknowledgement": " BASIC_DELIVERY "}, False),
-        ({"acknowledgement": "registered"}, True),
-        ({"acknowledgement_of_receipt": 0, "acknowledgement": "registered"}, False),
-    ],
-)
-def test_registered_acknowledgement_normalization(kwargs, expected):
-    assert helpers._registered_acknowledgement_of_receipt(kwargs) is expected
-
-
 def test_notification_email_prefers_explicit_then_first_valid_recipient():
     recipients = [
         None,

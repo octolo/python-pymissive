@@ -7,6 +7,8 @@ from unittest.mock import patch
 import pytest
 from django.test import override_settings
 
+from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.choices import MissiveRecipientType
 from django_pymissive.models.missive import Missive
 from django_pymissive.models.recipient import MissiveRecipient
@@ -145,3 +147,101 @@ def test_serialized_tags_are_kept_for_the_provider():
     with patch.object(missive, "get_webhook_url", return_value=None):
         data = missive.get_serialized_data(attachments=False)
     assert data["tags"] == ["welcome", "invoice"]
+
+
+def test_additional_config_merges_campaign_step_and_missive():
+    campaign = MissiveCampaign.objects.create(
+        subject="Campaign",
+        additional_config={"campaign_option": 1, "shared": "campaign"},
+    )
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        additional_config={"step_option": 2, "shared": "step"},
+    )
+    missive = Missive.objects.create(
+        campaign_step=step,
+        missive_type="email",
+        additional_config={"local_option": 3, "shared": "missive", "last_error": "local"},
+    )
+
+    with patch.object(missive, "get_webhook_url", return_value=None):
+        data = missive.get_serialized_data(attachments=False)
+
+    assert missive.resolved_additional_config() == {
+        "campaign_option": 1,
+        "step_option": 2,
+        "local_option": 3,
+        "shared": "missive",
+        "last_error": "local",
+    }
+    assert data["campaign_option"] == 1
+    assert data["step_option"] == 2
+    assert data["local_option"] == 3
+    assert data["shared"] == "missive"
+    assert data["last_error"] == "local"
+
+
+def test_additional_config_is_frozen_before_a_sent_missive():
+    campaign = MissiveCampaign.objects.create(subject="Campaign", additional_config={"campaign_option": 1})
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        additional_config={"step_option": 2},
+    )
+    missive = Missive.objects.create(
+        campaign_step=step,
+        missive_type="email",
+        additional_config={"local_option": 3},
+    )
+    expected = missive.resolved_additional_config()
+
+    missive.set_locally_ifnull()
+    missive.external_id = "sent-1"
+    missive.save(update_fields=["external_id"])
+    campaign.additional_config = {"campaign_option": 10}
+    campaign.save(update_fields=["additional_config"])
+    step.additional_config = {"step_option": 20}
+    step.save(update_fields=["additional_config"])
+    missive.refresh_from_db()
+
+    assert missive.additional_config == expected
+    assert missive.resolved_additional_config() == expected
+
+
+@override_settings(PYMISSIVE_DEFAULT_SENDER={})
+def test_provider_template_inherited_from_step_skips_the_email_body_requirement():
+    campaign = MissiveCampaign.objects.create(subject="Campaign")
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        subject="Template email",
+        sender_email="sender@example.com",
+        additional_config={"use_provider_template": True, "template_id": 42},
+    )
+    missive = Missive(campaign_step=step, missive_type="email")
+
+    missive.full_clean()
+    assert missive.resolved_additional_config()["template_id"] == 42
+
+
+def test_metadata_stays_local_to_each_model():
+    campaign = MissiveCampaign.objects.create(subject="Campaign", metadata={"campaign": 1})
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        metadata={"step": 2},
+    )
+    missive = Missive.objects.create(
+        campaign_step=step,
+        missive_type="email",
+        metadata={"missive": 3},
+    )
+
+    missive.set_locally_ifnull()
+    missive.refresh_from_db()
+    assert missive.metadata == {"missive": 3}

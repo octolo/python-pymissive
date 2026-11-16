@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from pymissive import postal_tracking
-from pymissive import webhook_secret
+from pymissive.webhook import secret as webhook_secret
 
 
 def test_postal_tracking_data_loads_from_packaged_resource_and_is_cached():

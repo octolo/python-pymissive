@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from django.contrib import admin
-
 from django.utils.translation import gettext_lazy as _
 from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
 
@@ -124,6 +123,19 @@ _STANDALONE_ATTACHMENT_INLINE_FIELDSETS: _FieldsetSpec = (
     ),
 )
 
+_CAMPAIGN_ATTACHMENT_INLINE_FIELDSETS = cast(
+    "_FieldsetSpec",
+    (
+        (
+            _("Campaign steps"),
+            {
+                "fields": ("campaign_step",),
+            },
+        ),
+        *tuple(_STANDALONE_ATTACHMENT_INLINE_FIELDSETS),
+    ),
+)
+
 
 class MissiveAttachmentBaseInline(admin.StackedInline):
     """Base inline for missive attachments."""
@@ -163,13 +175,23 @@ class MissiveVirtualAttachmentInline(admin.TabularInline):
     ]
 
 
-class CampaignAttachmentBaseInline(admin.StackedInline):
+class CampaignStepFieldMixin:
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        if db_field.name == "campaign_step":
+            from ..models.campaign_step import CampaignStep
+
+            campaign_id = getattr(request.resolver_match, "kwargs", {}).get("object_id")
+            kwargs["queryset"] = CampaignStep.objects.filter(campaign_id=campaign_id)
+        return super().formfield_for_manytomany(db_field, request, **kwargs)  # type: ignore[misc]
+
+
+class CampaignAttachmentBaseInline(CampaignStepFieldMixin, admin.StackedInline):
     """Base inline for campaign attachments (same UX as :class:`MissiveAttachmentBaseInline`)."""
 
     model = MissiveBaseAttachment
     fk_name = "campaign"
     extra = 0
-    fieldsets = _STANDALONE_ATTACHMENT_INLINE_FIELDSETS
+    fieldsets = _CAMPAIGN_ATTACHMENT_INLINE_FIELDSETS
     verbose_name = _("Attachment")
     verbose_name_plural = _("Attachments")
 
@@ -183,13 +205,14 @@ class CampaignAttachmentInline(CampaignAttachmentBaseInline):
     pass
 
 
-class CampaignVirtualAttachmentInline(admin.TabularInline):
+class CampaignVirtualAttachmentInline(CampaignStepFieldMixin, admin.TabularInline):
     """Inline for campaign virtual attachments."""
 
     model = CampaignVirtualAttachment
     extra = 0
     fields = [
         "priority",
+        "campaign_step",
         "attachment_content_type",
         "attachment_object_id",
         "attachment_object_arguments",

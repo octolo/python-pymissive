@@ -9,7 +9,6 @@ from providerkit import ProviderBase
 
 from pymissive import config
 
-from .acknowledgement import AcknowledgementMixin
 from .attachments import AttachmentsMixin
 from .branded import BrandedMixin
 
@@ -31,7 +30,6 @@ for category, service_cfg in config.MISSIVE_SERVICES.items():
 
 class MissiveProviderBase(
     ProviderBase,
-    AcknowledgementMixin,
     AttachmentsMixin,
     BrandedMixin,
 ):
@@ -39,6 +37,7 @@ class MissiveProviderBase(
 
     _default_services_cfg = defaults_services
     provider_key = "key"
+    preview_brand: str | None = None
     events_association: dict[str, str] | None = None
     fields_associations: dict[str, Any] = {}
 
@@ -48,7 +47,7 @@ class MissiveProviderBase(
 
     def get_webhook_secret(self) -> str:
         """Return ``WEBHOOK_SECRET`` or empty when inbound auth is off."""
-        from pymissive.webhook_auth import get_webhook_secret
+        from pymissive.webhook.auth import get_webhook_secret
 
         return get_webhook_secret(self)
 
@@ -57,8 +56,8 @@ class MissiveProviderBase(
         return False
 
     def verify_inbound_webhook(self, *, authorization: str = "", url_token: str = "") -> bool:
-        """Opt-in inbound check. See ``pymissive.webhook_auth``."""
-        from pymissive.webhook_auth import verify_inbound_webhook
+        """Opt-in inbound check. See ``pymissive.webhook.auth``."""
+        from pymissive.webhook.auth import verify_inbound_webhook
 
         return verify_inbound_webhook(self, authorization=authorization, url_token=url_token)
 
@@ -68,7 +67,7 @@ class MissiveProviderBase(
         return content
 
     def _guess_content_type(self, name: str) -> str:
-        """Guess MIME type from filename. Scaleway requires a type from its allowed list."""
+        """Guess a MIME type from a filename."""
         guessed, _ = mimetypes.guess_type(name)
         return guessed or "application/octet-stream"
 

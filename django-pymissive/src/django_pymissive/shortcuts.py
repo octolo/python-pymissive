@@ -39,7 +39,8 @@ Usage::
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from pymissive.config import MISSIVE_TYPES, missive_support_for_type, normalize_missive_type
 
@@ -78,6 +79,16 @@ def _recipient_model_and_value(support, models, *, email, phone, address, notifi
     return models["application"], ("notification_id", notification_id)
 
 
+def _validate_campaign(missive_type, campaign, campaign_step):
+    if campaign is not None:
+        if campaign_step is None:
+            raise ValueError("campaign_step is required when campaign is provided")
+        if campaign_step.campaign_id != campaign.pk:
+            raise ValueError("campaign_step does not belong to campaign")
+    if campaign_step is not None and campaign_step.missive_type != missive_type:
+        raise ValueError("campaign_step missive_type does not match missive_type")
+
+
 def send_missive(
     missive_type: str,
     *,
@@ -100,16 +111,14 @@ def send_missive(
     reply_to_email: str | None = None,
     # ── missive options ────────────────────────────────────────────────────
     campaign=None,
+    campaign_step=None,
     provider=None,
-    acknowledgement: str | None = None,
-    delivery_mode: str | None = None,
-    priority: str | None = None,
     brand_name: str | None = None,
     # ── escape hatches ─────────────────────────────────────────────────────
     extra_missive_fields: dict | None = None,
     extra_recipient_fields: dict | None = None,
     and_send: bool = True,
-) -> "Missive":
+) -> Missive:
     """Create a :class:`~django_pymissive.models.Missive` with one recipient and optionally send it.
 
     Args:
@@ -133,14 +142,11 @@ def send_missive(
         sender_address: Sender postal address.
         reply_to_name: Reply-To display name.
         reply_to_email: Reply-To e-mail address.
-        campaign: Optional :class:`~django_pymissive.models.MissiveCampaign`.
+        campaign: Optional campaign, accepted with *campaign_step* for caller
+            compatibility and validated against it.
+        campaign_step: Optional campaign step. This is the persisted campaign
+            link; campaign missives must provide it.
         provider: Provider override (``ProviderField`` value).
-        acknowledgement: Acknowledgement level (see
-            ``pymissive.config.MISSIVE_ACKNOWLEDGEMENT_LEVELS``).
-        delivery_mode: Delivery mode — ``'economic'``, ``'normal'``,
-            ``'premium'``, or ``'express'``.
-        priority: Priority — ``'low'``, ``'normal'``, ``'high'``, or
-            ``'urgent'``.
         brand_name: Brand name attached to the missive.
         extra_missive_fields: Extra kwargs forwarded verbatim to
             ``Missive.objects.create(…)``.  Must be a ``dict`` (not a JSON
@@ -152,7 +158,7 @@ def send_missive(
                     email="charles@example.com",
                     sender_name="Octolo",
                     sender_email="contact@octolo.tech",
-                    provider="brevo",
+                    provider="provider_name",
                     extra_missive_fields={
                         "additional_config": {
                             "template_id": 1,
@@ -186,6 +192,7 @@ def send_missive(
     missive_type = normalize_missive_type(missive_type) or missive_type
     # Resolve (and validate) the support before creating any DB row.
     support = _support_for_type(missive_type)
+    _validate_campaign(missive_type, campaign, campaign_step)
 
     missive_kwargs = {
         "missive_type": missive_type,
@@ -200,11 +207,8 @@ def send_missive(
             sender_address=sender_address,
             reply_to_name=reply_to_name,
             reply_to_email=reply_to_email,
-            campaign=campaign,
+            campaign_step=campaign_step,
             provider=provider,
-            acknowledgement=acknowledgement,
-            delivery_mode=delivery_mode,
-            priority=priority,
             brand_name=brand_name,
         ),
     }
@@ -244,7 +248,7 @@ def _make_type_shortcut(missive_type: str):
     """Return ``(fn_name, fn)`` for a ``send_<missive_type>()`` helper."""
     fn_name = f"send_{missive_type.replace('-', '_')}"
 
-    def _shortcut(**kwargs) -> "Missive":
+    def _shortcut(**kwargs) -> Missive:
         return send_missive(missive_type=missive_type, **kwargs)
 
     _shortcut.__name__ = fn_name
@@ -258,11 +262,11 @@ def _make_type_shortcut(missive_type: str):
 
 
 # ── auto-generate send_<type>() for every registered missive type ──────────
-_shortcuts: dict[str, Callable[..., "Missive"]] = {}
+_shortcuts: dict[str, Callable[..., Missive]] = {}
 
 for _mt in MISSIVE_TYPES:
     _fn_name, _fn = _make_type_shortcut(_mt)
     _shortcuts[_fn_name] = _fn
     globals()[_fn_name] = _fn
 
-__all__ = ["send_missive", *_shortcuts.keys()]
+__all__ = ["send_missive"] + list(_shortcuts)

@@ -43,21 +43,24 @@ def selection_qs(
     *,
     missive_type: str | None = None,
     active_only: bool = False,
+    campaign_step=None,
 ):
     """Return the selection rows of *campaign*.
 
     ``active_only`` keeps rows with no missive yet and not abandoned, which
-    is what the checkbox lists.
+    is what the checkbox lists. ``campaign_step`` keeps one step.
     """
     qs = CampaignTarget.objects.filter(campaign=campaign)
     if missive_type is not None:
-        qs = qs.filter(missive_type=require_missive_type(missive_type))
+        qs = qs.filter(campaign_step__missive_type=require_missive_type(missive_type))
+    if campaign_step is not None:
+        qs = qs.filter(campaign_step=campaign_step)
     if active_only:
         qs = qs.filter(CampaignTarget.active_q())
     return qs
 
 
-def select(campaign, missive_type: str, targets) -> int:
+def select(campaign, missive_type: str, targets, *, campaign_step=None) -> int:
     """Select *targets* for ``(campaign, missive_type)``.
 
     *targets* is a saved instance, an iterable of them, or a queryset.
@@ -70,52 +73,87 @@ def select(campaign, missive_type: str, targets) -> int:
     count.
     """
     channel = require_missive_type(missive_type)
+    campaign_step = _selection_step(campaign, channel, campaign_step)
     grouped = group_targets(targets)
     if not grouped:
         return 0
 
-    created = 0
-    for model, pairs in grouped.items():
-        content_type = ContentType.objects.get_for_model(model)
-        for start in range(0, len(pairs), BATCH_SIZE):
-            batch = pairs[start : start + BATCH_SIZE]
-            # ignore_conflicts alone would keep the rows safe, but not the
-            # count: the database does not say which rows it dropped.
-            already = set(
-                selection_qs(campaign, missive_type=channel, active_only=True)
-                .filter(
-                    content_type=content_type,
-                    object_id__in=[object_id for object_id, _target in batch],
-                )
-                .values_list("object_id", flat=True)
+    return sum(_select_model(campaign, campaign_step, channel, model, pairs) for model, pairs in grouped.items())
+
+
+def _selection_step(campaign, channel: str, campaign_step):
+    if campaign_step is None:
+        steps = list(
+            campaign.to_campaignstep.filter(missive_type=channel).order_by("position", "pk")[:2],
+        )
+        if len(steps) != 1:
+            raise ValueError(
+                f"Campaign must define exactly one {channel!r} step when campaign_step is omitted.",
             )
-            rows = [
-                CampaignTarget(
-                    campaign=campaign,
-                    missive_type=channel,
-                    content_type=content_type,
-                    object_id=object_id,
-                    object_str=_label(target),
-                )
-                for object_id, target in batch
-                if object_id not in already
-            ]
-            if not rows:
-                continue
+        campaign_step = steps[0]
+    if campaign_step.campaign_id != getattr(campaign, "pk", None):
+        raise ValueError("The step does not belong to this campaign.")
+    if campaign_step.missive_type != channel:
+        raise ValueError(f"Step missive type {campaign_step.missive_type!r} does not match {channel!r}.")
+    return campaign_step
+
+
+def _select_model(campaign, campaign_step, channel, model, pairs) -> int:
+    created = 0
+    content_type = ContentType.objects.get_for_model(model)
+    for start in range(0, len(pairs), BATCH_SIZE):
+        batch = pairs[start : start + BATCH_SIZE]
+        rows = _missing_target_rows(campaign, campaign_step, channel, content_type, batch)
+        if rows:
             CampaignTarget.objects.bulk_create(rows, ignore_conflicts=True)
             created += len(rows)
     return created
 
 
-def unselect(campaign, missive_type: str, targets=None) -> int:
+def _missing_target_rows(campaign, campaign_step, channel, content_type, batch):
+    # The database does not report which rows ``ignore_conflicts`` dropped,
+    # so exclude existing rows first to preserve the return count.
+    already = set(
+        selection_qs(
+            campaign,
+            missive_type=channel,
+            active_only=True,
+            campaign_step=campaign_step,
+        )
+        .filter(
+            content_type=content_type,
+            object_id__in=[object_id for object_id, _target in batch],
+        )
+        .values_list("object_id", flat=True)
+    )
+    return [
+        CampaignTarget(
+            campaign=campaign,
+            campaign_step=campaign_step,
+            content_type=content_type,
+            object_id=object_id,
+            object_str=_label(target),
+        )
+        for object_id, target in batch
+        if object_id not in already
+    ]
+
+
+def unselect(campaign, missive_type: str, targets=None, *, campaign_step=None) -> int:
     """Remove live selection rows for ``(campaign, missive_type)``.
 
     Sent rows stay. Pass *targets* to uncheck those objects only; omit it
-    to clear the whole channel. An empty list removes nothing.
+    to clear the whole channel. Pass *campaign_step* to limit the removal
+    to one step. An empty target list removes nothing.
 
     Returns the number of rows deleted.
     """
-    qs = selection_qs(campaign, missive_type=missive_type, active_only=True)
+    qs = selection_qs(
+        campaign,
+        missive_type=missive_type,
+        active_only=True,
+        campaign_step=campaign_step,
+    )
     if targets is not None:
         grouped = group_targets(targets)
         if not grouped:
@@ -231,7 +269,12 @@ def counts(
     One ``GROUP BY``. *missive_types*, when given, is filled with zeroes for
     the types that have no row, in the order it was passed.
     """
-    rows = selection_qs(campaign, active_only=active_only).values("missive_type").order_by().annotate(total=Count("id"))
+    rows = (
+        selection_qs(campaign, active_only=active_only)
+        .values(missive_type=models.F("campaign_step__missive_type"))
+        .order_by()
+        .annotate(total=Count("id"))
+    )
     if missive_types is None:
         return {row["missive_type"]: row["total"] for row in rows}
     result = {require_missive_type(value): 0 for value in missive_types}
@@ -247,9 +290,15 @@ def iter_targets(
     *,
     active_only: bool = False,
     chunk_size: int = CHUNK_SIZE,
+    campaign_step=None,
 ):
     """Yield selection rows, prefetching the generic target per chunk."""
-    qs = selection_qs(campaign, missive_type=missive_type, active_only=active_only)
+    qs = selection_qs(
+        campaign,
+        missive_type=missive_type,
+        active_only=active_only,
+        campaign_step=campaign_step,
+    )
     yield from iter_chunks(qs, chunk_size=chunk_size)
 
 
@@ -321,5 +370,5 @@ def _require_instance(target):
 def _label(target) -> str:
     try:
         return str(target)[:500]
-    except Exception:
+    except Exception:  # noqa: BLE001
         return ""

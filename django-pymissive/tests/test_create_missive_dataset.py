@@ -21,7 +21,7 @@ def test_create_dataset_without_campaign():
 
     missives = Missive.objects.order_by("subject")
     assert missives.count() == 3
-    assert not missives.exclude(campaign=None).exists()
+    assert not missives.exclude(campaign_step=None).exists()
     assert sorted(
         missives.values_list(
             "to_missiverecipient__recipient_support",
@@ -48,9 +48,9 @@ def test_create_dataset_with_new_campaign():
     )
 
     campaign = MissiveCampaign.objects.get(subject="Postal dataset")
-    assert Missive.objects.filter(campaign=campaign).count() == 2
+    assert Missive.objects.filter(campaign_step__campaign=campaign).count() == 2
     assert set(
-        Missive.objects.filter(campaign=campaign).values_list(
+        Missive.objects.filter(campaign_step__campaign=campaign).values_list(
             "to_missiverecipient__recipient_support",
             flat=True,
         )

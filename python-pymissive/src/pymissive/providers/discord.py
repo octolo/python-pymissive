@@ -13,6 +13,7 @@ class DiscordProvider(MissiveProviderBase):
     display_name = "Discord"
     description = "Community communication platform with channels"
     brands = ["discord"]
+    preview_brand = "discord"
     config_keys = ["DISCORD_BOT_TOKEN", "DISCORD_CHANNEL_ID"]
     required_packages = ["discord.py"]
     site_url = "https://discord.com"

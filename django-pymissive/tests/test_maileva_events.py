@@ -4,7 +4,7 @@ import pytest
 
 from pymissive.providers.maileva import MailevaProvider
 
-from django_pymissive.events import _process_event
+from django_pymissive.services.events import _process_event
 from django_pymissive.models import MissiveEvent, MissiveRecipient, MissiveStatus, MissiveType
 from django_pymissive.models.missive import Missive
 from django_pymissive.utils import get_recipient

@@ -11,8 +11,10 @@ from django.core.exceptions import ValidationError
 from django.test import override_settings
 
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.choices import MissiveStatus, MissiveType
 from django_pymissive.models.missive import Missive
+from django_pymissive.utils import sender_default_fields
 
 pytestmark = pytest.mark.django_db
 
@@ -42,32 +44,49 @@ def _missive(missive_type, **kw) -> Missive:
     )
 
 
+def _step(campaign, missive_type, **kwargs):
+    return CampaignStep.objects.create(
+        campaign=campaign,
+        position=campaign.to_campaignstep.count() + 1,
+        missive_type=missive_type,
+        **kwargs,
+    )
+
+
 @override_settings(PYMISSIVE_DEFAULT_SENDER=_DEFAULTS)
-def test_campaign_fills_every_empty_sender():
+def test_steps_fill_the_sender_for_their_support():
     campaign = _campaign()
-    assert campaign.sender_email_name == "Octolo"
-    assert campaign.sender_phone_name == "Octolo"
-    assert campaign.sender_address_name == "Octolo"
-    assert campaign.sender_email == "contact@octolo.tech"
-    assert str(campaign.sender_phone) == "+33123456789"
-    assert campaign.sender_address["organization"] == "Octolo"
-    assert campaign.sender_address["city"] == "Paris"
+    email = _step(campaign, MissiveType.EMAIL)
+    phone = _step(campaign, MissiveType.SMS)
+    postal = _step(campaign, MissiveType.LETTER)
+    assert email.sender_name == "Octolo"
+    assert email.sender_email == "contact@octolo.tech"
+    assert phone.sender_name == "Octolo"
+    assert str(phone.sender_phone) == "+33123456789"
+    assert postal.sender_name == "Octolo"
+    assert postal.sender_address["organization"] == "Octolo"
+    assert postal.sender_address["city"] == "Paris"
 
 
 @override_settings(PYMISSIVE_DEFAULT_SENDER=_DEFAULTS)
-def test_campaign_keeps_explicit_sender():
-    campaign = _campaign(
-        sender_email_name="Custom",
+def test_step_keeps_explicit_sender():
+    campaign = _campaign()
+    email = _step(
+        campaign,
+        MissiveType.EMAIL,
+        sender_name="Custom",
         sender_email="other@example.com",
-        sender_phone_name="SMS Brand",
+    )
+    phone = _step(
+        campaign,
+        MissiveType.SMS,
+        sender_name="SMS Brand",
         sender_phone="+33612345678",
     )
-    assert campaign.sender_email_name == "Custom"
-    assert campaign.sender_email == "other@example.com"
-    assert campaign.sender_phone_name == "SMS Brand"
-    assert str(campaign.sender_phone) == "+33612345678"
-    assert campaign.sender_address_name == "Octolo"
-    assert campaign.sender_address["organization"] == "Octolo"
+    assert email.sender_name == "Custom"
+    assert email.sender_email == "other@example.com"
+    assert phone.sender_name == "SMS Brand"
+    assert str(phone.sender_phone) == "+33612345678"
 
 
 @override_settings(PYMISSIVE_DEFAULT_SENDER=_DEFAULTS)
@@ -110,11 +129,14 @@ def test_missive_keeps_explicit_sender():
 
 @override_settings(PYMISSIVE_DEFAULT_SENDER=_DEFAULTS)
 def test_missive_skips_settings_when_campaign_has_sender():
-    campaign = _campaign(
-        sender_email_name="Campaign Sender",
+    campaign = _campaign()
+    step = _step(
+        campaign,
+        MissiveType.EMAIL,
+        sender_name="Campaign Sender",
         sender_email="campaign@example.com",
     )
-    missive = _missive(MissiveType.EMAIL, campaign=campaign)
+    missive = _missive(MissiveType.EMAIL, campaign_step=step)
     assert missive.sender_name is None
     assert missive.sender_email is None
     assert missive.get_locally_or_campaign_value("sender_name") == "Campaign Sender"
@@ -123,28 +145,22 @@ def test_missive_skips_settings_when_campaign_has_sender():
 
 @override_settings(PYMISSIVE_DEFAULT_SENDER=_DEFAULTS)
 def test_missive_fills_when_campaign_sender_empty_for_that_support():
-    campaign = MissiveCampaign(
-        subject="Camp",
-        sender_email_name="",
-        sender_email=None,
-        sender_phone_name="",
-        sender_phone=None,
-        sender_address_name="",
-        sender_address=None,
-    )
-    MissiveCampaign.objects.bulk_create([campaign])
-    campaign = MissiveCampaign.objects.get(pk=campaign.pk)
-    missive = _missive(MissiveType.EMAIL, campaign=campaign)
-    assert missive.sender_name == "Octolo"
-    assert missive.sender_email == "contact@octolo.tech"
+    campaign = _campaign()
+    step = _step(campaign, MissiveType.EMAIL)
+    missive = _missive(MissiveType.EMAIL, campaign_step=step)
+    assert missive.sender_name is None
+    assert missive.sender_email is None
+    assert missive.get_locally_or_campaign_value("sender_name") == "Octolo"
+    assert missive.get_locally_or_campaign_value("sender_email") == "contact@octolo.tech"
 
 
 @override_settings(PYMISSIVE_DEFAULT_SENDER={})
 def test_empty_setting_leaves_sender_blank():
     campaign = _campaign()
+    step = _step(campaign, MissiveType.EMAIL)
     missive = _missive(MissiveType.EMAIL)
-    assert not campaign.sender_email
-    assert not campaign.sender_email_name
+    assert not step.sender_email
+    assert not step.sender_name
     assert not missive.sender_name
     assert not missive.sender_email
 
@@ -196,3 +212,27 @@ def test_retrieved_missive_does_not_refill_sender():
     missive.refresh_from_db()
     assert missive.sender_name is None
     assert missive.sender_email is None
+
+
+def test_sender_default_fields_follow_the_support():
+    assert sender_default_fields("email") == {"sender_name": "name", "sender_email": "email"}
+    assert sender_default_fields("phone") == {"sender_name": "name", "sender_phone": "phone"}
+    assert sender_default_fields("address") == {"sender_name": "name", "sender_address": "address"}
+    assert sender_default_fields("application") == {"sender_name": "name"}
+    assert sender_default_fields(None) == {"sender_name": "name"}
+
+
+@override_settings(PYMISSIVE_DEFAULT_SENDER={})
+def test_step_update_fields_does_not_apply_sender_defaults():
+    campaign = _campaign()
+    step = _step(campaign, MissiveType.EMAIL, subject="Hello")
+    assert not step.sender_email
+
+    with override_settings(PYMISSIVE_DEFAULT_SENDER=_DEFAULTS):
+        step.subject = "Updated"
+        step.save(update_fields=["subject"])
+
+    step.refresh_from_db()
+    assert step.subject == "Updated"
+    assert not step.sender_email
+    assert not step.sender_name

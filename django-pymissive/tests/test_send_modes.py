@@ -48,6 +48,26 @@ def _events(missive: Missive):
     return list(MissiveEvent.objects.filter(missive=missive).order_by("pk"))
 
 
+def test_send_stores_the_duration_on_the_missive(settings):
+    settings.PYMISSIVE_DRY_RUN = True
+    missive = _email_missive()
+    MissiveRecipientEmail.objects.create(missive=missive, email="recipient@example.com")
+    ticks = [10.0, 12.5]
+
+    def _tick():
+        return ticks.pop(0) if len(ticks) > 1 else ticks[0]
+
+    with (
+        patch.object(Missive, "can_send", return_value=True),
+        patch.object(Missive, "get_serialized_data", return_value={}),
+        patch("django_pymissive.models.missive.time.perf_counter", side_effect=_tick),
+    ):
+        missive.send_missive()
+
+    missive.refresh_from_db()
+    assert missive.send_speed == pytest.approx(2.5)
+
+
 def test_dry_run_skips_provider(settings):
     settings.PYMISSIVE_DRY_RUN = True
     settings.PYMISSIVE_DISABLE_SEND = False
@@ -369,7 +389,7 @@ def test_claim_for_send_retries_from_error():
 
 def test_force_fake_provider_replaces_the_stored_provider(settings, caplog):
     settings.PYMISSIVE_DRY_RUN = False
-    settings.PYMISSIVE_FORCE_FAKE_PROVIDER = True
+    settings.PYMISSIVE_FORCE_PROVIDER = "fake"
     missive = _email_missive()
     Missive.objects.filter(pk=missive.pk).update(provider="brevo")
     missive.refresh_from_db()
@@ -388,7 +408,7 @@ def test_force_fake_provider_replaces_the_stored_provider(settings, caplog):
 
 
 def test_force_fake_provider_does_not_modify_history_during_reads(settings):
-    settings.PYMISSIVE_FORCE_FAKE_PROVIDER = True
+    settings.PYMISSIVE_FORCE_PROVIDER = "fake"
     missive = _email_missive()
     Missive.objects.filter(pk=missive.pk).update(
         provider="brevo",
@@ -407,7 +427,7 @@ def test_force_fake_provider_does_not_modify_history_during_reads(settings):
 
 def test_dry_run_still_skips_the_provider_when_fake_is_forced(settings):
     settings.PYMISSIVE_DRY_RUN = True
-    settings.PYMISSIVE_FORCE_FAKE_PROVIDER = True
+    settings.PYMISSIVE_FORCE_PROVIDER = "fake"
     missive = _email_missive()
     Missive.objects.filter(pk=missive.pk).update(provider="brevo")
     missive.refresh_from_db()

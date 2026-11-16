@@ -79,9 +79,7 @@ class BrevoAPIProvider(MissiveProviderBase):
         secret = self.get_webhook_secret()
         if not secret:
             return {}
-        from pymissive.webhook_auth import brevo_webhook_auth
-
-        return {"auth": brevo_webhook_auth(secret)}
+        return {"auth": {"type": "bearer", "token": secret}}
 
     #########################################################
     # API clients

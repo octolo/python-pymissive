@@ -9,7 +9,7 @@ from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
 from django_boosted.decorators import admin_boost_view  # type: ignore[import-untyped]
 
 from pymissive.config import provider_service_name
-from pymissive.webhook_secret import generate_webhook_secret as make_webhook_secret
+from pymissive.webhook.secret import generate_webhook_secret as make_webhook_secret
 
 from ..forms.webhook import GenerateWebhookSecretForm
 from ..models.webhook import MissiveWebhook
@@ -157,7 +157,12 @@ class MissiveWebhookAdmin(ActionRightsMixin, AdminBoostModel):
     def has_generate_webhook_secret_permission(self, request, obj=None):
         return self.has_action_rights(request, obj)
 
-    @admin_boost_view("adminform", _("Generate webhook secret"), requires_object=False)
+    @admin_boost_view(
+        "adminform",
+        _("Generate webhook secret"),
+        requires_object=False,
+        permission="view_missivewebhook",
+    )
     def generate_webhook_secret(self, request, form=None):
         """Show a secret seeded by provider name, UTC date, and SECRET_KEY."""
         self.require_action_rights(request)

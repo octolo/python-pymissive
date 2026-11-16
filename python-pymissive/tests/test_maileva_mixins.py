@@ -224,7 +224,11 @@ def test_webhook_api_creates_every_event_resource_pair_with_authentication():
 
 
 def test_sending_payload_contracts():
-    provider = _provider(ARCHIVING_DURATION=6, NOTIFICATION_TYPES=["ALL_MAILEVA"])
+    provider = _provider(
+        ARCHIVING_DURATION=6,
+        NOTIFICATION_TYPES=["ALL_MAILEVA"],
+        POSTAGE_TYPE="URGENT",
+    )
     common = {
         "id": 42,
         "subject": "  Contract ",
@@ -234,8 +238,8 @@ def test_sending_payload_contracts():
         "color_printing": "yes",
     }
 
-    letter = provider.get_letter_data(**common, priority="urgent")
-    registered = provider.get_registered_letter_data(**common, acknowledgement="basic_delivery")
+    letter = provider.get_letter_data(**common)
+    registered = provider.get_registered_letter_data(**common)
 
     assert letter["name"] == "Contract"
     assert letter["custom_id"] == "42"
@@ -245,7 +249,7 @@ def test_sending_payload_contracts():
     assert letter["sender_country_code"] == "FR"
     assert letter["notification_email"] == "alerts@example.test"
     assert letter["postage_type"] == "URGENT"
-    assert registered["acknowledgement_of_receipt"] is False
+    assert registered["acknowledgement_of_receipt"] is True
     assert registered["notification_types"] == ["ALL_MAILEVA"]
 
 

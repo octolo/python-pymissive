@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from django.http import StreamingHttpResponse
 
-from django_pymissive.billings import billings_export_queryset, render_billings_csv
+from django_pymissive.services.billings import billings_export_queryset, render_billings_csv
 from django_pymissive.forms.billing import ExportBillingsForm
 from django_pymissive.models.billing import MissiveBilling
 from django_pymissive.models.choices import MissiveType
@@ -182,7 +182,7 @@ def test_csv_without_extra_fields_does_not_resolve_related_objects():
         start_date=date(2026, 1, 1),
         end_date=date(2026, 1, 31),
     )
-    with patch("django_pymissive.billings.related_objects_by_content_type") as related:
+    with patch("django_pymissive.services.billings.related_objects_by_content_type") as related:
         csv_text = render_billings_csv(qs)
     related.assert_not_called()
     assert "1.2500" in csv_text

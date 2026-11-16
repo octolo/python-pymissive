@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from django.test import Client
 from django.urls import reverse
-
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.choices import MissiveStatus, MissiveType
 from django_pymissive.models.missive import Missive
 from django_pymissive.views.preview import template_for_missive
@@ -94,13 +94,16 @@ def test_discord_notification_preview_shows_the_rich_body():
 
 
 def test_campaign_preview_uses_the_brand_and_the_app_body():
-    campaign = MissiveCampaign.objects.create(
-        subject="Compte rendu",
-        phone_body_text="Le document est prêt.",
+    campaign = MissiveCampaign.objects.create(subject="Compte rendu")
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type=MissiveType.BRANDED,
+        body_text="Le document est prêt.",
     )
     url = reverse("django_pymissive:preview", args=["campaign", campaign.pk])
 
-    response = Client().get(url, {"type": "branded", "brand": "teams"})
+    response = Client().get(url, {"type": "branded", "brand": "teams", "step": step.pk})
 
     assert response.status_code == 200
     html = response.content.decode()
@@ -111,10 +114,16 @@ def test_campaign_preview_uses_the_brand_and_the_app_body():
 
 
 def test_campaign_preview_rejects_an_unknown_brand():
-    campaign = MissiveCampaign.objects.create(subject="Compte rendu", phone_body_text="OK")
+    campaign = MissiveCampaign.objects.create(subject="Compte rendu")
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type=MissiveType.BRANDED,
+        body_text="OK",
+    )
     url = reverse("django_pymissive:preview", args=["campaign", campaign.pk])
 
-    response = Client().get(url, {"type": "branded", "brand": "../../etc"})
+    response = Client().get(url, {"type": "branded", "brand": "../../etc", "step": step.pk})
 
     assert response.status_code == 200
     assert "brand-generic" in response.content.decode()
@@ -122,9 +131,15 @@ def test_campaign_preview_rejects_an_unknown_brand():
 
 def test_unsaved_branded_missive_preview_url_carries_the_brand():
     campaign = MissiveCampaign.objects.create(subject="Hello")
-    missive = Missive(campaign=campaign, missive_type=MissiveType.BRANDED, provider="slack")
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type=MissiveType.BRANDED,
+    )
+    missive = Missive(campaign_step=step, missive_type=MissiveType.BRANDED, provider="slack")
 
     path = missive.get_browser_preview_path()
 
     assert "type=branded" in path
     assert "brand=slack" in path
+    assert f"step={step.pk}" in path

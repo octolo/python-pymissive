@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.missive import Missive
 from django_pymissive.models.related_object import (
     CampaignRelatedObject,
@@ -21,10 +22,19 @@ pytestmark = pytest.mark.django_db
 
 
 def _make_email_missive(**overrides) -> Missive:
+    campaign = overrides.pop("campaign", None)
+    campaign_step = None
+    if campaign is not None:
+        campaign_step, _created = CampaignStep.objects.get_or_create(
+            campaign=campaign,
+            missive_type="email",
+            defaults={"position": campaign.to_campaignstep.count() + 1},
+        )
     defaults = {
         "missive_type": "email",
         "subject": "ctx",
         "body_rich": "<p>hi</p>",
+        "campaign_step": campaign_step,
     }
     defaults.update(overrides)
     return Missive.objects.create(**defaults)
@@ -194,3 +204,63 @@ def test_missive_context_singular_is_always_first_of_list():
     assert ctx["pdfdocument"] == ctx["pdfdocument_list"][0]
     # And the singular is the most-recent missive object (most specific).
     assert ctx["pdfdocument"]["name"] == "m3"
+
+
+def test_missive_context_merges_campaign_step_and_missive_values():
+    campaign = MissiveCampaign.objects.create(
+        subject="camp",
+        additional_context={"campaign": 1, "shared": "campaign"},
+    )
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        additional_context={"step": 2, "shared": "step"},
+    )
+    missive = Missive.objects.create(
+        campaign_step=step,
+        missive_type="email",
+        subject="{{ campaign }}-{{ step }}-{{ local }}-{{ shared }}",
+        additional_context={"local": 3, "shared": "missive"},
+    )
+
+    assert missive.resolved_additional_context() == {
+        "campaign": 1,
+        "step": 2,
+        "local": 3,
+        "shared": "missive",
+    }
+    assert missive.subject_compiled == "1-2-3-missive"
+
+
+def test_set_locally_ifnull_freezes_the_resolved_context():
+    campaign = MissiveCampaign.objects.create(
+        subject="camp",
+        additional_context={"campaign": 1, "shared": "campaign"},
+    )
+    step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=1,
+        missive_type="email",
+        additional_context={"step": 2, "shared": "step"},
+    )
+    missive = Missive.objects.create(
+        campaign_step=step,
+        missive_type="email",
+        additional_context={"local": 3, "shared": "missive"},
+    )
+
+    expected = missive.resolved_additional_context()
+    missive.set_locally_ifnull()
+    missive.refresh_from_db()
+
+    assert missive.additional_context == expected
+    assert missive.resolved_additional_context() == expected
+
+
+def test_empty_step_context_keeps_campaign_context():
+    campaign = MissiveCampaign.objects.create(subject="camp", additional_context={"campaign": 1})
+    step = CampaignStep.objects.create(campaign=campaign, position=1, missive_type="email")
+    missive = Missive.objects.create(campaign_step=step, missive_type="email")
+
+    assert missive.resolved_additional_context() == {"campaign": 1}

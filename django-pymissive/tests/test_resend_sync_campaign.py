@@ -1,10 +1,9 @@
 """Tests for ``sync_campaign`` on duplicate/resend and the no-campaign clear guard.
 
 Covers:
-- ``duplicate_missive(sync_campaign=True)`` overwrites campaign-sourced fields
-  with the campaign's current values (incl. the ``sender_name`` →
-  ``sender_email_name`` mapping and ``additional_context``).
-- A campaign-empty field keeps the duplicated missive's local value.
+- ``duplicate_missive(sync_campaign=True)`` overwrites step-sourced fields
+  with the step's current values and copies campaign context.
+- An empty step field keeps the duplicated missive's local value.
 - The default resend path (``sync_campaign=False``) clears campaign-sourced
   fields so they are lazily re-filled at send time.
 - ``clear_campaign_sourced_fields`` is a no-op without a campaign, so resending
@@ -19,6 +18,7 @@ import pytest
 from django.test import override_settings
 
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.choices import MissiveStatus, MissiveType
 from django_pymissive.models.missive import Missive
 
@@ -29,9 +29,19 @@ def _campaign(**kw) -> MissiveCampaign:
     return MissiveCampaign.objects.create(**kw)
 
 
-def _email_missive(campaign=None, **kw) -> Missive:
-    return Missive.objects.create(
+def _step(campaign, missive_type, **kwargs) -> CampaignStep:
+    return CampaignStep.objects.create(
         campaign=campaign,
+        position=1,
+        missive_type=missive_type,
+        **kwargs,
+    )
+
+
+def _email_missive(campaign=None, **kw) -> Missive:
+    if campaign is not None and "campaign_step" not in kw:
+        kw["campaign_step"] = _step(campaign, MissiveType.EMAIL)
+    return Missive.objects.create(
         missive_type=MissiveType.EMAIL,
         status=MissiveStatus.DRAFT,
         **kw,
@@ -41,12 +51,18 @@ def _email_missive(campaign=None, **kw) -> Missive:
 def test_sync_campaign_overwrites_local_overrides():
     campaign = _campaign(
         subject="Campaign subject",
-        email_body_text="Campaign body",
-        sender_email_name="Campaign Sender",
+    )
+    step = _step(
+        campaign,
+        MissiveType.EMAIL,
+        subject="Campaign subject",
+        body_text="Campaign body",
+        sender_name="Campaign Sender",
         sender_email="campaign@example.com",
     )
     missive = _email_missive(
         campaign,
+        campaign_step=step,
         subject="Local subject",
         body_text="Local body",
         sender_name="Local Sender",
@@ -58,7 +74,6 @@ def test_sync_campaign_overwrites_local_overrides():
 
     assert new.subject == "Campaign subject"
     assert new.body_text == "Campaign body"
-    # sender_name maps to the campaign's sender_email_name for email support
     assert new.sender_name == "Campaign Sender"
     assert new.sender_email == "campaign@example.com"
 
@@ -66,8 +81,10 @@ def test_sync_campaign_overwrites_local_overrides():
 def test_sync_campaign_keeps_value_when_campaign_field_empty():
     # Campaign has a subject but no body_text → body_text override is preserved.
     campaign = _campaign(subject="Campaign subject")
+    step = _step(campaign, MissiveType.EMAIL, subject="Campaign subject")
     missive = _email_missive(
         campaign,
+        campaign_step=step,
         subject="Local subject",
         body_text="Local body",
     )
@@ -94,8 +111,10 @@ def test_sync_campaign_copies_additional_context():
 
 def test_default_resend_clears_campaign_sourced_fields():
     campaign = _campaign(subject="Campaign subject")
+    step = _step(campaign, MissiveType.EMAIL, subject="Campaign subject", body_text="Campaign body")
     missive = _email_missive(
         campaign,
+        campaign_step=step,
         subject="Local subject",
         body_text="Local body",
     )
@@ -109,8 +128,9 @@ def test_default_resend_clears_campaign_sourced_fields():
 
 
 def _letter_missive(campaign=None, **kw) -> Missive:
+    if campaign is not None and "campaign_step" not in kw:
+        kw["campaign_step"] = _step(campaign, MissiveType.LETTER)
     return Missive.objects.create(
-        campaign=campaign,
         missive_type=MissiveType.LETTER,
         status=MissiveStatus.DRAFT,
         **kw,
@@ -130,13 +150,11 @@ def test_letter_printing_defaults_to_duplex_true_color_false():
 
 
 def test_letter_printing_local_false_is_kept():
-    campaign = _campaign(
-        subject="Postal campaign",
-        duplex_printing_letter=True,
-        color_printing_letter=True,
-    )
+    campaign = _campaign(subject="Postal campaign")
+    step = _step(campaign, MissiveType.LETTER, duplex_printing=True, color_printing=False)
     missive = _letter_missive(
         campaign,
+        campaign_step=step,
         duplex_printing=False,
         color_printing=False,
     )
@@ -150,15 +168,15 @@ def test_letter_printing_local_false_is_kept():
 
 
 def test_registered_letter_printing_uses_registered_campaign_fields():
-    campaign = _campaign(
-        subject="Postal campaign",
-        duplex_printing_letter=True,
-        color_printing_letter=False,
-        duplex_printing_registered_letter=False,
-        color_printing_registered_letter=True,
+    campaign = _campaign(subject="Postal campaign")
+    registered_step = _step(
+        campaign,
+        MissiveType.REGISTERED_LETTER,
+        duplex_printing=False,
+        color_printing=True,
     )
     missive = Missive.objects.create(
-        campaign=campaign,
+        campaign_step=registered_step,
         missive_type=MissiveType.REGISTERED_LETTER,
         status=MissiveStatus.DRAFT,
         duplex_printing=True,
@@ -170,8 +188,16 @@ def test_registered_letter_printing_uses_registered_campaign_fields():
 
     assert new.duplex_printing is False
     assert new.color_printing is True
+    letter_step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=2,
+        missive_type=MissiveType.LETTER,
+        duplex_printing=True,
+        color_printing=False,
+    )
     letter = _letter_missive(
         campaign,
+        campaign_step=letter_step,
         duplex_printing=True,
         color_printing=True,
     )
@@ -196,13 +222,11 @@ def test_campaign_named_id_uses_settings_generator():
 
 
 def test_sync_campaign_applies_letter_printing_false():
-    campaign = _campaign(
-        subject="Postal campaign",
-        duplex_printing_letter=False,
-        color_printing_letter=False,
-    )
+    campaign = _campaign(subject="Postal campaign")
+    step = _step(campaign, MissiveType.LETTER, duplex_printing=False, color_printing=False)
     missive = _letter_missive(
         campaign,
+        campaign_step=step,
         duplex_printing=True,
         color_printing=True,
     )
@@ -228,3 +252,42 @@ def test_clear_is_noop_without_campaign():
     assert new.subject == "Keep me"
     assert new.body_text == "Keep body"
     assert new.sender_name == "Keep Sender"
+
+
+@override_settings(PYMISSIVE_DEFAULT_SENDER={})
+def test_resend_paths_follow_every_email_sourced_field():
+    fields = Missive.get_campaign_sourced_fields("email")
+    step_values = {
+        "subject": "Step subject",
+        "body_rich": "<p>step</p>",
+        "body_rich_snapshot_html": "<p>step snapshot</p>",
+        "body_text": "step text",
+        "sender_name": "Step Sender",
+        "sender_email": "step@example.com",
+        "reply_to_name": "Step Reply",
+        "reply_to_email": "reply-step@example.com",
+    }
+    local_values = {
+        "subject": "Local subject",
+        "body_rich": "<p>local</p>",
+        "body_rich_snapshot_html": "<p>local snapshot</p>",
+        "body_text": "local text",
+        "sender_name": "Local Sender",
+        "sender_email": "local@example.com",
+        "reply_to_name": "Local Reply",
+        "reply_to_email": "reply-local@example.com",
+    }
+    assert set(step_values) == set(fields)
+    campaign = _campaign(subject="Campaign")
+    step = _step(campaign, MissiveType.EMAIL, **step_values)
+    missive = _email_missive(campaign, campaign_step=step, **local_values)
+
+    synced = missive.duplicate_missive(resend=True, sync_campaign=True)
+    synced.refresh_from_db()
+    for name in fields:
+        assert getattr(synced, name) == getattr(step, name)
+
+    cleared = missive.duplicate_missive(resend=True, sync_campaign=False)
+    cleared.refresh_from_db()
+    for name in fields:
+        assert getattr(cleared, name) in (None, "")

@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 import pytest
 
-from django_pymissive.billings import fetch_missive_billings
-from django_pymissive.events import _process_event
+from django_pymissive.services.billings import fetch_missive_billings
+from django_pymissive.services.events import _process_event
 from django_pymissive.models import MissiveEvent, MissiveRecipientEmail, MissiveStatus, MissiveType
 from django_pymissive.models.choices import MissiveEventType
 from django_pymissive.models.missive import Missive

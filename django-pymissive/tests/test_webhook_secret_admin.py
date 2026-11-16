@@ -11,7 +11,7 @@ from django.test import Client
 from django.urls import reverse
 
 from django_pymissive.forms.webhook import GenerateWebhookSecretForm
-from pymissive.webhook_secret import generate_webhook_secret
+from pymissive.webhook.secret import generate_webhook_secret
 
 pytestmark = pytest.mark.django_db
 

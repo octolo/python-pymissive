@@ -202,63 +202,6 @@ def missive_types_for_support(support: str) -> list[str]:
     return list(GENERIC_SUPPORT.get(normalize_support(support), []))
 
 
-PRIORITIES = ["low", "normal", "high", "urgent"]
-DELIVERY_MODES = ["economic", "normal", "premium", "express"]
-
-MISSIVE_ACKNOWLEDGEMENT_LEVELS = [
-    {
-        "level": 0,
-        "name": "basic_delivery",
-        "display_name": "Basic delivery",
-        "description": "Message sent / delivered. No proof of reading or identity.",
-        "identity_verification": False,
-        "signature": False,
-        "legal_value": "Technical only",
-        "means": [],
-    },
-    {
-        "level": 1,
-        "name": "acknowledgement_of_receipt",
-        "display_name": "Acknowledgement of receipt",
-        "description": "Recipient confirms receipt. No strong identity verification.",
-        "identity_verification": False,
-        "signature": False,
-        "legal_value": None,
-        "means": ["Reply email", "Acknowledge button"],
-    },
-    {
-        "level": 2,
-        "name": "authenticated_acknowledgement",
-        "display_name": "Authenticated acknowledgement",
-        "description": "Receipt confirmed. Authenticated identity (login, OTP, SSO).",
-        "identity_verification": True,
-        "signature": False,
-        "legal_value": None,
-        "means": ["User account", "MFA / OTP", "Secure portal"],
-    },
-    {
-        "level": 3,
-        "name": "signed_acknowledgement",
-        "display_name": "Signed acknowledgement",
-        "description": "Receipt confirmed. Electronic signature. Full traceability.",
-        "identity_verification": True,
-        "signature": True,
-        "legal_value": None,
-        "means": ["Simple or advanced e-signature"],
-    },
-    {
-        "level": 4,
-        "name": "qualified_acknowledgement",
-        "display_name": "Qualified / legally binding acknowledgement",
-        "description": "Receipt + high-level verified identity + Qualified signature.",
-        "identity_verification": True,
-        "signature": True,
-        "legal_value": "Strong legal value (eIDAS)",
-        "means": ["eIDAS qualified signature", "eDelivery / eRegistered mail"],
-    },
-]
-
-
 MISSIVE_SERVICES: dict[str, dict[str, Any]] = {
     "missive": {
         "services": missive.SERVICES,

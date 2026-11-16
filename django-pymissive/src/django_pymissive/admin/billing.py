@@ -9,7 +9,7 @@ from django.utils.translation import gettext_lazy as _
 
 from django_boosted import AdminBoostModel, admin_boost_view  # type: ignore[import-untyped]
 
-from ..billings import (
+from ..services.billings import (
     billings_export_queryset,
     delay_retrieve_billings,
     iter_billings_csv,

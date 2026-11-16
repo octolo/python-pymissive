@@ -7,7 +7,7 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from django_pymissive.models import MissiveCampaign, MissiveScheduledCampaign
+from django_pymissive.models import CampaignStep, MissiveCampaign, MissiveScheduledCampaign
 
 pytestmark = pytest.mark.django_db
 
@@ -137,6 +137,8 @@ def test_inline_adds_runs_but_leaves_existing_ones_untouched():
 
     run = _run(comment="kept")
     campaign = run.campaign
+    email = CampaignStep.objects.create(campaign=campaign, position=1, missive_type="email")
+    sms = CampaignStep.objects.create(campaign=campaign, position=2, missive_type="sms")
     request = RequestFactory().post("/")
     request.user = get_user_model().objects.create_superuser(username="admin", email="admin@example.com", password="x")
     inline = next(
@@ -151,9 +153,9 @@ def test_inline_adds_runs_but_leaves_existing_ones_untouched():
         f"{prefix}-INITIAL_FORMS": "1",
         f"{prefix}-0-id": str(run.pk),
         f"{prefix}-0-campaign": str(campaign.pk),
-        f"{prefix}-0-missive_type": "sms",
+        f"{prefix}-0-campaign_steps": [str(sms.pk)],
         f"{prefix}-1-campaign": str(campaign.pk),
-        f"{prefix}-1-missive_type": "email",
+        f"{prefix}-1-campaign_steps": [str(email.pk)],
     }
     formset = FormSet(data, instance=campaign, prefix=prefix)
 
@@ -161,5 +163,6 @@ def test_inline_adds_runs_but_leaves_existing_ones_untouched():
     formset.save()
 
     run.refresh_from_db()
-    assert run.missive_type != "sms"
-    assert campaign.to_missivecampaignsend.filter(missive_type="email").exclude(pk=run.pk).exists()
+    assert not run.campaign_steps.exists()
+    created = campaign.to_missivecampaignsend.exclude(pk=run.pk).get()
+    assert list(created.campaign_steps.all()) == [email]

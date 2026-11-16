@@ -18,6 +18,7 @@ python-missive/
 │       │   └── hand_delivery.py, fake.py
 │       ├── commands/         # CLI commands and packaged help
 │       ├── config/           # Types and field definitions
+│       ├── webhook/          # Authentication and secret-generation helpers
 │       ├── cli.py, __main__.py
 │       └── utils.py
 ├── tests/                    # Test suite
@@ -38,7 +39,7 @@ python-missive/
 The `providers/` directory contains message provider implementations:
 
 - **`base/`**: `MissiveProviderBase` plus the mixins that hold real behaviour
-  (`acknowledgement`, `attachments`, `branded`). Channel types (`email`, `sms`,
+  (`attachments`, `branded`). Channel types (`email`, `sms`,
   `registered_letter`, …) are services in the config; ProviderKit raises if the method is missing.
 - **`brevo/` and `maileva/`**: larger providers grouped into packages while
   retaining the public imports `pymissive.providers.brevo` and

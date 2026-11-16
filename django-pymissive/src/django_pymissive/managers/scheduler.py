@@ -1,7 +1,8 @@
 """Manager for MissiveScheduledCampaign model."""
 
 from django.db import models
-from django.db.models import Q
+from django.db.models import Exists, F, OuterRef, Q, Subquery, Value
+from django.db.models.functions import Coalesce
 from pymissive.config import GENERIC_SUPPORT, MISSIVE_TYPES
 
 from ..models.choices import (
@@ -58,6 +59,47 @@ def thread_annotation_name(thread: str) -> str:
     return f"count_thread_{thread}"
 
 
+def live_error_count_expr():
+    """Live failures this run would requeue, on its selected steps.
+
+    ``ERROR``, ``FAILED`` and ``PARTIALLY_FAILED`` with ``thread_type=MISSIVE``.
+    An empty step selection means every step of the campaign, except when
+    ``additional_config['step_scope']`` is ``none``: that run selected nothing
+    and counts zero. Archived attempts and conversation messages stay out, and
+    the count is not limited to missives already attached to this run: a
+    failure still belongs to the run that produced it until the retry archives
+    it.
+    """
+    from ..models.missive import Missive
+    from ..models.scheduler import MissiveScheduledCampaign
+
+    through = MissiveScheduledCampaign.campaign_steps.through
+    selected_for_this_step = through.objects.filter(
+        missivescheduledcampaign_id=OuterRef(OuterRef("pk")),
+        campaignstep_id=OuterRef("campaign_step_id"),
+    )
+    any_selected_step = through.objects.filter(
+        missivescheduledcampaign_id=OuterRef(OuterRef("pk")),
+    )
+    scoped_to_nothing = MissiveScheduledCampaign.objects.filter(
+        pk=OuterRef(OuterRef("pk")),
+        additional_config__step_scope="none",
+    )
+    rows = (
+        Missive._base_manager.filter(
+            campaign_step__campaign_id=OuterRef("campaign_id"),
+            thread_type=MissiveThreadType.MISSIVE,
+            status__in=ERROR_STATUSES,
+        )
+        .filter(Exists(selected_for_this_step) | (~Exists(any_selected_step) & ~Exists(scoped_to_nothing)))
+        .order_by()
+        .values("campaign_step__campaign_id")
+        .annotate(n=models.Count("pk"))
+        .values("n")
+    )
+    return Coalesce(Subquery(rows, output_field=models.IntegerField()), Value(0))
+
+
 def count_attempt_expr(*conditions: Q):
     """``Count`` of the run's send attempts — live rows *and* archived ones.
 
@@ -87,25 +129,29 @@ def count_annotations() -> dict:
     counts = {}
     for missive_type in MISSIVE_TYPES:
         type_q = Q(**{f"{_M}__missive_type": missive_type})
-        counts[total_annotation_name(missive_type)] = count_missive_expr(type_q)
+        counts[total_annotation_name(missive_type)] = count_missive_expr(type_q, lookup=_M)
         counts[sent_annotation_name(missive_type)] = count_missive_expr(
             type_q,
             sent_missive_q(prefix=_M),
+            lookup=_M,
         )
         counts[error_annotation_name(missive_type)] = count_missive_expr(
             type_q,
             error_missive_q(prefix=_M),
+            lookup=_M,
         )
     for support in GENERIC_SUPPORT:
         support_q = Q(**missive_type_filter(support, prefix=_M))
-        counts[support_count_name(support)] = count_missive_expr(support_q)
+        counts[support_count_name(support)] = count_missive_expr(support_q, lookup=_M)
         counts[support_count_name(support, "sent")] = count_missive_expr(
             support_q,
             sent_missive_q(prefix=_M),
+            lookup=_M,
         )
         counts[support_count_name(support, "error")] = count_missive_expr(
             support_q,
             error_missive_q(prefix=_M),
+            lookup=_M,
         )
     for status in MissiveStatus:
         counts[status_annotation_name(status)] = count_attempt_expr(
@@ -118,10 +164,11 @@ def count_annotations() -> dict:
     # Direct aggregates rather than a sum of the per-type buckets: a missive
     # whose type is not in MISSIVE_TYPES — never set, or left behind by a
     # renamed type — belongs to no bucket and would vanish from the run.
-    counts["count_total"] = count_missive_expr()
-    counts["count_sent"] = count_missive_expr(sent_missive_q(prefix=_M))
-    counts["count_pending"] = count_missive_expr(pending_missive_q(prefix=_M))
-    counts["count_error"] = count_missive_expr(error_missive_q(prefix=_M))
+    counts["count_total"] = count_missive_expr(lookup=_M)
+    counts["count_sent"] = count_missive_expr(sent_missive_q(prefix=_M), lookup=_M)
+    counts["count_pending"] = count_missive_expr(pending_missive_q(prefix=_M), lookup=_M)
+    counts["count_error"] = count_missive_expr(error_missive_q(prefix=_M), lookup=_M)
+    counts["count_live_error"] = live_error_count_expr()
     return counts
 
 
@@ -139,7 +186,10 @@ class MissiveScheduledCampaignQuerySet(models.QuerySet):
       ``thread_type=MISSIVE`` only, so a counter of that name means the same
       thing on a campaign and on one of its runs. It drives the progress bar,
       and it moves when a row leaves the live set (a draft reclaimed by a newer
-      run, an attempt archived by a retry).
+      run, an attempt archived by a retry). ``count_live_error`` is the live
+      failures on the steps this run would send, including those still attached
+      to an earlier run. ``with_counts`` adds it to ``count_pending`` when
+      ``retry_failed`` is set.
     * **What the run dispatched** — ``count_missive_<status>`` and
       ``count_thread_<type>`` — goes through :func:`count_attempt_expr` and
       keeps the archived attempts, so a finished run never loses the failures it
@@ -159,7 +209,21 @@ class MissiveScheduledCampaignQuerySet(models.QuerySet):
     """
 
     def with_counts(self):
-        return self.annotate(**count_annotations())
+        pending = F("count_pending") + models.Case(
+            models.When(
+                retry_failed=True,
+                send_date__isnull=True,
+                ended_at__isnull=True,
+                cancelled_at__isnull=True,
+                then=F("count_live_error"),
+            ),
+            default=Value(0),
+            output_field=models.IntegerField(),
+        )
+        return self.annotate(
+            **count_annotations(),
+            send_speed=models.Avg(f"{_M}__send_speed"),
+        ).annotate(count_pending=pending)
 
     def sending(self) -> list:
         """Runs a live worker is sending (see ``MissiveScheduledCampaign.is_sending``).

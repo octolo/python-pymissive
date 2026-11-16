@@ -1,109 +1,98 @@
 {% extends "django_pymissive/base_preview.html" %}
 {% load static i18n %}
-
 {% block preview_stylesheet %}
-<link rel="stylesheet" href="{% static 'django_pymissive/css/letter_page.css' %}">
-<link rel="stylesheet" href="{% static 'django_pymissive/css/postal_preview.css' %}">
+  <link rel="stylesheet"
+        href="{% static 'django_pymissive/css/letter_page.css' %}">
+  <link rel="stylesheet"
+        href="{% static 'django_pymissive/css/postal_preview.css' %}">
 {% endblock %}
-
 {% block preview_content %}
-<div class="postal-preview">
-
+  <div class="postal-preview">
     <div class="postal-recipient-picker-bar no-print">
-        {% include "django_pymissive/includes/postal_recipient_preview_nav.html" %}
+      {% include "django_pymissive/includes/postal_recipient_preview_nav.html" %}
     </div>
-
     <div class="envelope">
-        <div class="address-block sender-block">
-            <div class="address-label">{% trans "Sender" %}</div>
-            {% if sender.name %}<div class="address-name">{{ sender.name }}</div>{% endif %}
-            {% for line in sender_address.text_3lines %}
-            <div class="address-line">{{ line|join:" " }}</div>
-            {% empty %}
-            <div class="address-empty">{% trans "Not filled in" %}</div>
-            {% endfor %}
-        </div>
-        {% if delivery_mode_display or priority_display or acknowledgement_display %}
-        <div class="postal-meta">
-            {% if delivery_mode_display %}
-            <span class="meta-badge meta-delivery">{{ delivery_mode_display }}<small>{% trans "Delivery Mode" %}</small></span>
-            {% endif %}
-            {% if priority_display %}
-            <span class="meta-badge meta-priority">{{ priority_display }}<small>{% trans "Priority" %}</small></span>
-            {% endif %}
-            {% if acknowledgement_display %}
-            <span class="meta-badge meta-ack">{{ acknowledgement_display }}<small>{% trans "Acknowledgement Level" %}</small></span>
-            {% endif %}
-        </div>
-        {% endif %}
+      <div class="address-block sender-block">
+        <div class="address-label">{% trans "Sender" %}</div>
+        {% if sender.name %}<div class="address-name">{{ sender.name }}</div>{% endif %}
+        {% for line in sender_address.text_3lines %}
+          <div class="address-line">{{ line|join:" " }}</div>
+        {% empty %}
+          <div class="address-empty">{% trans "Not filled in" %}</div>
+        {% endfor %}
+      </div>
     </div>
-
     <div class="postal-preview-actions no-print">
-        {% if campaign %}
+      {% if campaign_step %}
+        <a href="{% url 'django_pymissive:download_pdf_campaign_step' campaign_step.pk %}"
+           class="postal-preview-actions__link">{% trans "Download PDF" %}</a>
+      {% elif campaign %}
         <a href="{% url 'django_pymissive:download_pdf' 'campaign' campaign.pk %}?type={{ campaign_preview_kind|urlencode }}"
-           class="postal-preview-actions__link">
-            {% trans "Download PDF" %}
-        </a>
-        {% elif postal_letter_recipient_pk %}
+           class="postal-preview-actions__link">{% trans "Download PDF" %}</a>
+      {% elif postal_letter_recipient_pk %}
         <a href="{% url 'django_pymissive:download_pdf_recipient' 'missive' missive.pk postal_letter_recipient_pk %}"
-           class="postal-preview-actions__link">
-            {% trans "Download PDF" %}
-        </a>
-        {% elif missive.is_persisted %}
+           class="postal-preview-actions__link">{% trans "Download PDF" %}</a>
+      {% elif missive.is_persisted %}
         <a href="{% url 'django_pymissive:download_pdf' 'missive' missive.pk %}"
-           class="postal-preview-actions__link">
-            {% trans "Download PDF" %}
-        </a>
-        {% endif %}
+           class="postal-preview-actions__link">{% trans "Download PDF" %}</a>
+      {% endif %}
     </div>
-
     {% if missive.is_persisted %}
-        {% comment %}
+      {% comment %}
         Saved missive: every PDF physical attachment in priority order
         (first_document at priority 0, then user attachments). Non-PDF skipped.
-        {% endcomment %}
-        {% for doc in missive.attachments_physical %}
-            {% include "django_pymissive/includes/postal_pdf_attachment_preview.html" %}
-        {% endfor %}
+      {% endcomment %}
+      {% for doc in missive.attachments_physical %}
+        {% include "django_pymissive/includes/postal_pdf_attachment_preview.html" %}
+      {% endfor %}
     {% else %}
-        {% comment %}
+      {% comment %}
         Campaign preview: render the letter as a PDF (via download_pdf, which
         runs body_to_pdf and the full first_document_processors chain incl.
         watermark) instead of inline HTML, so the preview matches what the
         recipient receives. Fall back to inline HTML when no campaign is
         bound (e.g. ad-hoc unsaved missive preview). Other PDF attachments
         follow underneath, also via PDF.js.
-        {% endcomment %}
-        {% if campaign %}
+      {% endcomment %}
+      {% if campaign_step %}
+        <div class="pdf-attachment"
+             data-pdf-url="{% url 'django_pymissive:download_pdf_campaign_step' campaign_step.pk %}">
+          <div class="pdf-attachment-label">
+            <span aria-hidden="true">📄</span>
+            <span class="pdf-attachment-name">{% trans "Letter (first page)" %}</span>
+          </div>
+          <div class="pdf-pages">
+            <div class="pdf-loading">{% trans "Loading…" %}</div>
+          </div>
+        </div>
+      {% elif campaign %}
         <div class="pdf-attachment"
              data-pdf-url="{% url 'django_pymissive:download_pdf' 'campaign' campaign.pk %}?type={{ campaign_preview_kind|urlencode }}">
-            <div class="pdf-attachment-label">
-                <span aria-hidden="true">&#128196;</span>
-                <span class="pdf-attachment-name">{% trans "Letter (first page)" %}</span>
-            </div>
-            <div class="pdf-pages">
-                <div class="pdf-loading">{% trans "Loading…" %}</div>
-            </div>
+          <div class="pdf-attachment-label">
+            <span aria-hidden="true">📄</span>
+            <span class="pdf-attachment-name">{% trans "Letter (first page)" %}</span>
+          </div>
+          <div class="pdf-pages">
+            <div class="pdf-loading">{% trans "Loading…" %}</div>
+          </div>
         </div>
-        {% else %}
-            {% include "django_pymissive/includes/postal_a4_letter_page.html" %}
+      {% else %}
+        {% include "django_pymissive/includes/postal_a4_letter_page.html" %}
+      {% endif %}
+      {% for doc in missive.attachments_physical %}
+        {% if not doc.is_first_document %}
+          {% include "django_pymissive/includes/postal_pdf_attachment_preview.html" %}
         {% endif %}
-        {% for doc in missive.attachments_physical %}
-            {% if not doc.is_first_document %}
-                {% include "django_pymissive/includes/postal_pdf_attachment_preview.html" %}
-            {% endif %}
-        {% endfor %}
+      {% endfor %}
     {% endif %}
-
-</div>
+  </div>
 {% endblock %}
-
 {% block preview_scripts %}
-{% trans "PDF.js unavailable." as pdfjs_msg_unavailable %}
-{% trans "Open attachment" as pdfjs_msg_open %}
-{% trans "Could not render document" as pdfjs_msg_error %}
-<script src="{% static 'django_pymissive/js/pdfjs/pdf.min.js' %}"></script>
-<script>
+  {% trans "PDF.js unavailable." as pdfjs_msg_unavailable %}
+  {% trans "Open attachment" as pdfjs_msg_open %}
+  {% trans "Could not render document" as pdfjs_msg_error %}
+  <script src="{% static 'django_pymissive/js/pdfjs/pdf.min.js' %}"></script>
+  <script>
 (function () {
     var MSG_UNAVAILABLE = '{{ pdfjs_msg_unavailable|escapejs }}';
     var MSG_OPEN        = '{{ pdfjs_msg_open|escapejs }}';
@@ -170,5 +159,5 @@
 
     document.querySelectorAll('.pdf-attachment[data-pdf-url]').forEach(renderAttachment);
 })();
-</script>
+  </script>
 {% endblock %}

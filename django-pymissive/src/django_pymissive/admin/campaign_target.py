@@ -47,7 +47,7 @@ class TargetStateFilter(admin.SimpleListFilter):
     title = _("State")
     parameter_name = "state"
 
-    def lookups(self, request, model_admin):
+    def lookups(self, request, _model_admin):
         return [(key, label) for key, (label, _condition) in TARGET_STATES.items()]
 
     def queryset(self, request, queryset):
@@ -89,10 +89,10 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
     list_display_links = ["object_str"]
     list_filter = [
         TargetStateFilter,
-        "missive_type",
+        "campaign_step__missive_type",
         "created_at",
     ]
-    list_select_related = ("campaign", "content_type", "missive")
+    list_select_related = ("campaign", "campaign_step", "content_type", "missive")
     search_fields = [
         "object_str",
         "object_id",
@@ -109,8 +109,13 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
         "created_at",
         "updated_at",
     ]
-    raw_id_fields = ["campaign", "missive"]
+    raw_id_fields = ["campaign", "campaign_step", "missive"]
     actions = ["abandon_selected"]
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and not obj.can_remove:
+            return False
+        return super().has_delete_permission(request, obj)
 
     def change_fieldsets(self):
         """Configure fieldsets for the change view."""
@@ -118,7 +123,7 @@ class CampaignTargetAdmin(ActionRightsMixin, AdminBoostModel, BaseRelatedObjectA
             None,
             [
                 "campaign",
-                "missive_type",
+                "campaign_step",
                 "content_type",
                 "object_id",
                 "object_url_link_display",

@@ -1,5 +1,7 @@
 """Queryset for campaign selection rows."""
 
+from typing import cast
+
 from django.db import models
 from django.db.models import OuterRef, Subquery, Value
 from django.db.models.functions import Coalesce
@@ -43,7 +45,10 @@ class CampaignTargetQuerySet(models.QuerySet):
         One query for the generic targets of the chunk, one for the
         sub-targets. Reading either afterwards does not hit the database.
         """
-        return self.prefetch_related("target", "to_campaignrecipienttarget")
+        return self.select_related("campaign_step").prefetch_related(
+            "target",
+            "to_campaignrecipienttarget",
+        )
 
     def with_target_count(self):
         """Annotate the number of explicitly selected contact values."""
@@ -62,6 +67,23 @@ class CampaignTargetQuerySet(models.QuerySet):
                 Value(0),
             ),
         )
+
+    def delete(self):
+        """Refuse when any selected row points at a missive past draft."""
+        from django.db.models.deletion import ProtectedError
+        from django.utils.translation import gettext as _
+
+        from ..models.choices import sent_missive_q
+        from ..models.missive import Missive
+
+        blocked = self.filter(sent_missive_q("missive"))
+        if blocked.exists():
+            protected = set(Missive._base_manager.filter(pk__in=blocked.values("missive_id")))
+            raise ProtectedError(
+                _("Cannot delete a campaign target whose missive has left the draft state."),
+                cast(set[models.Model], protected or set(blocked)),
+            )
+        return super().delete()
 
 
 CampaignTargetManager = models.Manager.from_queryset(CampaignTargetQuerySet)

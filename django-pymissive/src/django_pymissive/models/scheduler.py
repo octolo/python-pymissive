@@ -26,7 +26,7 @@ from ..managers.scheduler import (
     thread_annotation_name,
     total_annotation_name,
 )
-from ..models.choices import MissiveStatus, MissiveThreadType, MissiveType, sent_missive_q
+from ..models.choices import MissiveStatus, MissiveThreadType, sent_missive_q
 from ..models.missive import MissiveAlreadySending
 from ..models.mixins import CommentTimestampedModel
 from ..utils import (
@@ -40,7 +40,8 @@ from ..utils import (
 
 logger = logging.getLogger(__name__)
 
-MISSIVE_TYPE_ALL = "*"
+#: ``get_missives`` / ``process_missives`` default: use the run's selected steps.
+_ANY_STEP = object()
 
 
 def _resolve_task_method(obj, method_name: str):
@@ -92,8 +93,10 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
     sent. What the run *did* send stays put — see ``counts_by_status`` and
     ``history_count``, which keep the attempts a retry has archived.
 
-    ``average_send_speed`` is stored, not derived: seconds per missive sent,
-    rewritten at each progress step from the sent count just refreshed.
+    ``average_send_speed`` is stored when the run ends: the seconds between
+    ``send_date`` and ``ended_at``, divided by the number of missives sent.
+    It is the wall-clock pace. The mean of each missive's ``send_speed`` is a
+    separate annotation, so parallel sends can make the two differ.
     """
 
     id = models.UUIDField(
@@ -135,16 +138,17 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         editable=False,
         verbose_name=_("Average speed per send"),
         help_text=_(
-            "Average seconds per missive sent, measured from the start of this run. "
-            "Refreshed at each progress step, together with the sent count."
+            "Wall-clock seconds per missive sent, from this run's send date to its end. "
+            "Stored when the run ends. Parallel sends make it differ from the mean "
+            "of each missive's own send speed."
         ),
     )
-    missive_type = models.CharField(
-        max_length=50,
-        default=MISSIVE_TYPE_ALL,
-        choices=[(MISSIVE_TYPE_ALL, _("All types"))] + MissiveType.choices,
-        verbose_name=_("Missive type"),
-        help_text=_("Restrict sending to missives of this type. '*' sends every type (default)."),
+    campaign_steps = models.ManyToManyField(
+        "django_pymissive.CampaignStep",
+        blank=True,
+        related_name="to_scheduled_campaign",
+        verbose_name=_("Campaign steps"),
+        help_text=_("Steps sent by this run. Leave empty to send every step in the campaign."),
     )
     retry_failed = models.BooleanField(
         default=False,
@@ -338,12 +342,32 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         self.__dict__.pop("_pending_targets_cache", None)
         return self
 
+    def selected_campaign_steps(self) -> list:
+        """Selected steps in campaign order; an empty M2M means every step.
+
+        ``step_scope`` ``none`` is a stored scope that matched no step. That
+        run stays empty instead of widening to every step of the campaign.
+        """
+        steps = list(self.campaign_steps.all())
+        if not steps:
+            config = self.additional_config if isinstance(self.additional_config, dict) else {}
+            if config.get("step_scope") == "none":
+                return []
+            steps = list(self.campaign.to_campaignstep.all())
+        return sorted(
+            (step for step in steps if step.campaign_id == self.campaign_id),
+            key=lambda step: (step.position, step.pk),
+        )
+
+    def selected_campaign_step_ids(self) -> list:
+        """Primary keys of the steps this run processes."""
+        return [step.pk for step in self.selected_campaign_steps()]
+
     def selection_channels(self) -> list[str]:
-        """Channels a selection run builds, narrowed by ``missive_type``."""
-        channels = list((self.additional_config or {}).get("missive_types") or [])
-        if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
-            channels = [channel for channel in channels if channel == self.missive_type]
-        return channels
+        """Channels built by a selection run, derived from its selected steps."""
+        if self._campaign_has_steps():
+            return list(dict.fromkeys(step.missive_type for step in self.selected_campaign_steps()))
+        return list((self.additional_config or {}).get("missive_types") or [])
 
     def pending_targets_by_type(self) -> dict:
         """Targets of an open selection run with no missive yet, per channel.
@@ -355,20 +379,17 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             return {}
         cache = self.__dict__.get("_pending_targets_cache")
         if cache is None:
-            from django.db.models import Count
+            from django.db.models import Count, F
 
             from .campaign_target import CampaignTarget
 
-            rows = (
-                CampaignTarget.objects.filter(
-                    CampaignTarget.active_q(),
-                    campaign_id=self.campaign_id,
-                    missive_type__in=self.selection_channels(),
-                )
-                .values("missive_type")
-                .order_by()
-                .annotate(n=Count("id"))
+            targets = CampaignTarget.objects.filter(
+                CampaignTarget.active_q(),
+                campaign_id=self.campaign_id,
+                campaign_step__missive_type__in=self.selection_channels(),
             )
+            targets = targets.filter(campaign_step_id__in=self.selected_campaign_step_ids())
+            rows = targets.values(missive_type=F("campaign_step__missive_type")).order_by().annotate(n=Count("id"))
             cache = {row["missive_type"]: row["n"] for row in rows}
             self.__dict__["_pending_targets_cache"] = cache
         return cache
@@ -376,7 +397,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
     @classmethod
     def prefetch_pending_targets(cls, runs) -> None:
         """Fill :meth:`pending_targets_by_type` for many runs in one query."""
-        from django.db.models import Count
+        from django.db.models import Count, F
 
         from .campaign_target import CampaignTarget
 
@@ -388,18 +409,27 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
                 CampaignTarget.active_q(),
                 campaign_id__in={run.campaign_id for run in open_runs},
             )
-            .values("campaign_id", "missive_type")
+            .values(
+                "campaign_id",
+                "campaign_step_id",
+                missive_type=F("campaign_step__missive_type"),
+            )
             .order_by()
             .annotate(n=Count("id"))
         )
         by_campaign: dict = {}
         for row in rows:
-            by_campaign.setdefault(row["campaign_id"], {})[row["missive_type"]] = row["n"]
+            key = (row["campaign_step_id"], row["missive_type"])
+            by_campaign.setdefault(row["campaign_id"], {})[key] = row["n"]
         for run in open_runs:
             pending = by_campaign.get(run.campaign_id, {})
-            run.__dict__["_pending_targets_cache"] = {
-                channel: pending[channel] for channel in run.selection_channels() if channel in pending
-            }
+            step_ids = set(run.selected_campaign_step_ids()) if run._campaign_has_steps() else {None}
+            channels = set(run.selection_channels())
+            totals: dict[str, int] = {}
+            for (step_id, channel), count in pending.items():
+                if step_id in step_ids and channel in channels:
+                    totals[channel] = totals.get(channel, 0) + count
+            run.__dict__["_pending_targets_cache"] = totals
 
     def _count(self, name):
         """Annotated counter if present on the instance, else a live lookup."""
@@ -490,7 +520,12 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
 
     @property
     def total_pending_count(self):
-        """Missives of this run still waiting to be sent, unbuilt targets included."""
+        """Missives of this run still waiting to be sent, unbuilt targets included.
+
+        ``count_pending`` already includes ``count_live_error`` when
+        ``retry_failed`` is set: those failures are not drafts yet, but this
+        run will duplicate and send them.
+        """
         return self._count("count_pending") + sum(self.pending_targets_by_type().values())
 
     @property
@@ -540,11 +575,12 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
                 "label": str(MissiveStatus(status).label),
                 "count": count,
             }
+        measured = self.measured_send_speed()
         return {
             "id": str(self.pk),
             "campaign_id": str(self.campaign_id),
             "campaign_subject": self.campaign.subject,
-            "missive_type": self.missive_type,
+            "campaign_step_ids": [str(pk) for pk in self.selected_campaign_step_ids()],
             "status": self.run_status,
             "running": self.is_running,
             "scheduled_send_date": (self.scheduled_send_date.isoformat() if self.scheduled_send_date else None),
@@ -560,6 +596,8 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             "progress": self.progress,
             "average_send_speed": self.average_send_speed,
             "average_send_speed_display": format_average_send_speed(self.average_send_speed),
+            "send_speed": measured,
+            "send_speed_display": format_average_send_speed(measured),
             "by_type": by_type,
             "by_status": by_status,
         }
@@ -708,10 +746,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             # send them. Re-claiming costs nothing and takes nothing from
             # anybody: the drafts of a run still open — this one's included —
             # are not claimable.
-            qs = self.campaign.claimable_send_queryset()
-            if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
-                qs = qs.filter(missive_type=self.missive_type)
-            qs.update(scheduler=self)
+            self._scope_to_selected_steps(self.campaign.claimable_send_queryset()).update(scheduler=self)
 
         error = None
         try:
@@ -723,9 +758,13 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             self._finalize_run(error)
 
     def _finalize_run(self, error: str | None) -> None:
-        """Set ``ended_at`` and persist an optional error."""
+        """Set ``ended_at``, store the wall-clock pace, and persist an optional error."""
         self.ended_at = timezone.now()
         update_fields = ["ended_at"]
+        speed = self._wall_clock_average_send_speed()
+        if speed is not None:
+            self.average_send_speed = speed
+            update_fields.append("average_send_speed")
         if error is not None:
             config = dict(self.additional_config or {})
             config["last_error"] = error
@@ -733,14 +772,21 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             update_fields.append("additional_config")
         self.save(update_fields=update_fields)
 
-    def get_missives(self):
+    def get_missives(self, *, campaign_step=_ANY_STEP):
         """Return the queryset of DRAFT missives to process for this run.
+
+        *campaign_step* limits the queryset to that step. ``None`` keeps the
+        drafts that have no step. The default returns every draft of the run.
+
+        When the campaign has steps and no step was asked for, the order is
+        the step position, then the primary key. A run can stop and resume
+        without changing that order.
 
         When missives were bulk-attached to the run via the ``scheduler`` FK
         (see :meth:`MissiveCampaign.start_campaign`), we query through that
         relation for accuracy. Otherwise fall back to the campaign relation
-        (useful for runs created manually without the bulk-update step).
-        Filtered by ``missive_type`` when not ``"*"``.
+        (useful for runs created manually without the bulk-update step). Both
+        paths are restricted to the run's selected campaign steps.
 
         The fallback claims what
         :meth:`MissiveCampaign.claimable_send_queryset` allows — not every draft
@@ -758,9 +804,36 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         else:
             Missive.reclaim_stale_processing(campaign=self.campaign)
             qs = self.campaign.claimable_send_queryset()
-        if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
-            qs = qs.filter(missive_type=self.missive_type)
+        qs = self._scope_to_selected_steps(qs)
+        if campaign_step is None:
+            qs = qs.filter(campaign_step__isnull=True).order_by("pk")
+        elif campaign_step is not _ANY_STEP:
+            qs = qs.filter(campaign_step=campaign_step).order_by("pk")
+        elif self._campaign_has_steps():
+            from django.db.models import F
+
+            qs = qs.order_by(F("campaign_step__position").asc(nulls_last=True), "pk")
         return qs
+
+    def _campaign_has_steps(self) -> bool:
+        from .campaign_step import CampaignStep
+
+        cache = self.__dict__.get("_campaign_has_steps_cache")
+        if cache is None:
+            campaign = self.campaign
+            prefetched = getattr(campaign, "_prefetched_objects_cache", {})
+            if "to_campaignstep" in prefetched:
+                cache = bool(prefetched["to_campaignstep"])
+            else:
+                cache = CampaignStep.objects.filter(campaign_id=self.campaign_id).exists()
+            self.__dict__["_campaign_has_steps_cache"] = cache
+        return cache
+
+    def _scope_to_selected_steps(self, queryset):
+        """Restrict a missive queryset to this run's step selection."""
+        if not self._campaign_has_steps():
+            return queryset.filter(campaign_step__isnull=True)
+        return queryset.filter(campaign_step_id__in=self.selected_campaign_step_ids())
 
     @staticmethod
     def claim_missive(missive) -> bool:
@@ -803,7 +876,7 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             return 1
         return max(1, (total + steps - 1) // steps)
 
-    def process_missives(self, send_fn=None) -> list:
+    def process_missives(self, send_fn=None, *, campaign_step=_ANY_STEP) -> list:
         """Send each DRAFT missive best-effort.
 
         ``send_fn(missive)`` defaults to ``missive.send_missive()``, which
@@ -833,18 +906,17 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             def send_fn(missive):
                 missive.send_missive()
 
-        pks = list(self.get_missives().values_list("pk", flat=True))
+        pks = list(self.get_missives(campaign_step=campaign_step).values_list("pk", flat=True))
         hooks = self.resolve_progress_hooks()
         total = len(pks)
         stride = self._progress_stride(total)
         failures: list[tuple[object, str]] = []
         logger.info("Scheduled campaign %s: sending %s missive(s)", self.pk, total)
         self._refresh_sent_count()
-        speed_origin = (timezone.now(), self.total_sent_count)
         for index, missive in enumerate(self._iter_in_chunks(pks), start=1):
             if self.checkpoint():
                 if self.cancelled_at:
-                    self._record_step_progress(hooks, speed_origin)
+                    self._record_step_progress(hooks)
                     logger.info(
                         "Scheduled campaign %s cancelled before missive %s/%s: %s",
                         self.pk,
@@ -856,14 +928,13 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             if missive is not None:
                 self._send_one(missive, send_fn, failures)
             if index % stride == 0 or index == total:
-                self._record_step_progress(hooks, speed_origin)
+                self._record_step_progress(hooks)
                 logger.info(
-                    "Scheduled campaign %s: %s/%s processed, %s failed, %s s per send",
+                    "Scheduled campaign %s: %s/%s processed, %s failed",
                     self.pk,
                     index,
                     total,
                     len(failures),
-                    f"{self.average_send_speed:.2f}" if self.average_send_speed else "-",
                 )
         return failures
 
@@ -911,12 +982,11 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
         Live sends only: archived attempts are already retried through their
         replacement, and a failed conversation message is not a campaign send.
         """
-        base_qs = self.campaign.to_missive.filter(
+        base_qs = self.campaign.missive_queryset().filter(
             thread_type=MissiveThreadType.MISSIVE,
             status__in=ERROR_STATUSES,
         )
-        if self.missive_type and self.missive_type != MISSIVE_TYPE_ALL:
-            base_qs = base_qs.filter(missive_type=self.missive_type)
+        base_qs = self._scope_to_selected_steps(base_qs)
 
         retried = 0
         with transaction.atomic():
@@ -1149,22 +1219,51 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             return False
         return self.pull_cancellation()
 
-    def _record_step_progress(self, hooks, speed_origin):
-        """Refresh the sent count, store the average speed, then notify hooks.
+    def _record_step_progress(self, hooks):
+        """Refresh the sent count, then notify hooks.
 
         Called at each progress step, including the last missive and a
-        cancellation. Without hooks, only the sent count is read: the full
-        set of counters is what a hook may look at, not the speed.
-        *speed_origin* is ``(started_at, sent_before)`` taken when the send
-        loop started.
+        cancellation. Without hooks, only the sent count is read.
         """
         if hooks:
             self.refresh_counts()
         else:
             self._refresh_sent_count()
-        self._update_average_send_speed(*speed_origin)
         if hooks:
             self._notify_progress(hooks)
+
+    def measured_send_speed(self):
+        """Mean of the durations stored on this run's missives.
+
+        ``None`` when no missive has been timed. SQL ``AVG`` ignores those
+        rows, so an unsent draft does not dilute the pace.
+        """
+        if "send_speed" in self.__dict__:
+            return self.__dict__["send_speed"]
+        from django.db.models import Avg
+
+        from .missive import Missive
+
+        return Missive._base_manager.filter(scheduler_id=self.pk).aggregate(speed=Avg("send_speed"))["speed"]
+
+    def _wall_clock_average_send_speed(self):
+        """Seconds from ``send_date`` to ``ended_at``, per missive that left draft."""
+        if self.send_date is None or self.ended_at is None:
+            return None
+        from .choices import MissiveThreadType, sent_missive_q
+        from .missive import Missive
+
+        sent = Missive._base_manager.filter(
+            sent_missive_q(),
+            scheduler_id=self.pk,
+            thread_type=MissiveThreadType.MISSIVE,
+        ).count()
+        if sent <= 0:
+            return None
+        elapsed = (self.ended_at - self.send_date).total_seconds()
+        if elapsed < 0:
+            return None
+        return elapsed / sent
 
     def _refresh_sent_count(self) -> None:
         """Reload ``count_sent`` alone and drop the other cached counters."""
@@ -1179,18 +1278,6 @@ class MissiveScheduledCampaign(CommentTimestampedModel):
             scheduler_id=self.pk,
             thread_type=MissiveThreadType.MISSIVE,
         ).count()
-
-    def _update_average_send_speed(self, started_at, sent_before) -> None:
-        """Seconds per missive sent since *started_at*, from the current counts."""
-        sent = self.total_sent_count - sent_before
-        if sent <= 0:
-            return
-        elapsed = (timezone.now() - started_at).total_seconds()
-        if elapsed < 0:
-            return
-        speed = elapsed / sent
-        self.average_send_speed = speed
-        type(self).objects.filter(pk=self.pk).update(average_send_speed=speed)
 
     def _notify_progress(self, hooks):
         """Call each progress hook, isolating hook errors."""

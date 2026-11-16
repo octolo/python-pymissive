@@ -7,7 +7,6 @@ from .helpers import (
     _maileva_address_line_6,
     _notification_email,
     _provider_custom_id,
-    _registered_acknowledgement_of_receipt,
     _require_maileva_line_1_or_2,
 )
 from .types import MailevaMixinTypingBase
@@ -71,21 +70,14 @@ class MailevaSendMixin(MailevaMixinTypingBase):
         data["envelope_windows_type"] = kwargs.get(
             "envelope_windows_type", self._get_config_or_env("ENVELOPE_WINDOWS_TYPE", "DOUBLE")
         )
-        priority = kwargs.get("priority")
-        postage_type = (
-            "urgent"
-            if (priority or "").lower() == "urgent"
-            else str(self._get_config_or_env("POSTAGE_TYPE", "fast")).lower()
-        )
-        data["postage_type"] = postage_type.upper()
+        data["postage_type"] = str(self._get_config_or_env("POSTAGE_TYPE", "fast")).upper()
         return data
 
     def get_registered_letter_data(self, **kwargs: Any) -> dict[str, Any]:
-        """registered_mail/v4 sending payload. AR follows the missive field."""
+        """registered_mail/v4 sending payload."""
         data = self._sending_base_data(**kwargs)
-        wants_ar = _registered_acknowledgement_of_receipt(kwargs)
-        data["acknowledgement_of_receipt"] = wants_ar
-        if wants_ar and kwargs.get("returned_mail_scanning", self._get_config_or_env("RETURNED_MAIL_SCANNING", False)):
+        data["acknowledgement_of_receipt"] = True
+        if kwargs.get("returned_mail_scanning", self._get_config_or_env("RETURNED_MAIL_SCANNING", False)):
             data["acknowledgement_of_receipt_scanning"] = True
         if data.get("notification_email"):
             data["notification_types"] = self._get_config_or_env("NOTIFICATION_TYPES", ["ALL_MAILEVA", "ALL_LAPOSTE"])

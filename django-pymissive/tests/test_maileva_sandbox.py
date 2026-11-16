@@ -137,9 +137,9 @@ def test_letter_has_delete_recipient_services():
     assert MailevaProvider.delete_recipient_letter is not MailevaProvider.delete_recipient_registered_letter
 
 
-def test_letter_payload_ignores_acknowledgement():
+def test_letter_payload_uses_simple_letter_contract():
     provider = _PostalProvider()
-    data = provider.get_letter_data(subject="Letter", acknowledgement="acknowledgement_of_receipt")
+    data = provider.get_letter_data(subject="Letter")
     assert "acknowledgement_of_receipt" not in data
     assert "notification_types" not in data
     assert data.get("postage_type") == "FAST"
@@ -153,34 +153,23 @@ def test_letter_webhook_resource_types_include_mail_v3():
     assert "mail/v2/sendings" in types
 
 
-def test_registered_letter_basic_delivery_disables_ar():
+def test_registered_letter_enables_ar():
     provider = _PostalProvider()
-    data = provider.get_registered_letter_data(subject="registered letter", acknowledgement="basic_delivery")
-    assert data.get("acknowledgement_of_receipt") is False
+    data = provider.get_registered_letter_data(subject="registered letter")
+    assert data.get("acknowledgement_of_receipt") is True
     assert "acknowledgement_of_receipt_scanning" not in data
     assert "postage_type" not in data
     assert "notification_types" not in data
 
 
-def test_registered_letter_acknowledgement_enables_ar():
+def test_registered_letter_can_enable_ar_scanning():
     provider = _PostalProvider()
     data = provider.get_registered_letter_data(
         subject="registered letter",
-        acknowledgement="acknowledgement_of_receipt",
         returned_mail_scanning=True,
     )
     assert data.get("acknowledgement_of_receipt") is True
     assert data.get("acknowledgement_of_receipt_scanning") is True
-
-
-def test_registered_letter_explicit_ar_flag_wins():
-    provider = _PostalProvider()
-    data = provider.get_registered_letter_data(
-        subject="registered letter",
-        acknowledgement="acknowledgement_of_receipt",
-        acknowledgement_of_receipt=False,
-    )
-    assert data.get("acknowledgement_of_receipt") is False
 
 
 def test_letter_payload_sends_printing_flags_as_bools():

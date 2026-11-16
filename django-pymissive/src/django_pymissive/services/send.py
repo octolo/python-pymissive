@@ -7,7 +7,7 @@ sends the run's drafts through the scheduler's own loop. The request that
 clicks "send" does not build the missives itself.
 
 Missives are built by ``build_target_processors`` (target, then run, then
-campaign, then the setting). An optional *build* dotted path
+step, then campaign, then the setting). An optional *build* dotted path
 ``(campaign, target, missive_type) -> Missive | None`` becomes the run's
 chain. Campaign-sourced fields (subject, body, sender) are filled by
 ``Missive.send_missive`` from the campaign when the draft left them empty.
@@ -69,6 +69,7 @@ def materialize_selection(
     build=None,
     scheduler=None,
     on_row=None,
+    campaign_step=None,
 ) -> int:
     """Build a draft for every live selection row of *missive_types*. Sends nothing.
 
@@ -80,11 +81,13 @@ def materialize_selection(
     row; returning false stops the build.
     """
     attached = 0
-    for channel in _channels(missive_types):
+    channels = [campaign_step.missive_type] if campaign_step is not None else _channels(missive_types)
+    for channel in channels:
         for row in target_services.iter_targets(
             campaign,
             channel,
             active_only=True,
+            campaign_step=campaign_step,
         ):
             if on_row is not None and on_row(row) is False:
                 return attached
@@ -94,11 +97,12 @@ def materialize_selection(
                 channel,
                 build=build,
                 scheduler=scheduler,
+                campaign_step=campaign_step or row.campaign_step,
             )
     return attached
 
 
-def _materialize_target(row, campaign, channel, *, build=None, scheduler=None) -> int:
+def _materialize_target(row, campaign, channel, *, build=None, scheduler=None, campaign_step=None) -> int:
     """Build one active target while holding its database row lock."""
     try:
         with transaction.atomic():
@@ -122,8 +126,10 @@ def _materialize_target(row, campaign, channel, *, build=None, scheduler=None) -
                     build=build,
                     scheduler=scheduler,
                     campaign=campaign,
+                    campaign_step=campaign_step,
                 ),
                 scheduler=scheduler,
+                campaign_step=campaign_step,
             )
             if missive is None:
                 _abandon(locked, NO_REACHABLE_RECIPIENT)
@@ -152,7 +158,7 @@ def _abandon(row, reason: str) -> None:
         )
 
 
-def send_target(campaign, target, missive_type: str, *, build=None) -> None:
+def send_target(campaign, target, missive_type: str, *, campaign_step=None, build=None) -> None:
     """Materialize and send one *target* outside of a scheduled run.
 
     Raises when a campaign send is already running, or when the build
@@ -169,11 +175,23 @@ def send_target(campaign, target, missive_type: str, *, build=None) -> None:
     with transaction.atomic():
         _lock_idle_campaign(campaign)
         row = (
-            target_services.selection_qs(campaign, missive_type=channel, active_only=True)
+            target_services.selection_qs(
+                campaign,
+                missive_type=channel,
+                active_only=True,
+                campaign_step=campaign_step,
+            )
             .filter(content_type=content_type, object_id=object_id)
             .first()
         )
-        missive = _materialize_row(campaign, target, channel, row, build=build)
+        missive = _materialize_row(
+            campaign,
+            target,
+            channel,
+            row,
+            build=build,
+            campaign_step=campaign_step,
+        )
     if missive is None:
         raise ValidationError(
             _("This target has no reachable recipient on this channel."),
@@ -207,13 +225,17 @@ def _lock_idle_campaign(campaign) -> None:
         )
 
 
-def _materialize_row(campaign, target, channel, row, *, build=None):
-    chosen = selection_build(row, build=build, campaign=campaign)
+def _materialize_row(campaign, target, channel, row, *, build=None, campaign_step=None):
+    step = campaign_step
+    if step is None and row is not None and row.campaign_step_id:
+        step = row.campaign_step
+    chosen = selection_build(row, build=build, campaign=campaign, campaign_step=step)
     missive, _created = draft_services.materialize_missive(
         campaign,
         target,
         channel,
         build=chosen,
+        campaign_step=step,
     )
     if missive is not None and row is not None:
         row.attach_missive(missive)
@@ -226,7 +248,8 @@ def start_selection(campaign, missive_types, *, build: str | None = None):
     *build* is a dotted path, because the worker imports it in another
     process. It becomes the run's ``build_target_processors``;
     without it the run copies the campaign's chain, and an empty one falls
-    back to ``settings.PYMISSIVE_DEFAULT_BUILD_TARGET_PROCESSORS``. The
+    back to the selected steps, their targets, then
+    ``settings.PYMISSIVE_DEFAULT_BUILD_TARGET_PROCESSORS``. The
     processing flag is set here: ``start_campaign`` is the other place that
     does it, and calling it would claim draft missives that do not exist yet.
     """
@@ -235,8 +258,6 @@ def start_selection(campaign, missive_types, *, build: str | None = None):
         raise ValidationError(_("At least one missive type is required."))
     if build is not None:
         _load_callable(build, "build")
-    elif not resolve_build_target_processors(campaign=campaign):
-        raise ValidationError(_("No build processor is configured for this target."))
 
     with transaction.atomic():
         locked = MissiveCampaign.objects_plain.select_for_update().get(pk=campaign.pk)
@@ -245,12 +266,20 @@ def start_selection(campaign, missive_types, *, build: str | None = None):
             raise CampaignAlreadySending(
                 _("A campaign send is already in progress."),
             )
+        has_steps = locked.to_campaignstep.exists()
+        selected_steps = list(locked.to_campaignstep.filter(missive_type__in=chosen)) if has_steps else []
+        if has_steps and not selected_steps:
+            raise ValidationError(_("No campaign step matches the requested missive types."))
+        if build is None and not _selection_has_builder(locked, selected_steps):
+            raise ValidationError(_("No build processor is configured for this target."))
         scheduled = locked.to_missivecampaignsend.create(
             scheduled_send_date=timezone.now(),
             external_task_backend=SELECTION_TASK,
             additional_config={"missive_types": chosen},
             build_target_processors=[build] if build else [],
         )
+        if selected_steps:
+            scheduled.campaign_steps.add(*selected_steps)
     scheduled.start_scheduled_campaign()
     return scheduled
 
@@ -275,16 +304,42 @@ def run_selection(scheduled_id) -> None:
     def on_row(_row) -> bool:
         return not scheduled.checkpoint()
 
-    materialize_selection(
-        scheduled.campaign,
-        scheduled.selection_channels(),
-        scheduler=scheduled,
-        on_row=on_row,
-    )
-    if not scheduled.cancelled_at:
-        scheduled.process_missives()
+    steps = list(scheduled.selected_campaign_steps())
+    if steps:
+        _run_steps(scheduled, steps, on_row)
+    else:
+        materialize_selection(
+            scheduled.campaign,
+            scheduled.selection_channels(),
+            scheduler=scheduled,
+            on_row=on_row,
+        )
+        if not scheduled.cancelled_at:
+            scheduled.process_missives()
     if scheduled.cancelled_at:
         _release_unsent_targets(scheduled)
+
+
+def _run_steps(scheduled, steps, on_row) -> None:
+    """Materialize and send each selected step in campaign order.
+
+    A failed missive stays on its step. The next step still runs.
+    """
+    for step in steps:
+        if scheduled.checkpoint():
+            return
+        materialize_selection(
+            scheduled.campaign,
+            [step.missive_type],
+            scheduler=scheduled,
+            on_row=on_row,
+            campaign_step=step,
+        )
+        if scheduled.cancelled_at:
+            return
+        scheduled.process_missives(campaign_step=step)
+        if scheduled.cancelled_at:
+            return
 
 
 def _release_unsent_targets(scheduled) -> None:
@@ -321,18 +376,51 @@ def _channels(missive_types) -> list[str]:
     return chosen
 
 
-def selection_build(row, *, build=None, scheduler=None, campaign=None):
+def _selection_has_builder(campaign, selected_steps) -> bool:
+    """True when this scope can build a missive without an explicit *build*.
+
+    The campaign chain and the global default cover every step. Otherwise
+    each selected step must carry a chain, or every target still waiting on
+    it must carry one.
+    """
+    if resolve_build_target_processors(campaign=campaign):
+        return True
+    if not selected_steps:
+        return False
+    from django.db.models import Q
+
+    from ..models.campaign_target import CampaignTarget
+
+    for step in selected_steps:
+        if step.build_target_processors:
+            continue
+        waiting = CampaignTarget.objects.filter(CampaignTarget.active_q(), campaign_step=step)
+        if not waiting.exists():
+            return False
+        uncovered = waiting.filter(Q(build_target_processors=[]) | Q(build_target_processors__isnull=True))
+        if uncovered.exists():
+            return False
+    return True
+
+
+def selection_build(row, *, build=None, scheduler=None, campaign=None, campaign_step=None):
     """Return the build callable for one selection row (*row* may be ``None``).
 
     The chain comes from
     :func:`~django_pymissive.models.campaign_target.resolve_build_target_processors`.
     *build*, given by the caller, only gives way to the row's own chain.
+    *campaign_step* supplies the step chain when *row* has none.
     """
     from ..processors.build_target import build_from_processors
 
     if build is not None and not getattr(row, "build_target_processors", None):
         return build
-    processors = resolve_build_target_processors(row, scheduler=scheduler, campaign=campaign)
+    processors = resolve_build_target_processors(
+        row,
+        scheduler=scheduler,
+        campaign=campaign,
+        campaign_step=campaign_step,
+    )
     if not processors:
         raise ValidationError(
             _("No build processor is configured for this target."),

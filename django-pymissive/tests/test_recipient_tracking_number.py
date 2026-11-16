@@ -11,7 +11,7 @@ from django.utils import timezone
 from django_pymissive.models import MissiveRecipientEmail
 from django_pymissive.models.choices import MissiveStatus, MissiveType
 from django_pymissive.models.missive import Missive
-from django_pymissive.retrieve import retrieve_from_provider
+from django_pymissive.services.retrieve import retrieve_from_provider
 
 pytestmark = pytest.mark.django_db
 

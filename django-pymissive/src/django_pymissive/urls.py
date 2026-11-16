@@ -12,6 +12,12 @@ app_name = "django_pymissive"
 
 urlpatterns: List[URLPattern] = [
     path(
+        "preview/campaign-step/<int:pk>/",
+        PreviewView.as_view(),
+        {"campaign_or_missive": "campaign_step"},
+        name="preview_campaign_step",
+    ),
+    path(
         "preview/<str:campaign_or_missive>/<uuid:pk>/<int:recipient_pk>/",
         PreviewView.as_view(),
         name="preview_recipient",
@@ -46,6 +52,12 @@ urlpatterns: List[URLPattern] = [
         "attachment/<str:campaign_or_missive>/<uuid:pk>/download/",
         MissiveAttachmentDownloadView.as_view(),
         name="missive_attachment_download",
+    ),
+    path(
+        "pdf/campaign-step/<int:pk>/",
+        DownloadPDFView.as_view(),
+        {"campaign_or_missive": "campaign_step"},
+        name="download_pdf_campaign_step",
     ),
     path(
         "pdf/<str:campaign_or_missive>/<uuid:pk>/<int:recipient_pk>/",

@@ -20,6 +20,11 @@
         jsonPre: document.getElementById("campaign-json-pre"),
     };
 
+    root.querySelectorAll(".progress-bar[data-progress]").forEach(function (bar) {
+        const value = Math.max(0, Math.min(100, Number(bar.dataset.progress || 0)));
+        bar.style.width = value + "%";
+    });
+
     function escapeHtml(text) {
         return String(text)
             .replace(/&/g, "&amp;")

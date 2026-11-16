@@ -17,6 +17,7 @@ class SlackProvider(MissiveProviderBase):
     display_name = "Slack"
     description = "Professional team collaboration messaging"
     brands = ["slack"]
+    preview_brand = "slack"
     config_keys = ["SLACK_BOT_TOKEN", "SLACK_CHANNEL_ID"]
 
     def __init__(self, **kwargs: str | None) -> None:

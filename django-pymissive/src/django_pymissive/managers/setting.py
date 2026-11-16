@@ -9,8 +9,6 @@ from virtualqueryset.managers import VirtualManager
 
 def _known_settings() -> dict[str, object]:
     """Every setting this package reads, with the value used when it is unset."""
-    from pymissive.config import DELIVERY_MODES, MISSIVE_ACKNOWLEDGEMENT_LEVELS, PRIORITIES
-
     from ..processors.attachment._base import DEFAULT_ATTACHMENT_PROCESSORS
     from ..processors.body._base import DEFAULT_BODY_PROCESSORS
     from ..processors.build_target import DEFAULT_BUILD_TARGET_FIELDS, DEFAULT_BUILD_TARGET_PROCESSORS
@@ -27,7 +25,6 @@ def _known_settings() -> dict[str, object]:
         "PYMISSIVE_DOMAIN": None,
         "PYMISSIVE_PDF_GENERATOR": "django_pymissive.pdf.body_to_pdf",
         "PYMISSIVE_SCHEME": None,
-        "PYMISSIVE_ALLOW_FAKE_PROVIDER": False,
         "PYMISSIVE_ALLOWED_ATTACHMENT_EXTENSIONS": None,
         "PYMISSIVE_ALLOWED_TASK_BACKENDS": None,
         "PYMISSIVE_ATTACHMENT_FILE_STORAGE": None,
@@ -44,7 +41,7 @@ def _known_settings() -> dict[str, object]:
         "PYMISSIVE_DEFAULT_SENDER": None,
         "PYMISSIVE_DISABLE_SEND": False,
         "PYMISSIVE_DRY_RUN": False,
-        "PYMISSIVE_FORCE_FAKE_PROVIDER": False,
+        "PYMISSIVE_FORCE_PROVIDER": None,
         "PYMISSIVE_JSON_WIDGET": None,
         "PYMISSIVE_OVERRIDE_RECIPIENT": None,
         "PYMISSIVE_PROGRESS_HOOK": None,
@@ -56,30 +53,23 @@ def _known_settings() -> dict[str, object]:
         "PYMISSIVE_STALE_PROCESSING_SECONDS": STALE_PROCESSING_SECONDS_DEFAULT,
         "PYMISSIVE_WATERMARK": DEFAULT_WATERMARK_LINES,
     }
-    for name in (
-        *DELIVERY_MODES,
-        *PRIORITIES,
-        *(level["name"] for level in MISSIVE_ACKNOWLEDGEMENT_LEVELS),
-    ):
-        known.setdefault(f"PYMISSIVE_{str(name).upper()}", True)
     return known
 
 
-_ENV_FLAGS = ("PYMISSIVE_DISABLE_SEND", "PYMISSIVE_ALLOW_FAKE_PROVIDER", "PYMISSIVE_FORCE_FAKE_PROVIDER")
+_ENV_FLAGS = ("PYMISSIVE_DISABLE_SEND",)
+_ENV_VALUES = ("PYMISSIVE_FORCE_PROVIDER",)
 
 
 def _env_flag(name: str):
     """Effective boolean for a flag read from the environment, then settings."""
-    from pymissive.utils import is_disable_send, is_fake_provider_allowed, is_force_fake_provider
+    from pymissive.utils import is_disable_send
 
-    if name == "PYMISSIVE_DISABLE_SEND":
-        return is_disable_send()
-    if name == "PYMISSIVE_FORCE_FAKE_PROVIDER":
-        return is_force_fake_provider()
-    return is_fake_provider_allowed()
+    return is_disable_send()
 
 
 def _setting_value(name: str, default: object) -> tuple[object, bool]:
+    if name in _ENV_VALUES and name in os.environ:
+        return os.environ[name], True
     if name in _ENV_FLAGS and os.environ.get(name) is not None:
         return _env_flag(name), True
     if hasattr(settings, name):

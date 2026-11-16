@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from django_pymissive.models import MissiveRecipientEmail, MissiveType
 from django_pymissive.models.campaign import MissiveCampaign
+from django_pymissive.models.campaign_step import CampaignStep
 from django_pymissive.models.choices import MissiveStatus
 from django_pymissive.models.event import MissiveEvent
 from django_pymissive.models.missive import Missive
@@ -29,8 +30,15 @@ EVENTS = 4
 
 def _fat_missive(campaign=None, *, status=MissiveStatus.SUCCESS, scheduler=None, events=EVENTS):
     """A missive carrying enough recipients and events to expose the join fanout."""
+    campaign_step = None
+    if campaign is not None:
+        campaign_step, _created = CampaignStep.objects.get_or_create(
+            campaign=campaign,
+            missive_type=MissiveType.EMAIL,
+            defaults={"position": 1},
+        )
     missive = Missive.objects.create(
-        campaign=campaign,
+        campaign_step=campaign_step,
         scheduler=scheduler,
         missive_type=MissiveType.EMAIL,
         subject="Test missive",

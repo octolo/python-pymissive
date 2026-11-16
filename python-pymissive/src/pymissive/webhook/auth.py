@@ -1,22 +1,13 @@
-"""Inbound webhook proof and outbound registration payloads.
+"""Generic inbound webhook authentication.
 
-One ``WEBHOOK_SECRET`` per provider. The HTTP gate accepts any of:
-
-- ``Authorization: Bearer <secret>`` (Brevo)
-- ``Authorization: Basic …`` whose password is the secret (Maileva)
-- URL path token equal to the secret (Scaleway SNS, no custom headers)
-
-Each provider maps that same secret onto its own create/update API.
+The HTTP gate accepts Bearer authentication, a Basic-auth password, or a URL
+path token. Providers remain responsible for their outbound API payloads.
 """
 
 from __future__ import annotations
 
 import base64
 import hmac
-
-#: Default ``authentication.basic.login`` (Maileva). Overridable via
-#: ``WEBHOOK_BASIC_LOGIN``. Only the password is checked inbound.
-WEBHOOK_BASIC_LOGIN = "pymissive"
 
 
 def get_webhook_secret(provider) -> str:
@@ -26,15 +17,6 @@ def get_webhook_secret(provider) -> str:
         return ""
     raw = getter("WEBHOOK_SECRET", "") or ""
     return str(raw).strip()
-
-
-def get_webhook_basic_login(provider) -> str:
-    """Read ``WEBHOOK_BASIC_LOGIN``, default ``pymissive``."""
-    getter = getattr(provider, "_get_config_or_env", None)
-    if getter is None:
-        return WEBHOOK_BASIC_LOGIN
-    raw = getter("WEBHOOK_BASIC_LOGIN", WEBHOOK_BASIC_LOGIN) or WEBHOOK_BASIC_LOGIN
-    return str(raw).strip() or WEBHOOK_BASIC_LOGIN
 
 
 def authorization_matches(
@@ -70,25 +52,6 @@ def verify_inbound_webhook(
     if not secret:
         return True
     return authorization_matches(secret, authorization=authorization, url_token=url_token)
-
-
-def maileva_subscription_authentication(secret: str, login: str = WEBHOOK_BASIC_LOGIN) -> dict:
-    """Body fragment for Maileva ``POST/PATCH /subscriptions``.
-
-    See notification_center v2 ``authentication.basic``
-    (https://www.maileva.com/catalogue-api/notifications-webhooks/).
-    """
-    return {
-        "basic": {
-            "login": login or WEBHOOK_BASIC_LOGIN,
-            "password": secret,
-        }
-    }
-
-
-def brevo_webhook_auth(secret: str) -> dict:
-    """``auth`` object for Brevo create/update webhook (Bearer)."""
-    return {"type": "bearer", "token": secret}
 
 
 def _digest_equal(left: str, right: str) -> bool:

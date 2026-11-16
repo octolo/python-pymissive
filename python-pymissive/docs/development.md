@@ -2,7 +2,8 @@
 
 ### General Rules
 
-- Always execute project tooling through `python dev.py <command>`.
+- Run project tooling from the `python-pymissive/` directory.
+- Run tests with `python -m pytest`; use the configured `ruff` and `mypy` commands for quality checks.
 - Default to English for all code artifacts (comments, docstrings, logging, error strings, documentation snippets, etc.) regardless of the language used in discussions.
 - Keep comments minimal and only when they clarify non-obvious logic.
 - Avoid reiterating what the code already states clearly.

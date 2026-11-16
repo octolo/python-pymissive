@@ -1,12 +1,10 @@
 {% extends "admin/base_site.html" %}
 {% load i18n admin_urls django_pymissive_animations %}
-
 {% block title %}{{ title }}{% endblock %}
-
 {% block extrahead %}
-{{ block.super }}
-{% pymissive_animations_css %}
-<style>
+  {{ block.super }}
+  {% pymissive_animations_css %}
+  <style>
   .demo-page { max-width: 1220px; margin: 0 auto; padding: 8px 4px 28px; color: var(--body-fg); font-family: var(--font-family-primary); }
   .demo-page, .demo-page * { box-sizing: border-box; }
   .demo-page .panel { margin: 20px 0; padding: 0 18px 18px; border: 1px solid var(--hairline-color); border-radius: 8px; background: var(--body-bg); overflow: hidden; }
@@ -60,114 +58,218 @@
     .demo-page .panel { padding: 0 13px 13px; }
     .demo-page .panel > h2 { margin-left: -13px; margin-right: -13px; padding-left: 13px; padding-right: 13px; }
   }
-</style>
+  </style>
 {% endblock %}
-
 {% block breadcrumbs %}
-<div class="breadcrumbs">
-  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
-  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
-  &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
-  &rsaquo; {{ title }}
-</div>
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% translate "Home" %}</a>
+    › <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+    › <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+    › {{ title }}
+  </div>
 {% endblock %}
-
 {% block content %}
-<main class="demo-page">
-  <section class="panel">
-    <h2>{% translate "Shared settings" %}</h2>
-    <p>{% translate "These settings apply to the custom preview and to every preset." %}</p>
-    <div class="toolbar">
-      <div class="field"><label for="custom-speed">{% translate "Speed" %} : <output id="custom-speed-value">1×</output></label><input id="custom-speed" type="range" min="0.25" max="4" step="0.25" value="1"></div>
-      <div class="field"><label for="custom-count">{% translate "Number of items" %} : <output id="custom-count-value">3</output></label><input id="custom-count" type="range" min="1" max="12" step="1" value="3"></div>
-      <div class="field"><label for="custom-total">{% translate "Total sends" %}</label><input id="custom-total" type="number" min="0" step="1" value="100"></div>
-      <div class="field"><label for="custom-remaining">{% translate "Remaining sends" %}</label><input id="custom-remaining" type="number" min="0" step="1" value="100"></div>
-      <div class="field"><label for="custom-errors">{% translate "Errors" %}</label><input id="custom-errors" type="number" min="0" step="1" value="0"></div>
-      <div class="field"><label for="custom-caller">{% translate "Caller name" %}</label><input id="custom-caller" type="text" maxlength="42" value="Pymissive"></div>
-      <div class="field"><label for="custom-color">{% translate "Brand color" %}</label><input id="custom-color" type="color" value="#5484ed"></div>
-    </div>
-    <div class="checks">
-      <label><input id="custom-background" type="checkbox" checked> {% translate "Illustrated background" %}</label>
-      <label><input id="custom-ground" type="checkbox" checked> {% translate "Ground bar" %}</label>
-      <label><input id="custom-show-caption" type="checkbox" checked> {% translate "Text under the ground" %}</label>
-      <label><input id="custom-counter" type="checkbox" checked> {% translate "Counter" %}</label>
-      <label><input id="custom-counter-background" type="checkbox"> {% translate "White counter background" %}</label>
-      <label><input id="custom-summary" type="checkbox"> {% translate "Summary when finished" %}</label>
-    </div>
-    <div class="finale-actions">
-      <button type="button" data-finale-status="completed">✓ {% translate "Sent" %}</button>
-      <button type="button" data-finale-status="errors">! {% translate "Errors" %}</button>
-      <button type="button" data-finale-status="cancelled">× {% translate "Cancelled" %}</button>
-    </div>
-    <div class="form-grid">
-      <div class="field"><label for="custom-messages">{% translate "SMS messages (one message per line)" %}</label><textarea id="custom-messages" rows="4">{% translate "Hello! 👋" %}
+  <main class="demo-page">
+    <section class="panel">
+      <h2>{% translate "Shared settings" %}</h2>
+      <p>{% translate "These settings apply to the custom preview and to every preset." %}</p>
+      <div class="toolbar">
+        <div class="field"><label for="custom-speed">{% translate "Speed" %} : <output id="custom-speed-value">1×</output></label><input id="custom-speed"
+                                                                                                                                         type="range"
+                                                                                                                                         min="0.25"
+                                                                                                                                         max="4"
+                                                                                                                                         step="0.25"
+                                                                                                                                         value="1"></div>
+        <div class="field"><label for="custom-count">{% translate "Number of items" %} : <output id="custom-count-value">3</output></label><input id="custom-count" type="range" min="1" max="12" step="1" value="3"></div>
+        <div class="field">
+          <label for="custom-total">{% translate "Total sends" %}</label>
+          <input id="custom-total" type="number" min="0" step="1" value="100">
+        </div>
+        <div class="field">
+          <label for="custom-remaining">{% translate "Remaining sends" %}</label>
+          <input id="custom-remaining" type="number" min="0" step="1" value="100">
+        </div>
+        <div class="field">
+          <label for="custom-errors">{% translate "Errors" %}</label>
+          <input id="custom-errors" type="number" min="0" step="1" value="0">
+        </div>
+        <div class="field">
+          <label for="custom-caller">{% translate "Caller name" %}</label>
+          <input id="custom-caller" type="text" maxlength="42" value="Pymissive">
+        </div>
+        <div class="field">
+          <label for="custom-color">{% translate "Brand color" %}</label>
+          <input id="custom-color" type="color" value="#5484ed">
+        </div>
+      </div>
+      <div class="checks">
+        <label>
+          <input id="custom-background" type="checkbox" checked>
+          {% translate "Illustrated background" %}
+        </label>
+        <label>
+          <input id="custom-ground" type="checkbox" checked>
+          {% translate "Ground bar" %}
+        </label>
+        <label>
+          <input id="custom-show-caption" type="checkbox" checked>
+          {% translate "Text under the ground" %}
+        </label>
+        <label>
+          <input id="custom-counter" type="checkbox" checked>
+          {% translate "Counter" %}
+        </label>
+        <label>
+          <input id="custom-counter-background" type="checkbox">
+          {% translate "White counter background" %}
+        </label>
+        <label>
+          <input id="custom-summary" type="checkbox">
+          {% translate "Summary when finished" %}
+        </label>
+      </div>
+      <div class="finale-actions">
+        <button type="button" data-finale-status="completed">✓ {% translate "Sent" %}</button>
+        <button type="button" data-finale-status="errors">! {% translate "Errors" %}</button>
+        <button type="button" data-finale-status="cancelled">× {% translate "Cancelled" %}</button>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label for="custom-messages">{% translate "SMS messages (one message per line)" %}</label>
+          <textarea id="custom-messages" rows="4">{% translate "Hello! 👋" %}
 {% translate "See you soon!" %}
-{% translate "Thanks 😊" %}</textarea><span class="muted">{% translate "Press Enter to add another message. Each send picks one at random, without changing how many are sent." %}</span></div>
-      <div class="field"><label for="custom-caption">{% translate "Text under the ground bar" %}</label><textarea id="custom-caption" rows="4">{% translate "Sending the message…" %}</textarea><span class="muted">{% translate "Long text is fine: the lower area grows to fit it." %}</span></div>
-    </div>
-  </section>
-
-  <section class="preview-section">
-    <div id="custom-types" class="form-grid">
-      <fieldset class="field" id="custom-senders"><label>{% translate "Send types" %}</label>
-        <label class="check"><input type="checkbox" value="email" checked> {% translate "Email — blue envelope" %}</label>
-        <label class="check"><input type="checkbox" value="emailAR" checked> {% translate "Email with AR — marked envelope" %}</label>
-        <label class="check"><input type="checkbox" value="postal" checked> {% translate "Postal mail — yellow envelope" %}</label>
-        <label class="check"><input type="checkbox" value="registered" checked> {% translate "Registered mail — yellow envelope with AR" %}</label>
-        <label class="check"><input type="checkbox" value="handDelivery" checked> {% translate "Hand delivery" %}</label>
-        <label class="check"><input type="checkbox" value="sms" checked> {% translate "SMS" %}</label>
-        <label class="check"><input type="checkbox" value="voice" checked> {% translate "Voice call" %}</label>
-        <label class="check"><input type="checkbox" value="notification" checked> {% translate "Notification" %}</label>
-      </fieldset>
-      <div class="field"><label for="custom-receiver">{% translate "Receiver type" %}</label><select id="custom-receiver"><option value="email">{% translate "Screen — Email" %}</option><option value="emailAR">{% translate "Screen — Email with AR" %}</option><option value="mailbox">{% translate "Mailbox" %}</option><option value="mailboxAR">{% translate "Mailbox with AR" %}</option><option value="doorstep">{% translate "Door — Hand delivery" %}</option><option value="sms">{% translate "Phone — SMS" %}</option><option value="voice">{% translate "Phone — Voice call" %}</option><option value="notification">{% translate "Phone — Notification" %}</option><option value="globe" selected>{% translate "Globe" %}</option></select></div>
-    </div>
-    <div class="mount-point" id="custom-preview"></div>
-    <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="custom-code"></code></pre></details>
-  </section>
-
-  <section class="panel">
-    <h2>{% translate "Presets and code samples" %}</h2>
-    <p>{% translate "These animations use the shared settings above. The title and subtitle come from each animation. Open “View the code” under an example to copy its setup into your own page." %}</p>
-    <div class="examples">
-      <section class="example">
-        <div class="mount-point" id="frame-email"></div>
-        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-email"></code></pre></details>
-      </section>
-      <section class="example">
-        <div class="mount-point" id="frame-email-ar"></div>
-        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-email-ar"></code></pre></details>
-      </section>
-      <section class="example">
-        <div class="mount-point" id="frame-postal"></div>
-        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-postal"></code></pre></details>
-      </section>
-      <section class="example">
-        <div class="mount-point" id="frame-registered"></div>
-        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-registered"></code></pre></details>
-      </section>
-      <section class="example">
-        <div class="mount-point" id="frame-hand-delivery"></div>
-        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-hand-delivery"></code></pre></details>
-      </section>
-      <section class="example">
-        <div class="mount-point" id="frame-sms"></div>
-        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-sms"></code></pre></details>
-      </section>
-      <section class="example">
-        <div class="mount-point" id="frame-voice"></div>
-        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-voice"></code></pre></details>
-      </section>
-      <section class="example">
-        <div class="mount-point" id="frame-notification"></div>
-        <details class="sample-code"><summary>{% translate "View the integration code" %}</summary><pre><code id="code-frame-notification"></code></pre></details>
-      </section>
-    </div>
-  </section>
-
-  <section class="panel">
-    <h2>{% translate "Integration code" %}</h2>
-    <p>{% translate "Add this to your application: a container, the CSS file, the animation library, then the mount call in your application code. The counter is driven by the returned API." %}</p>
-    <pre class="code-block"><code>&lt;link rel="stylesheet" href="animations.css"&gt;
+{% translate "Thanks 😊" %}</textarea><span class="muted">{% translate "Press Enter to add another message. Each send picks one at random, without changing how many are sent." %}</span>
+        </div>
+        <div class="field">
+          <label for="custom-caption">{% translate "Text under the ground bar" %}</label>
+          <textarea id="custom-caption" rows="4">{% translate "Sending the message…" %}</textarea><span class="muted">{% translate "Long text is fine: the lower area grows to fit it." %}</span>
+        </div>
+      </div>
+    </section>
+    <section class="preview-section">
+      <div id="custom-types" class="form-grid">
+        <fieldset class="field" id="custom-senders">
+          <label>{% translate "Send types" %}</label>
+          <label class="check">
+            <input type="checkbox" value="email" checked>
+            {% translate "Email — blue envelope" %}
+          </label>
+          <label class="check">
+            <input type="checkbox" value="emailAR" checked>
+            {% translate "Email with AR — marked envelope" %}
+          </label>
+          <label class="check">
+            <input type="checkbox" value="postal" checked>
+            {% translate "Postal mail — yellow envelope" %}
+          </label>
+          <label class="check">
+            <input type="checkbox" value="registered" checked>
+            {% translate "Registered mail — yellow envelope with AR" %}
+          </label>
+          <label class="check">
+            <input type="checkbox" value="handDelivery" checked>
+            {% translate "Hand delivery" %}
+          </label>
+          <label class="check">
+            <input type="checkbox" value="sms" checked>
+            {% translate "SMS" %}
+          </label>
+          <label class="check">
+            <input type="checkbox" value="voice" checked>
+            {% translate "Voice call" %}
+          </label>
+          <label class="check">
+            <input type="checkbox" value="notification" checked>
+            {% translate "Notification" %}
+          </label>
+        </fieldset>
+        <div class="field">
+          <label for="custom-receiver">{% translate "Receiver type" %}</label>
+          <select id="custom-receiver">
+            <option value="email">{% translate "Screen — Email" %}</option>
+            <option value="emailAR">{% translate "Screen — Email with AR" %}</option>
+            <option value="mailbox">{% translate "Mailbox" %}</option>
+            <option value="mailboxAR">{% translate "Mailbox with AR" %}</option>
+            <option value="doorstep">{% translate "Door — Hand delivery" %}</option>
+            <option value="sms">{% translate "Phone — SMS" %}</option>
+            <option value="voice">{% translate "Phone — Voice call" %}</option>
+            <option value="notification">{% translate "Phone — Notification" %}</option>
+            <option value="globe" selected>{% translate "Globe" %}</option>
+          </select>
+        </div>
+      </div>
+      <div class="mount-point" id="custom-preview"></div>
+      <details class="sample-code">
+        <summary>{% translate "View the integration code" %}</summary>
+        <pre><code id="custom-code"></code></pre>
+      </details>
+    </section>
+    <section class="panel">
+      <h2>{% translate "Presets and code samples" %}</h2>
+      <p>{% translate "These animations use the shared settings above. The title and subtitle come from each animation. Open “View the code” under an example to copy its setup into your own page." %}</p>
+      <div class="examples">
+        <section class="example">
+          <div class="mount-point" id="frame-email"></div>
+          <details class="sample-code">
+            <summary>{% translate "View the integration code" %}</summary>
+            <pre><code id="code-frame-email"></code></pre>
+          </details>
+        </section>
+        <section class="example">
+          <div class="mount-point" id="frame-email-ar"></div>
+          <details class="sample-code">
+            <summary>{% translate "View the integration code" %}</summary>
+            <pre><code id="code-frame-email-ar"></code></pre>
+          </details>
+        </section>
+        <section class="example">
+          <div class="mount-point" id="frame-postal"></div>
+          <details class="sample-code">
+            <summary>{% translate "View the integration code" %}</summary>
+            <pre><code id="code-frame-postal"></code></pre>
+          </details>
+        </section>
+        <section class="example">
+          <div class="mount-point" id="frame-registered"></div>
+          <details class="sample-code">
+            <summary>{% translate "View the integration code" %}</summary>
+            <pre><code id="code-frame-registered"></code></pre>
+          </details>
+        </section>
+        <section class="example">
+          <div class="mount-point" id="frame-hand-delivery"></div>
+          <details class="sample-code">
+            <summary>{% translate "View the integration code" %}</summary>
+            <pre><code id="code-frame-hand-delivery"></code></pre>
+          </details>
+        </section>
+        <section class="example">
+          <div class="mount-point" id="frame-sms"></div>
+          <details class="sample-code">
+            <summary>{% translate "View the integration code" %}</summary>
+            <pre><code id="code-frame-sms"></code></pre>
+          </details>
+        </section>
+        <section class="example">
+          <div class="mount-point" id="frame-voice"></div>
+          <details class="sample-code">
+            <summary>{% translate "View the integration code" %}</summary>
+            <pre><code id="code-frame-voice"></code></pre>
+          </details>
+        </section>
+        <section class="example">
+          <div class="mount-point" id="frame-notification"></div>
+          <details class="sample-code">
+            <summary>{% translate "View the integration code" %}</summary>
+            <pre><code id="code-frame-notification"></code></pre>
+          </details>
+        </section>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>{% translate "Integration code" %}</h2>
+      <p>{% translate "Add this to your application: a container, the CSS file, the animation library, then the mount call in your application code. The counter is driven by the returned API." %}</p>
+      <pre class="code-block"><code>&lt;link rel="stylesheet" href="animations.css"&gt;
 &lt;div id="postal-frame"&gt;&lt;/div&gt;
 &lt;script src="animation.js"&gt;&lt;/script&gt;
 &lt;script&gt;
@@ -187,12 +289,12 @@
   postal.counter.reset(100);
   postal.counter.setRemaining(90);
 &lt;/script&gt;</code></pre>
-    <p class="muted">{% translate "To mix several send types or pick another receiver, pass a list and the receiver option:" %} <code>PymissiveAnimation.mountCard("frame-id", ["sms", "postal"], { receiver: "globe" })</code>. {% translate "IDs and mount calls stay in your own HTML or JavaScript." %}</p>
-  </section>
-</main>
-{% pymissive_animations_labels %}
-{% pymissive_animations_js %}
-<script>
+      <p class="muted">{% translate "To mix several send types or pick another receiver, pass a list and the receiver option:" %} <code>PymissiveAnimation.mountCard("frame-id", ["sms", "postal"], { receiver: "globe" })</code>. {% translate "IDs and mount calls stay in your own HTML or JavaScript." %}</p>
+    </section>
+  </main>
+  {% pymissive_animations_labels %}
+  {% pymissive_animations_js %}
+  <script>
   const customTitle = '{% filter escapejs %}{% translate "Custom preview" %}{% endfilter %}';
   const customSubtitle = '{% filter escapejs %}{% translate "Custom combination" %}{% endfilter %}';
   const exampleSpecs = [

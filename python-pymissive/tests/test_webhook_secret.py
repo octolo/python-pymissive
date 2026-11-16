@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from pymissive.commands import webhook as webhook_cmd
-from pymissive.webhook_secret import collect_mouse_entropy, generate_webhook_secret
+from pymissive.webhook.secret import collect_mouse_entropy, generate_webhook_secret
 
 
 def test_same_seed_is_stable():

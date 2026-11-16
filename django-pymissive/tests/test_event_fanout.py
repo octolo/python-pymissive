@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 from django.db import IntegrityError, transaction
 
-from django_pymissive.events import _get_occurred_at, _process_event, _upsert_event
+from django_pymissive.services.events import _get_occurred_at, _process_event, _upsert_event
 from django_pymissive.models import (
     MissiveEvent,
     MissiveRecipientEmail,

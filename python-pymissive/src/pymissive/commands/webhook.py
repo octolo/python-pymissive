@@ -8,7 +8,7 @@ from clicommands.commands.args import parse_args_from_config
 from clicommands.commands.base import Command
 from clicommands.utils import print_header, print_separator
 
-from pymissive.webhook_secret import collect_mouse_entropy, generate_webhook_secret
+from pymissive.webhook.secret import collect_mouse_entropy, generate_webhook_secret
 
 _ARG_CONFIG = {
     "help": {"type": "store_true"},
@@ -54,7 +54,7 @@ def _webhook_command(args: list[str]) -> bool:
     print_separator()
     print(token)
     print(
-        "Set WEBHOOK_SECRET (or BREVO_WEBHOOK_SECRET / …) to this value.",
+        "Set WEBHOOK_SECRET, or its provider-prefixed equivalent, to this value.",
         file=sys.stderr,
     )
     return True
@@ -62,5 +62,5 @@ def _webhook_command(args: list[str]) -> bool:
 
 webhook_command = Command(
     _webhook_command,
-    "Generate a webhook secret (webhook secret --provider brevo [--seconds 5])",
+    "Generate a webhook secret (webhook secret --provider <name> [--seconds 5])",
 )

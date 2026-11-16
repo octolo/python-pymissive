@@ -9,7 +9,7 @@ from django.urls import reverse
 
 from django_pymissive.models.choices import MissiveStatus, MissiveType
 from django_pymissive.models.missive import Missive
-from django_pymissive.preview_sandbox import sandboxed_preview_srcdoc
+from django_pymissive.services.preview_sandbox import sandboxed_preview_srcdoc
 
 pytestmark = pytest.mark.django_db
 

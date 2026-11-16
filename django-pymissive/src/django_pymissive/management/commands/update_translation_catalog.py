@@ -6,8 +6,8 @@ django_pymissive.models.choices, so xgettext (makemessages) cannot extract them.
 This command generates a Python module with explicit _("literal") calls so makemessages
 can find them.
 
-Sources: MISSIVE_ACKNOWLEDGEMENT_LEVELS, MISSIVE_TYPES, SUCCESSFUL_EVENTS, INFO_EVENTS,
-FAILED_EVENTS, DELIVERY_MODES, PRIORITIES, GENERIC_SUPPORT.
+Sources: MISSIVE_TYPES, SUCCESSFUL_EVENTS, INFO_EVENTS, FAILED_EVENTS,
+    GENERIC_SUPPORT.
 
 Run before makemessages:
   ./manage.py update_translation_catalog
@@ -25,34 +25,17 @@ def _config_string(value: object) -> str:
     return value
 
 
-def _acknowledgement_strings(level: dict[str, object]) -> set[str]:
-    values = [level["display_name"]]
-    values.extend(level[key] for key in ("description", "legal_value") if level.get(key))
-    means = level.get("means")
-    if means:
-        if not isinstance(means, (list, tuple, set, frozenset)):
-            raise TypeError(f"Expected an iterable of means, got {type(means).__name__}")
-        values.extend(means)
-    return {_config_string(value) for value in values}
-
-
 def extract_strings_from_config() -> set[str]:
     """Extract all user-facing strings from pymissive.config."""
     from pymissive.config import (
-        MISSIVE_ACKNOWLEDGEMENT_LEVELS,
         MISSIVE_TYPES,
         SUCCESSFUL_EVENTS,
         INFO_EVENTS,
         FAILED_EVENTS,
-        DELIVERY_MODES,
-        PRIORITIES,
         GENERIC_SUPPORT,
     )
 
     strings: set[str] = set()
-
-    for level in MISSIVE_ACKNOWLEDGEMENT_LEVELS:
-        strings.update(_acknowledgement_strings(level))
 
     for v in MISSIVE_TYPES.values():
         strings.add(v)
@@ -69,12 +52,6 @@ def extract_strings_from_config() -> set[str]:
     _add_event_strings(SUCCESSFUL_EVENTS)
     _add_event_strings(INFO_EVENTS)
     _add_event_strings(FAILED_EVENTS)
-
-    for k in DELIVERY_MODES:
-        strings.add(k.capitalize())
-
-    for k in PRIORITIES:
-        strings.add(k.capitalize())
 
     for k in GENERIC_SUPPORT.keys():
         strings.add(k.capitalize())

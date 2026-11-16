@@ -8,7 +8,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import DetailView
 
-from ..events import handle_events
+from ..services.events import handle_events
 from ..models.provider import MissiveProviderModel
 
 logger = logging.getLogger(__name__)

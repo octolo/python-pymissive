@@ -16,6 +16,8 @@ filled in at send time).
 
 from __future__ import annotations
 
+import inspect
+
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
 from django.db.models import Q
@@ -50,20 +52,24 @@ def link_target(missive, target, *, new: bool = False) -> MissiveRelatedObject:
     return link
 
 
-def missive_links(target, *, campaign, missive_type: str):
+def missive_links(target, *, campaign, missive_type: str, campaign_step=None):
     """``MissiveRelatedObject`` rows of *target* for this campaign and channel.
 
     Live sends only: a ``HISTORY`` row left by a resend is not a draft to
-    reuse, and not the missive to duplicate again.
+    reuse, and not the missive to duplicate again. *campaign_step* keeps two
+    steps of the same channel from seeing each other's missives.
     """
     content_type, object_id = identity(target)
-    return MissiveRelatedObject.objects.filter(
+    rows = MissiveRelatedObject.objects.filter(
         content_type=content_type,
         object_id=object_id,
-        missive__campaign_id=campaign.pk,
+        missive__campaign_step__campaign_id=campaign.pk,
         missive__missive_type=require_missive_type(missive_type),
         missive__thread_type=MissiveThreadType.MISSIVE,
     )
+    if campaign_step is not None:
+        rows = rows.filter(missive__campaign_step=campaign_step)
+    return rows
 
 
 def _in_flight_q() -> Q:
@@ -77,10 +83,10 @@ def _in_flight_q() -> Q:
     )
 
 
-def existing_draft(campaign, target, missive_type: str) -> Missive | None:
+def existing_draft(campaign, target, missive_type: str, *, campaign_step=None) -> Missive | None:
     """Return the draft already prepared for ``(target, missive_type)``."""
     link = (
-        missive_links(target, campaign=campaign, missive_type=missive_type)
+        missive_links(target, campaign=campaign, missive_type=missive_type, campaign_step=campaign_step)
         .filter(missive__status=MissiveStatus.DRAFT)
         .select_related("missive")
         .order_by("-missive__created_at", "-id")
@@ -89,10 +95,10 @@ def existing_draft(campaign, target, missive_type: str) -> Missive | None:
     return link.missive if link else None
 
 
-def last_sent(campaign, target, missive_type: str) -> Missive | None:
+def last_sent(campaign, target, missive_type: str, *, campaign_step=None) -> Missive | None:
     """Return the most recent missive of ``(target, missive_type)`` that left draft."""
     link = (
-        missive_links(target, campaign=campaign, missive_type=missive_type)
+        missive_links(target, campaign=campaign, missive_type=missive_type, campaign_step=campaign_step)
         .exclude(missive__status=MissiveStatus.DRAFT)
         .exclude(_in_flight_q())
         .select_related("missive")
@@ -109,6 +115,7 @@ def materialize_missive(
     *,
     build,
     scheduler=None,
+    campaign_step=None,
 ) -> tuple[Missive | None, bool]:
     """Return the missive to send, building it when none exists yet.
 
@@ -117,37 +124,76 @@ def materialize_missive(
     existing draft was reused. *scheduler*, when given, owns the missive.
     """
     channel = require_missive_type(missive_type)
+    campaign_step = _materialization_step(campaign, channel, campaign_step)
 
-    draft, previous = _draft_and_last_sent(campaign, target, channel)
+    draft, previous = _draft_and_last_sent(campaign, target, channel, campaign_step=campaign_step)
     if draft is not None:
-        _attach(draft, scheduler=scheduler)
+        _attach(draft, scheduler=scheduler, campaign_step=campaign_step)
         return draft, False
     if previous is not None:
         return resend_draft(previous, scheduler=scheduler), True
 
+    missive = _build_missive(
+        campaign,
+        target,
+        channel,
+        build=build,
+        scheduler=scheduler,
+        campaign_step=campaign_step,
+    )
+    return missive, missive is not None
+
+
+def _materialization_step(campaign, channel: str, campaign_step):
+    if campaign_step is not None:
+        return campaign_step
+    steps = list(
+        campaign.to_campaignstep.filter(missive_type=channel).order_by("position", "pk")[:2],
+    )
+    if len(steps) != 1:
+        raise ValueError(
+            f"Campaign must define exactly one {channel!r} step when campaign_step is omitted.",
+        )
+    return steps[0]
+
+
+def _build_missive(campaign, target, channel, *, build, scheduler, campaign_step) -> Missive | None:
     # The link to the target is what existing_draft finds next time: a
     # missive saved without it would be built a second time.
     with transaction.atomic():
-        missive = build(campaign, target, channel)
+        missive = _call_build(build, campaign, target, channel, campaign_step)
         if missive is None:
-            return None, False
-        if missive._state.adding:
-            raise ValueError("build() must return a saved missive, or None to skip")
-        if missive.missive_type != channel:
-            raise ValueError(f"build() returned a {missive.missive_type!r} missive for {channel!r}")
-        _attach(missive, campaign=campaign, scheduler=scheduler)
+            return None
+        _validate_built_missive(missive, channel)
+        _attach(missive, campaign=campaign, scheduler=scheduler, campaign_step=campaign_step)
         link_target(missive, target)
-    return missive, True
+    return missive
 
 
-def _draft_and_last_sent(campaign, target, channel) -> tuple[Missive | None, Missive | None]:
+def _call_build(build, campaign, target, channel, campaign_step):
+    parameters = inspect.signature(build).parameters.values()
+    accepts_step = any(
+        parameter.name == "campaign_step" or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters
+    )
+    kwargs = {"campaign_step": campaign_step} if campaign_step is not None and accepts_step else {}
+    return build(campaign, target, channel, **kwargs)
+
+
+def _validate_built_missive(missive, channel: str) -> None:
+    if missive._state.adding:
+        raise ValueError("build() must return a saved missive, or None to skip")
+    if missive.missive_type != channel:
+        raise ValueError(f"build() returned a {missive.missive_type!r} missive for {channel!r}")
+
+
+def _draft_and_last_sent(campaign, target, channel, *, campaign_step=None) -> tuple[Missive | None, Missive | None]:
     """:func:`existing_draft` and :func:`last_sent` in one query.
 
     A draft wins over a more recent sent missive, as when they are called
     one after the other.
     """
     links = (
-        missive_links(target, campaign=campaign, missive_type=channel)
+        missive_links(target, campaign=campaign, missive_type=channel, campaign_step=campaign_step)
         .exclude(_in_flight_q())
         .select_related("missive")
         .order_by("-missive__created_at", "-id")
@@ -161,17 +207,34 @@ def _draft_and_last_sent(campaign, target, channel) -> tuple[Missive | None, Mis
     return None, previous
 
 
-def _attach(missive, *, campaign=None, scheduler=None) -> None:
-    """Give *missive* its campaign and scheduler when missing, in one save."""
-    fields = []
-    if campaign is not None and not missive.campaign_id:
-        missive.campaign = campaign
-        fields.append("campaign")
-    if scheduler is not None and missive.scheduler_id != scheduler.pk:
-        missive.scheduler = scheduler
-        fields.append("scheduler")
+def _attach(missive, *, campaign=None, scheduler=None, campaign_step=None) -> None:
+    """Give *missive* its step and scheduler when missing, in one save."""
+    _validate_attachment(campaign, campaign_step, missive)
+    fields = _attach_step(missive, campaign_step)
+    fields.extend(_attach_scheduler(missive, scheduler))
     if fields:
         missive.save(update_fields=[*fields, "updated_at"])
+
+
+def _validate_attachment(campaign, campaign_step, missive) -> None:
+    if campaign is not None and campaign_step is None and not missive.campaign_step_id:
+        raise ValueError("campaign_step is required for a campaign missive")
+    if campaign is not None and campaign_step is not None and campaign_step.campaign_id != campaign.pk:
+        raise ValueError("campaign_step does not belong to campaign")
+
+
+def _attach_step(missive, campaign_step) -> list[str]:
+    if campaign_step is not None and not missive.campaign_step_id:
+        missive.campaign_step = campaign_step
+        return ["campaign_step"]
+    return []
+
+
+def _attach_scheduler(missive, scheduler) -> list[str]:
+    if scheduler is not None and missive.scheduler_id != scheduler.pk:
+        missive.scheduler = scheduler
+        return ["scheduler"]
+    return []
 
 
 def resend_draft(missive: Missive, *, scheduler=None) -> Missive:
@@ -215,6 +278,7 @@ def build_draft(
     provider: str | None = None,
     metadata: dict | None = None,
     extra_missive_fields: dict | None = None,
+    campaign_step=None,
 ) -> Missive | None:
     """Create one draft missive with a single recipient, linked to *target*.
 
@@ -225,10 +289,20 @@ def build_draft(
     The caller (usually the *build* hook of :func:`materialize_missive`) owns
     where the address, phone or email comes from.
     """
-    from ..shortcuts import send_missive
     from pymissive.config import missive_support_for_type
 
+    from ..shortcuts import send_missive
+
     channel = require_missive_type(missive_type)
+    if campaign_step is None:
+        steps = list(
+            campaign.to_campaignstep.filter(missive_type=channel).order_by("position", "pk")[:2],
+        )
+        if len(steps) != 1:
+            raise ValueError(
+                f"Campaign must define exactly one {channel!r} step when campaign_step is omitted.",
+            )
+        campaign_step = steps[0]
     support = missive_support_for_type(channel)
     contact = {
         "email": email,
@@ -239,6 +313,7 @@ def build_draft(
     if contact in (None, ""):
         return None
 
+    fields = dict(extra_missive_fields or {})
     missive = send_missive(
         channel,
         name=name,
@@ -250,8 +325,9 @@ def build_draft(
         body_rich=body_rich,
         body_text=body_text,
         campaign=campaign,
+        campaign_step=campaign_step,
         provider=provider,
-        extra_missive_fields=extra_missive_fields,
+        extra_missive_fields=fields or None,
         extra_recipient_fields={"recipient_type": recipient_type} if recipient_type else None,
         and_send=False,
     )
@@ -272,7 +348,7 @@ def delete_drafts(campaign, missive_type: str, *, targets=None) -> int:
     """
     channel = require_missive_type(missive_type)
     qs = MissiveRelatedObject.objects.filter(
-        missive__campaign_id=campaign.pk,
+        missive__campaign_step__campaign_id=campaign.pk,
         missive__status=MissiveStatus.DRAFT,
         missive__missive_type=channel,
         missive__thread_type=MissiveThreadType.MISSIVE,
