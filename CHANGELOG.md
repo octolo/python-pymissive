@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.0 — 2026-11-16
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.9.0,<2`.
+- Apply migration `0036_campaign_steps`. It copies each campaign's channel
+  content onto steps, then removes those columns.
+
+### Changes
+
+- A campaign sends through ordered steps. Each step holds the channel, the
+  subject, the body, and the sender options. A campaign can have several
+  steps on the same channel.
+- Targets, missives, files, and scheduled runs belong to a step. An empty
+  step selection still sends every step. A stored scope that matched nothing
+  sends nothing.
+- A campaign, a step, a missive, or a target cannot be deleted once a missive
+  has left draft. A file limited to a deleted step is deleted with it.
+
 ## 1.8.5 — 2026-11-04
 
 ### Compatibility
