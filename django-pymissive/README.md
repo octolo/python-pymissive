@@ -408,6 +408,38 @@ entry, zeroed with an empty `last` when it has no matching missive. On 1 000
 objects carrying three missives each, the five annotations above take ~1 000 ms
 where the batch pass takes ~22 ms.
 
+`missive_breakdowns_by_object()` is the grouped form of that batch. It counts
+each linked missive once, in the database, and nests the buckets in the order
+of `group_by` (`campaign`, `missive_type`, `status`):
+
+```python
+from django_pymissive.managers.related_object import (
+    missive_breakdowns_by_object, object_id_value,
+)
+
+stats = missive_breakdowns_by_object(Participant, [p.pk for p in page])
+stats[object_id_value(participant.pk)][str(campaign.pk)]["email"]
+# {"errors": 1, "total": 2}
+```
+
+`total` is the missives that left the pending state (`sent_missive_q`), so a
+draft or a legacy empty status adds nothing. `errors` is `error_missive_q`.
+`HISTORY` rows are included until `thread_type` is set. An object with no
+missive still has an entry (`{}`); a campaign or type with no row is absent.
+The same filters as `missive_link_q` apply, including a JSON lookup:
+
+```python
+missive_link_q(metadata={"channel__in": ("letter", "address")})
+```
+
+A nested key such as `address__city` stays an exact match. A key that is not
+an identifier is rejected.
+
+`recipient_summaries_by_object()` lists, per object and newest missive first,
+the contact value, support, recipient status, `sent_at` and the missive and
+campaign ids. It reads recipients through `details_by_missive()`, the same
+resolution as `targets_by_missive()`.
+
 Your model's primary key can be an integer or a UUID: `object_id` is a text
 column, holding the pk without its dashes (`uuid.hex`), because PostgreSQL
 renders a UUID dashed where SQLite stores 32 hex characters. Go through
@@ -432,14 +464,39 @@ Values keep their natural type — a string for e-mail, phone and notification i
 the address dict for postal supports — and fall back to the recipient name when
 no contact value is on file.
 
+On a campaign target, `set_recipients(values)` replaces one role and keeps the
+others. `clear_recipients()` drops that role so the linked object's own
+contacts are used again. `set_target_recipients(campaign, missive_type, values_by_target)`
+does the replacement for many live rows in one transaction. Its mapping keys
+are `CampaignTarget` rows, saved business objects or explicit
+`(model, object_id)` pairs; a bare object id is ambiguous across models and is
+refused. Pass `clear_other_roles=True` to drop the roles the call does not
+replace.
+
 ### Before and after a send
 
 ```python
-campaign.send_preview_payload()  # {"total", "by_support", "by_type"} — what a send would push out
+campaign.send_preview_payload()  # {"total", "by_support", "by_type"} — drafts a send would push out
 campaign.progress_payload()      # what already went out, per type, plus the runs
+campaign.ensure_steps(specs)     # idempotent (missive_type, label, position) rows
+campaign.get_step("email")       # the only step of that type, or ValueError
 campaign.is_processing           # flag set, or a run still open
 campaign.can_remove              # nothing past draft; enforced on delete
 ```
+
+`build_campaign_send_recap(campaign)` is the combined view of what
+`start_campaign()` can claim. `targets` counts live checkboxes. `drafts`
+counts claimable draft missives. A checkbox already attached to a draft is
+only in `drafts`. `total`, `by_type` and `by_support` add the two scopes.
+`build_send_preview()` remains the checkbox-only count.
+
+`prepare_preview(campaign, step, target)` builds the unsaved preview the
+views render. It reuses the target's contact resolver, accepts a recipient
+that has a name and no address, and can run a processor chain
+`(campaign, step, target) -> PreviewRuntimeData | None` without subclassing
+the preview view. Configure dotted paths in `PYMISSIVE_PREVIEW_PROCESSORS`;
+processors that only override content keep the default related objects and
+recipients. Nothing is saved.
 
 Both payloads cover `thread_type=MISSIVE`, so their totals agree with
 `count_sent` / `count_error` and stay below `count_missive`, which counts the

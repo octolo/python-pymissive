@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.10.0 — 2026-11-16
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.10.0,<2`.
+- No migration is required.
+
+### Changes
+
+- Document and test the shared missive, support, event, recipient, and
+  provider-preview contract.
+- Add batch breakdowns and recipient summaries for any linked model.
+- Replace a campaign target's recipients atomically, including many targets
+  in one call.
+- Add a combined send recap, idempotent campaign steps, and a preview
+  preparation hook.
+
 ## 1.9.0 — 2026-11-16
 
 ### Compatibility

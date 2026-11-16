@@ -31,6 +31,7 @@ from .drafts import (
 from .send import (
     SELECTION_TASK,
     CampaignAlreadySending,
+    build_campaign_send_recap,
     build_send_preview,
     generate_target,
     materialize_selection,
@@ -49,12 +50,14 @@ from .targets import (
     iter_targets,
     select,
     selection_qs,
+    set_target_recipients,
     unselect,
 )
 
 __all__ = [
     "SELECTION_TASK",
     "CampaignAlreadySending",
+    "build_campaign_send_recap",
     "build_draft",
     "build_send_preview",
     "connect_target_cleanup",
@@ -73,10 +76,11 @@ __all__ = [
     "materialize_selection",
     "resend_draft",
     "run_selection",
-    "selection_build",
     "select",
+    "selection_build",
     "selection_qs",
     "send_target",
+    "set_target_recipients",
     "start_selection",
     "unselect",
 ]

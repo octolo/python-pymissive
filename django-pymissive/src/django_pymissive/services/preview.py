@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils.translation import gettext_lazy as _
 
@@ -203,33 +204,169 @@ def _target_object(row: CampaignTarget):
 
 def missive_for_target_preview(row: CampaignTarget) -> Missive:
     """Build an unsaved target missive with pure related-object and recipient data."""
+    return prepare_preview(row.campaign, row.campaign_step, row).missive
+
+
+def prepare_preview(
+    campaign: MissiveCampaign,
+    campaign_step: CampaignStep | None = None,
+    target: CampaignTarget | None = None,
+    *,
+    recipients=None,
+    related_objects=None,
+    processors=None,
+    preview_kind: str = "email",
+    brand: str = "",
+) -> ResolvedPreview:
+    """Prepare one unsaved campaign preview without subclassing the view.
+
+    The default recipient list is the one materialization already uses
+    (:func:`ordered_target_contacts`) when *target* is a selection row.
+    Pass *recipients* to replace that list, including a name with no
+    deliverable channel value. *related_objects* replaces the linked objects.
+
+    *processors* is an optional chain of callables or dotted paths, analogous
+    to build-target processors. When omitted,
+    ``settings.PYMISSIVE_PREVIEW_PROCESSORS`` is used. Each is called as
+    ``processor(campaign, campaign_step, target)`` and may return
+    :class:`PreviewRuntimeData`, a mapping (``recipients``, ``related_objects``,
+    and optionally ``subject``, ``body_text``, ``body_rich``), or ``None``.
+    The first result that is not ``None`` wins; otherwise the default
+    resolution above is used. Nothing is saved.
+    """
+    step = campaign_step
+    if isinstance(target, CampaignTarget):
+        if target.campaign_id and campaign.pk and target.campaign_id != campaign.pk:
+            raise ValueError("target does not belong to campaign")
+        if step is None and target.campaign_step_id:
+            step = target.campaign_step
+        elif step is not None and target.campaign_step_id and target.campaign_step_id != step.pk:
+            raise ValueError("target does not belong to campaign_step")
+    kind = preview_kind_for_missive_type(step.missive_type) if step is not None else preview_kind
+    missive = missive_for_campaign_preview(campaign, kind, brand=brand, campaign_step=step)
+    default_runtime = _default_preview_runtime(
+        target,
+        recipients=recipients,
+        related_objects=related_objects,
+        missive_type=missive.missive_type,
+    )
+    if processors is None:
+        processors = getattr(settings, "PYMISSIVE_PREVIEW_PROCESSORS", ())
+    runtime = _runtime_from_processors(processors, campaign, step, target)
+    if runtime is None:
+        runtime = default_runtime
+    else:
+        runtime = _merge_preview_override(
+            missive,
+            runtime,
+            default_runtime=default_runtime,
+            recipients=recipients,
+            related_objects=related_objects,
+        )
+    setattr(missive, "_preview_runtime", runtime)  # noqa: B010 - preview-only, not a model field
+    return ResolvedPreview(
+        missive=missive,
+        source=target if isinstance(target, CampaignTarget) else (step or campaign),
+        campaign=campaign,
+        campaign_step=step,
+        target=target if isinstance(target, CampaignTarget) else None,
+        preview_kind=preview_kind_for_missive_type(missive.missive_type),
+        runtime_data=runtime,
+    )
+
+
+def _runtime_from_processors(processors, campaign, campaign_step, target):
+    from ..utils.imports import import_allowed_string
+
+    if isinstance(processors, str):
+        processors = [processors]
+    for entry in processors or []:
+        processor = import_allowed_string(entry) if isinstance(entry, str) else entry
+        payload = processor(campaign, campaign_step, target)
+        if payload is not None:
+            return payload
+    return None
+
+
+def _merge_preview_override(
+    missive,
+    payload,
+    *,
+    default_runtime,
+    recipients,
+    related_objects,
+) -> PreviewRuntimeData:
+    if isinstance(payload, PreviewRuntimeData):
+        runtime = payload
+    elif isinstance(payload, dict):
+        for attribute in ("subject", "body_text", "body_rich"):
+            if payload.get(attribute) not in (None, ""):
+                setattr(missive, attribute, payload[attribute])
+        runtime = _runtime_from_parts(
+            payload.get("recipients", default_runtime.recipients),
+            payload.get("related_objects", default_runtime.related_objects),
+            missive_type=missive.missive_type,
+        )
+    else:
+        raise TypeError("A preview processor must return PreviewRuntimeData, a mapping, or None.")
+    if recipients is None and related_objects is None:
+        return runtime
+    return _runtime_from_parts(
+        recipients if recipients is not None else runtime.recipients,
+        related_objects if related_objects is not None else runtime.related_objects,
+        missive_type=missive.missive_type,
+    )
+
+
+def _default_preview_runtime(target, *, recipients, related_objects, missive_type: str) -> PreviewRuntimeData:
     from ..processors.build_target import ordered_target_contacts, recipient_field_for_missive_type
 
-    step = row.campaign_step if row.campaign_step_id else None
-    missive = missive_for_campaign_preview(
-        row.campaign,
-        preview_kind_for_missive_type(row.missive_type),
-        campaign_step=step,
-    )
-    target = _target_object(row)
-    field = recipient_field_for_missive_type(row.missive_type)
-    recipients = (
-        tuple(
-            PreviewRecipient.from_contact(recipient_type, name, field, contact)
-            for recipient_type, name, contact in ordered_target_contacts(row)
+    if isinstance(target, CampaignTarget) and recipients is None:
+        field = recipient_field_for_missive_type(target.missive_type)
+        recipients = (
+            tuple(
+                PreviewRecipient.from_contact(recipient_type, name, field, contact)
+                for recipient_type, name, contact in ordered_target_contacts(target)
+            )
+            if field
+            else ()
         )
-        if field
-        else ()
+    if related_objects is None and isinstance(target, CampaignTarget):
+        linked = _target_object(target)
+        related_objects = (linked,) if linked is not None else ()
+    return _runtime_from_parts(recipients, related_objects, missive_type=missive_type)
+
+
+def _runtime_from_parts(recipients, related_objects, *, missive_type: str) -> PreviewRuntimeData:
+    from ..processors.build_target import recipient_field_for_missive_type
+
+    field = recipient_field_for_missive_type(missive_type) or "email"
+    normalized = tuple(_coerce_preview_recipient(item, field) for item in recipients or ())
+    return PreviewRuntimeData(
+        related_objects=tuple(related_objects or ()),
+        recipients=normalized,
     )
-    setattr(  # noqa: B010 - preview-only runtime data is not a model field
-        missive,
-        "_preview_runtime",
-        PreviewRuntimeData(
-            related_objects=(target,) if target is not None else (),
-            recipients=recipients,
-        ),
-    )
-    return missive
+
+
+def _coerce_preview_recipient(item, field: str) -> PreviewRecipient:
+    if isinstance(item, PreviewRecipient):
+        return item
+    if isinstance(item, (list, tuple)) and len(item) == 3:
+        recipient_type, name, contact = item
+        return PreviewRecipient.from_contact(str(recipient_type), str(name or ""), field, contact)
+    if isinstance(item, dict):
+        recipient_type = str(item.get("recipient_type") or MissiveRecipientType.RECIPIENT)
+        values = {key: item.get(key) or "" for key in _PREVIEW_RECIPIENT_FIELDS}
+        values["address"] = item.get("address")
+        return PreviewRecipient(
+            recipient_type=recipient_type,
+            name=str(item.get("name") or ""),
+            email=values["email"],
+            phone=values["phone"],
+            address=values["address"],
+            notification_id=values["notification_id"],
+        )
+    raise TypeError("A preview recipient must be a PreviewRecipient, a mapping, or (type, name, value).")
 
 
 def _missive_for_preview_source(
@@ -244,19 +381,19 @@ def _missive_for_preview_source(
     if isinstance(source, CampaignTarget):
         return source.missive or missive_for_target_preview(source)
     if isinstance(source, CampaignStep):
-        return missive_for_campaign_preview(
+        return prepare_preview(
             source.campaign,
-            preview_kind_for_missive_type(source.missive_type),
-            brand=brand,
-            campaign_step=source,
-        )
-    if isinstance(source, MissiveCampaign):
-        return missive_for_campaign_preview(
             source,
-            preview_kind,
+            preview_kind=preview_kind_for_missive_type(source.missive_type),
             brand=brand,
+        ).missive
+    if isinstance(source, MissiveCampaign):
+        return prepare_preview(
+            source,
             campaign_step=campaign_step,
-        )
+            preview_kind=preview_kind,
+            brand=brand,
+        ).missive
     raise TypeError(f"Unsupported preview source: {type(source).__name__}")
 
 

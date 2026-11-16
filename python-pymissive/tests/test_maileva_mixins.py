@@ -314,12 +314,26 @@ def test_send_disabled_still_stages_without_submitting(monkeypatch):
 
 def test_preview_stages_without_submit_and_uses_temporary_custom_data():
     provider = _provider()
-    with patch.object(provider, "_stage_postal_before_submit", return_value=("draft-1", [], [])) as stage:
-        result = provider.preview_registered_letter(subject="Proof")
+    recipients = [{"external_id": "recipient-1"}]
+    attachments = [{"external_id": "document-1"}]
+    staged = ("draft-1", recipients, attachments)
+    with (
+        patch.object(provider, "_stage_postal_before_submit", return_value=staged) as stage,
+        patch.object(provider, "_request") as request,
+    ):
+        registered = provider.preview_registered_letter(subject="Proof")
+        letter = provider.preview_letter(subject="Proof")
 
-    assert stage.call_args.kwargs["custom_data"] == "pymissive_temporary_preview"
-    assert result["event"] == "draft"
-    assert result["id"] == "draft-1"
+    request.assert_not_called()
+    assert [call.kwargs["custom_data"] for call in stage.call_args_list] == [
+        "pymissive_temporary_preview",
+        "pymissive_temporary_preview",
+    ]
+    for result in (registered, letter):
+        assert result["event"] == "draft"
+        assert result["id"] == "draft-1"
+        assert result["recipients"] == recipients
+        assert result["attachments"] == attachments
 
 
 def test_attachment_crud_uses_multipart_timeout():

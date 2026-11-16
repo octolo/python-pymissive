@@ -5,19 +5,21 @@ needs to annotate **its own** models with their missives:
 :class:`MissiveRelatedQuerySetMixin` for the annotations,
 :func:`missive_related_queryset` for the raw link rows, and
 :func:`missive_link_q` to express "which missives am I talking about" once.
+:func:`missive_breakdowns_by_object` and :func:`recipient_summaries_by_object`
+are the batch counterparts used by statistics and recipient views.
 """
 
+import re
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.db import models
-from django.db.models import Count, Min, Q, Value
+from django.db.models import Count, F, Min, Q, Value
 from django.db.models.expressions import OuterRef, Subquery
 from django.db.models.functions import Cast, Coalesce, JSONObject, Replace
-from pymissive.config import SENT_EVENTS
+from pymissive.config import SENT_EVENTS, missive_support_for_type
 
-from ..models.choices import missive_type_filter, pending_missive_q, sent_missive_q
-
+from ..models.choices import error_missive_q, missive_type_filter, pending_missive_q, sent_missive_q
 
 #: Ordering of the link rows: newest missive first, most recent link as
 #: tie-break. The link's own ``id`` is auto-incremented, so it breaks ties by
@@ -33,6 +35,43 @@ _NEWEST_FIRST = ("-missive__created_at", "-id")
 #: (999, 32 766 or more), so a batch that passes in tests can still fail in
 #: production — hence a size that fits everywhere rather than the backend's max.
 _ID_BATCH_SIZE = 5000
+
+#: Dimensions :func:`missive_breakdowns_by_object` knows how to group on.
+#: Anything else is refused: an arbitrary ORM path would let a caller widen
+#: the contract without a test noticing.
+_BREAKDOWN_FIELDS = {
+    "campaign": "missive__campaign_step__campaign_id",
+    "missive_type": "missive__missive_type",
+    "status": "missive__status",
+}
+
+#: Final segment of a metadata lookup that Django applies as a JSON lookup
+#: rather than as another key. Nested keys (``address__city``) stay exact.
+_METADATA_LOOKUPS = frozenset(
+    {
+        "contained_by",
+        "contains",
+        "endswith",
+        "exact",
+        "gt",
+        "gte",
+        "has_any_keys",
+        "has_key",
+        "has_keys",
+        "icontains",
+        "iendswith",
+        "iexact",
+        "in",
+        "iregex",
+        "isnull",
+        "istartswith",
+        "startswith",
+        "lt",
+        "lte",
+        "regex",
+    }
+)
+_METADATA_KEY = re.compile(r"^[A-Za-z0-9_]+(?:__[A-Za-z0-9_]+)*$")
 
 
 def _id_batches(values, size: int):
@@ -147,7 +186,10 @@ def missive_link_q(
         thread_type: Usually ``MissiveThreadType.MISSIVE`` to ignore the
             ``HISTORY`` rows a resend leaves behind.
         metadata: ``{key: value}`` pairs matched inside the missive ``metadata``
-            JSON bag, for discriminators the lib knows nothing about.
+            JSON bag, for discriminators the lib knows nothing about. A key may
+            end with one JSON lookup, so ``{"channel__in": ("letter", "address")}``
+            matches either value. A nested key such as ``address__city`` stays an
+            exact match. Keys that are not identifiers are rejected.
         sent: ``True`` for missives that left the pending state, ``False`` for
             the ones still waiting. Prefer this over a raw ``status`` filter: it
             also covers the legacy empty status.
@@ -173,10 +215,52 @@ def missive_link_q(
     if thread_type is not None:
         q &= Q(**{field("thread_type"): thread_type})
     for key, value in (metadata or {}).items():
-        q &= Q(**{f"{field('metadata')}__{key}": value})
+        q &= Q(**{f"{field('metadata')}__{_metadata_lookup_key(key)}": value})
     if sent is not None:
         q &= sent_missive_q(prefix) if sent else pending_missive_q(prefix)
     return q
+
+
+def _metadata_lookup_key(key: str) -> str:
+    """Return *key* when it is a JSON key, optionally ending in one JSON lookup.
+
+    ``channel__in`` is the ``in`` lookup. ``address__city`` is a nested key:
+    a trailing segment that is not a known lookup is left untouched. Only keys
+    that are not identifiers are rejected, so an ordinary JSON key cannot be
+    turned into a join or a raw expression.
+    """
+    if isinstance(key, str) and _METADATA_KEY.fullmatch(key):
+        return key
+    allowed = ", ".join(sorted(_METADATA_LOOKUPS))
+    raise ValueError(f"Unsupported metadata lookup: {key!r}. Use a JSON key or a key plus one of: {allowed}.")
+
+
+def _breakdown_dimensions(group_by) -> tuple[str, ...]:
+    if isinstance(group_by, str) or not isinstance(group_by, (list, tuple)):
+        raise TypeError("group_by must be a sequence of dimension names.")
+    names = tuple(group_by)
+    if not names:
+        raise ValueError("group_by must name at least one dimension.")
+    unknown = [name for name in names if name not in _BREAKDOWN_FIELDS]
+    if unknown:
+        known = ", ".join(_BREAKDOWN_FIELDS)
+        raise ValueError(f"Unknown breakdown dimension: {unknown[0]!r}. Expected one of {known}.")
+    if len(set(names)) != len(names):
+        raise ValueError("group_by dimensions must be unique.")
+    return names
+
+
+def _store_breakdown(bucket: dict, dimensions: tuple[str, ...], row: dict) -> None:
+    node = bucket
+    for index, name in enumerate(dimensions):
+        value = row[name]
+        if value is None:
+            return
+        key = str(value)
+        if index == len(dimensions) - 1:
+            node[key] = {"errors": int(row["errors"] or 0), "total": int(row["total"] or 0)}
+            return
+        node = node.setdefault(key, {})
 
 
 def missive_related_queryset(instance, **filters):
@@ -303,6 +387,156 @@ def missive_summaries_by_object(model, object_ids, **filters) -> dict:
     events = _event_summaries(MissiveEvent, every_missive)
     _populate_summaries(summaries, missives_by_object, last_missive, events)
     return summaries
+
+
+def missive_breakdowns_by_object(
+    model,
+    object_ids,
+    *,
+    group_by=("campaign", "missive_type"),
+    campaign=None,
+    support: str | None = None,
+    missive_type=None,
+    thread_type: str | None = None,
+    metadata: dict | None = None,
+) -> dict:
+    """``{object_id: {dimension: …}}`` counts for a batch of objects.
+
+    Groups linked missives in the database, then nests the buckets in Python
+    in the order of *group_by*. Accepted dimensions are ``campaign``,
+    ``missive_type`` and ``status``. Each leaf is ``{"errors", "total"}``:
+
+    * ``total`` counts missives that left the pending state
+      (:func:`sent_missive_q`), so a draft or a legacy empty status contributes
+      nothing;
+    * ``errors`` counts missives matching :func:`error_missive_q`.
+
+    A missive linked several times, or carrying several events or recipients,
+    is still counted once. ``thread_type`` defaults to no filter, so ``HISTORY``
+    rows are included until the caller says otherwise. Every requested object
+    gets an entry; a dimension value with no missive is simply absent. An empty
+    id list issues no query. Filters are those of :func:`missive_link_q` except
+    ``sent``, which would hide the draft rows the zero ``total`` is about.
+
+    Keys are text. A campaign id is ``str(pk)`` (dashed for a UUID) and an
+    object id is :func:`object_id_value`.
+    """
+    from ..models.related_object import MissiveRelatedObject
+
+    dimensions = _breakdown_dimensions(group_by)
+    summaries: dict[str, dict] = {object_id_value(getattr(pk, "pk", pk)): {} for pk in object_ids or []}
+    if not summaries:
+        return {}
+
+    link_q = missive_link_q(
+        **link_filters(
+            {
+                "campaign": campaign,
+                "support": support,
+                "missive_type": missive_type,
+                "thread_type": thread_type,
+                "metadata": metadata,
+            }
+        )
+    )
+    aliases = {name: F(_BREAKDOWN_FIELDS[name]) for name in dimensions}
+    type_q = content_type_q(model)
+    for object_ids_batch in _id_batches(summaries, _ID_BATCH_SIZE):
+        rows = (
+            MissiveRelatedObject.objects.filter(type_q, link_q, object_id__in=object_ids_batch)
+            .values("object_id", **aliases)
+            .annotate(
+                errors=Count("missive_id", distinct=True, filter=error_missive_q("missive")),
+                total=Count("missive_id", distinct=True, filter=sent_missive_q("missive")),
+            )
+        )
+        for row in rows:
+            bucket = summaries.get(row["object_id"])
+            if bucket is None:
+                continue
+            _store_breakdown(bucket, dimensions, row)
+    return summaries
+
+
+def recipient_summaries_by_object(
+    model,
+    object_ids,
+    *,
+    campaign=None,
+    support: str | None = None,
+    missive_type=None,
+    thread_type: str | None = None,
+) -> dict:
+    """``{object_id: [missive, …]}`` recipient rows for a batch of objects.
+
+    Each missive entry carries the ids needed to regroup it (``missive_id``,
+    ``campaign_id``, ``missive_type``, ``support``) and the recipients resolved
+    by :meth:`MissiveRecipientManager.details_by_missive` — the same contact
+    value as :meth:`MissiveRecipientManager.targets_by_missive`, plus the
+    recipient status, ``sent_at`` and role.
+
+    Every requested object gets a list, empty when nothing matches. Missives
+    are newest first and are not repeated when several links point at them.
+    An empty id list issues no query. Two queries run per id batch: the links,
+    then the recipients of those missives.
+    """
+    from ..models.recipient import MissiveRecipient
+    from ..models.related_object import MissiveRelatedObject
+
+    summaries: dict[str, list] = {object_id_value(getattr(pk, "pk", pk)): [] for pk in object_ids or []}
+    if not summaries:
+        return {}
+
+    link_q = missive_link_q(
+        **link_filters(
+            {
+                "campaign": campaign,
+                "support": support,
+                "missive_type": missive_type,
+                "thread_type": thread_type,
+            }
+        )
+    )
+    type_q = content_type_q(model)
+    for object_ids_batch in _id_batches(summaries, _ID_BATCH_SIZE):
+        linked: dict[str, list] = {}
+        seen: dict[str, set] = {}
+        rows = (
+            MissiveRelatedObject.objects.filter(type_q, link_q, object_id__in=object_ids_batch)
+            .order_by("object_id", *_NEWEST_FIRST)
+            .values(
+                "object_id",
+                "missive_id",
+                "missive__missive_type",
+                "missive__campaign_step__campaign_id",
+            )
+        )
+        for row in rows:
+            object_id = row["object_id"]
+            missive_ids = seen.setdefault(object_id, set())
+            if row["missive_id"] in missive_ids:
+                continue
+            missive_ids.add(row["missive_id"])
+            linked.setdefault(object_id, []).append(row)
+        details = MissiveRecipient.objects.details_by_missive(
+            [row["missive_id"] for entries in linked.values() for row in entries],
+            support=support,
+        )
+        for object_id, entries in linked.items():
+            summaries[object_id] = [_recipient_summary(row, details) for row in entries]
+    return summaries
+
+
+def _recipient_summary(row: dict, details: dict) -> dict:
+    missive_type = row["missive__missive_type"]
+    campaign_id = row["missive__campaign_step__campaign_id"]
+    return {
+        "missive_id": str(row["missive_id"]),
+        "campaign_id": None if campaign_id is None else str(campaign_id),
+        "missive_type": missive_type,
+        "support": missive_support_for_type(missive_type) or "",
+        "recipients": list(details.get(str(row["missive_id"]), ())),
+    }
 
 
 def _sent_at_subquery():

@@ -62,6 +62,43 @@ def build_send_preview(campaign, *, missive_types=None) -> dict:
     }
 
 
+def build_campaign_send_recap(campaign) -> dict:
+    """What :meth:`MissiveCampaign.start_campaign` can claim, counted once.
+
+    ``targets`` are the live checkboxes (no missive yet). ``drafts`` are the
+    draft missives :meth:`MissiveCampaign.claimable_send_queryset` would attach
+    to the new run. A target already pointing at a draft is only in ``drafts``.
+    ``total``, ``by_type`` and ``by_support`` add the two scopes. Supports use
+    the canonical keys from ``pymissive.config.GENERIC_SUPPORT``.
+    """
+    from django.db.models import Count
+    from pymissive.config import GENERIC_SUPPORT, missive_support_for_type
+
+    targets = target_services.counts(campaign, active_only=True)
+    drafts: dict[str, int] = {}
+    draft_rows = (
+        campaign.claimable_send_queryset().order_by().values("missive_type").annotate(total=Count("id", distinct=True))
+    )
+    for row in draft_rows:
+        drafts[row["missive_type"]] = row["total"]
+
+    by_type: dict[str, int] = {}
+    for missive_type, count in (*targets.items(), *drafts.items()):
+        by_type[missive_type] = by_type.get(missive_type, 0) + count
+    by_support = dict.fromkeys(GENERIC_SUPPORT, 0)
+    for missive_type, count in by_type.items():
+        support = missive_support_for_type(missive_type)
+        if support:
+            by_support[support] += count
+    return {
+        "total": sum(by_type.values()),
+        "by_support": by_support,
+        "by_type": by_type,
+        "targets": {"total": sum(targets.values()), "by_type": targets},
+        "drafts": {"total": sum(drafts.values()), "by_type": drafts},
+    }
+
+
 def materialize_selection(
     campaign,
     missive_types,

@@ -244,6 +244,135 @@ def disconnect_target_cleanup(*models_to_disconnect) -> None:
         )
 
 
+def set_target_recipients(
+    campaign,
+    missive_type: str,
+    values_by_target,
+    *,
+    recipient_type=None,
+    clear_other_roles: bool = False,
+    campaign_step=None,
+) -> int:
+    """Replace one role on many live targets in a single transaction.
+
+    *values_by_target* maps a :class:`CampaignTarget`, a saved business
+    object, or a ``(model, object_id)`` pair to the contacts that role must
+    hold. A bare object id is refused because two target models may share it.
+    Values are stored as given after :func:`stored_recipient_values`
+    deduplication.
+    Other roles are left in place unless ``clear_other_roles`` is set. A
+    target that is not a live row of this campaign and type is skipped when
+    it was named by object; a :class:`CampaignTarget` from another campaign
+    or channel raises ``ValueError``.
+
+    Returns how many live targets were addressed. An empty mapping issues
+    no query.
+    """
+    from ..models.campaign_target import CampaignRecipientTarget, stored_recipient_values
+    from ..processors.build_target import default_recipient_type
+
+    if not values_by_target:
+        return 0
+    channel = require_missive_type(missive_type)
+    role = recipient_type or default_recipient_type(channel)
+    with transaction.atomic():
+        rows, values_by_pk = _recipient_rows(campaign, channel, values_by_target, campaign_step)
+        if not rows:
+            return 0
+        target_ids = [row.pk for row in rows]
+        if clear_other_roles:
+            CampaignRecipientTarget.objects.filter(target_id__in=target_ids).exclude(recipient_type=role).delete()
+        existing = {
+            item.target_id: item
+            for item in CampaignRecipientTarget.objects.select_for_update().filter(
+                target_id__in=target_ids,
+                recipient_type=role,
+            )
+        }
+        created = []
+        updated = []
+        for row in rows:
+            values = stored_recipient_values(values_by_pk[row.pk], channel)
+            current = existing.get(row.pk)
+            if current is None:
+                created.append(CampaignRecipientTarget(target=row, recipient_type=role, values=values))
+            elif list(current.values or []) != values:
+                current.values = values
+                updated.append(current)
+        if created:
+            CampaignRecipientTarget.objects.bulk_create(created)
+        if updated:
+            CampaignRecipientTarget.objects.bulk_update(updated, ["values"])
+    return len(rows)
+
+
+def _recipient_rows(campaign, channel: str, values_by_target, campaign_step):
+    from ..models.campaign_target import CampaignTarget
+
+    by_pk: dict[int, object] = {}
+    by_identity: dict[tuple[type[models.Model], str], object] = {}
+    for key, values in values_by_target.items():
+        if isinstance(key, CampaignTarget):
+            if key.campaign_id != getattr(campaign, "pk", None) or key.missive_type != channel:
+                raise ValueError("Recipient target does not belong to this campaign and missive type.")
+            if campaign_step is not None and key.campaign_step_id != campaign_step.pk:
+                raise ValueError("Recipient target does not belong to this campaign step.")
+            by_pk[key.pk] = values
+            continue
+        if isinstance(key, models.Model):
+            model = _require_instance(key)
+            by_identity[(model, object_id_value(key.pk, pk_field=model._meta.pk))] = values
+            continue
+        if isinstance(key, tuple) and len(key) == 2:
+            model, object_id = key
+            meta = getattr(model, "_meta", None)
+            if not isinstance(model, type) or meta is None:
+                raise TypeError("A target identity must be (model, object_id).")
+            model = meta.concrete_model
+            by_identity[(model, object_id_value(object_id, pk_field=model._meta.pk))] = values
+            continue
+        raise TypeError(
+            "Recipient target keys must be CampaignTarget rows, saved model instances, or (model, object_id) pairs."
+        )
+
+    rows: dict[int, CampaignTarget] = {}
+    qs = selection_qs(
+        campaign,
+        missive_type=channel,
+        active_only=True,
+        campaign_step=campaign_step,
+    ).select_for_update()
+    if by_pk:
+        for row in qs.filter(pk__in=by_pk):
+            rows[row.pk] = row
+        missing = set(by_pk) - set(rows)
+        if missing:
+            raise ValueError("Recipient target is not a live selection row of this campaign.")
+    values_by_content_type: dict[tuple[int, str], object] = {}
+    window = Q()
+    for model in {model for model, _object_id in by_identity}:
+        content_type = ContentType.objects.get_for_model(model)
+        object_ids = [object_id for candidate, object_id in by_identity if candidate is model]
+        window |= Q(content_type=content_type, object_id__in=object_ids)
+        for object_id in object_ids:
+            values_by_content_type[(content_type.pk, object_id)] = by_identity[(model, object_id)]
+    if window:
+        for row in qs.filter(window):
+            rows.setdefault(row.pk, row)
+
+    values_by_pk = {}
+    ordered = []
+    for row in rows.values():
+        if row.pk in by_pk:
+            values_by_pk[row.pk] = by_pk[row.pk]
+        elif (row.content_type_id, row.object_id) in values_by_content_type:
+            values_by_pk[row.pk] = values_by_content_type[(row.content_type_id, row.object_id)]
+        else:
+            continue
+        ordered.append(row)
+    return ordered, values_by_pk
+
+
 def is_selected(campaign, target, missive_type: str) -> bool:
     """True when *target* has a live (not-yet-materialized) selection row."""
     content_type, object_id = identity(target)

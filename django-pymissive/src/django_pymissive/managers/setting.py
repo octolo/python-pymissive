@@ -45,6 +45,7 @@ def _known_settings() -> dict[str, object]:
         "PYMISSIVE_JSON_WIDGET": None,
         "PYMISSIVE_OVERRIDE_RECIPIENT": None,
         "PYMISSIVE_PROGRESS_HOOK": None,
+        "PYMISSIVE_PREVIEW_PROCESSORS": [],
         "PYMISSIVE_RECIPIENT_ALLOWED": None,
         "PYMISSIVE_PROGRESS_STEP": PROGRESS_STEP_DEFAULT,
         "PYMISSIVE_RICHTEXT_WIDGET": "django.forms.Textarea",

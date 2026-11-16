@@ -119,6 +119,7 @@ can_send_sms = hasattr(provider, "send_sms")
 
 For more details, see the documentation in the `docs/` folder:
 
+- `docs/contracts.md` - Stable types, events, recipients and preview boundary
 - `docs/purpose.md` - Project goals and architecture
 - `docs/structure.md` - Module structure and organization
 - `docs/development.md` - Development guidelines

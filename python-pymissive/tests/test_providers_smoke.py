@@ -42,6 +42,21 @@ def test_shipped_provider_instantiates_and_normalizes(module_name, class_name):
     assert isinstance(provider.get_brands(), list)
 
 
+_POSTAL_PREVIEW_METHODS = ("preview_letter", "preview_registered_letter")
+
+
+@pytest.mark.parametrize(("module_name", "class_name"), SHIPPED)
+def test_preview_capability_is_a_real_method(module_name, class_name):
+    provider = _load(module_name, class_name)()
+    for method_name in _POSTAL_PREVIEW_METHODS:
+        implemented = hasattr(provider, method_name)
+        if class_name == "MailevaProvider":
+            assert implemented
+            assert callable(getattr(provider, method_name))
+        else:
+            assert not implemented
+
+
 def test_todo_is_not_among_the_shipped_provider_modules():
     """``todo/`` is a backlog folder, not a discoverable provider."""
     import pkgutil

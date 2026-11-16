@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 import pytest
-
 from pymissive.config import (
     ADDRESS_FIELDS,
+    ALL_EVENTS,
     EMAIL_FIELDS,
+    FAILED_EVENTS,
     GENERIC_SUPPORT,
+    INFO_EVENTS,
     MISSIVE_FIELDS,
+    MISSIVE_TYPES,
     PHONE_FIELDS,
+    SENT_EVENTS,
+    SUCCESSFUL_EVENTS,
     fields_to_arg_config,
     get_config_by_support,
     missive_service_type,
+    missive_support_for_type,
     missive_types_for_support,
     normalize_missive_type,
     normalize_support,
     provider_service_name,
 )
+from pymissive.config.recipient import RECIPIENT_FIELDS
 
 
 def test_normalize_support_accepts_key_and_type():
@@ -68,6 +75,74 @@ def test_unknown_missive_type_does_not_build_a_service_name():
         missive_service_type("lre")
     with pytest.raises(ValueError, match="Unknown missive type"):
         provider_service_name("send", "postal")
+
+
+def test_every_missive_type_belongs_to_one_support():
+    owners: dict[str, str] = {}
+    for support, types in GENERIC_SUPPORT.items():
+        assert normalize_support(support) == support
+        configured = tuple(types)
+        returned = missive_types_for_support(support)
+        assert returned == list(configured)
+        returned.append("mutated")
+        assert tuple(types) == configured
+        for missive_type in types:
+            assert missive_type not in owners, f"{missive_type} belongs to {owners.get(missive_type)} and {support}"
+            assert missive_type in MISSIVE_TYPES, missive_type
+            owners[missive_type] = support
+
+    orphans = set(MISSIVE_TYPES) - set(owners)
+    assert orphans == set()
+
+    for missive_type, support in owners.items():
+        assert normalize_missive_type(missive_type) == missive_type
+        assert missive_support_for_type(missive_type) == support
+        assert normalize_support(missive_type) == support
+        hyphenated = missive_type.replace("_", "-")
+        assert normalize_missive_type(hyphenated) == missive_type
+        assert missive_support_for_type(hyphenated) == support
+        assert normalize_support(hyphenated) == support
+
+
+def test_sent_events_keep_their_documented_order_and_membership():
+    assert SENT_EVENTS == ("sent", "accepted", "delivered")
+    assert set(SENT_EVENTS) <= set(ALL_EVENTS)
+
+
+def test_event_categories_partition_all_events():
+    successful = set(SUCCESSFUL_EVENTS)
+    failed = set(FAILED_EVENTS)
+    info = set(INFO_EVENTS)
+    assert successful.isdisjoint(failed)
+    assert successful.isdisjoint(info)
+    assert failed.isdisjoint(info)
+    assert set(ALL_EVENTS) == successful | failed | info
+    assert len(ALL_EVENTS) == len(successful) + len(failed) + len(info)
+
+
+_RECIPIENT_CONTRACT_FIELDS = (
+    "recipient_type",
+    "name",
+    "internal_id",
+    "external_id",
+    "substitute_id",
+    "email",
+    "phone",
+    "address",
+    "notification_id",
+    "sent_at",
+    "delivered_at",
+    "tracking_number",
+)
+
+
+def test_recipient_contract_fields_keep_their_formats():
+    missing = [name for name in _RECIPIENT_CONTRACT_FIELDS if name not in RECIPIENT_FIELDS]
+    assert missing == []
+    for name in _RECIPIENT_CONTRACT_FIELDS:
+        assert RECIPIENT_FIELDS[name].get("format"), name
+    assert RECIPIENT_FIELDS["sent_at"]["format"] == "datetime"
+    assert RECIPIENT_FIELDS["delivered_at"]["format"] == "datetime"
 
 
 def test_fields_to_arg_config_maps_formats():

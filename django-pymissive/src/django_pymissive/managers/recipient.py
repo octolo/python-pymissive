@@ -46,6 +46,51 @@ class MissiveRecipientManager(models.Manager):
             output_field=models.CharField(),
         )
 
+    def details_by_missive(self, missive_ids, *, support: str | None = None) -> dict:
+        """``{str(missive_id): [recipient, …]}`` for a batch of missives.
+
+        Same contact value as :meth:`targets_by_missive`, plus the role,
+        status, ``sent_at`` and support. One query, with no join on events.
+        """
+        missive_ids = [mid for mid in (missive_ids or []) if mid]
+        if not missive_ids:
+            return {}
+        normalized, fields = _target_fields(support)
+        # _base_manager rather than self: get_queryset() annotates count_event,
+        # and its LEFT JOIN on the events survives .values() — which only drops
+        # the column — leaving the rows to group multiplied by the events. Fifty
+        # missives with 3 recipients and 20 events each: 3 000 rows scanned and
+        # grouped for 150 read. The prefetch it also carries is ignored anyway.
+        qs = self.model._base_manager.filter(missive_id__in=missive_ids)
+        if normalized:
+            qs = qs.filter(recipient_support=normalized)
+
+        by_missive: dict[str, list] = {}
+        columns = (
+            "missive_id",
+            "recipient_support",
+            "recipient_type",
+            "name",
+            "status",
+            "sent_at",
+            *fields.values(),
+        )
+        for row in qs.order_by("name", "id").values(*columns):
+            value = _target_from_row(row, fields)
+            if not value:
+                continue
+            by_missive.setdefault(str(row["missive_id"]), []).append(
+                {
+                    "value": value,
+                    "name": row["name"] or "",
+                    "status": row["status"],
+                    "sent_at": row["sent_at"],
+                    "recipient_type": row["recipient_type"],
+                    "support": row["recipient_support"],
+                }
+            )
+        return by_missive
+
     def targets_by_missive(self, missive_ids, *, support: str | None = None) -> dict:
         """``{str(missive_id): [target, …]}`` for a batch of missives.
 
@@ -63,27 +108,10 @@ class MissiveRecipientManager(models.Manager):
         ``support`` restricts the result to one channel (a support key, alias or
         missive type); without it every recipient of the missives is returned.
         """
-        missive_ids = [mid for mid in (missive_ids or []) if mid]
-        if not missive_ids:
-            return {}
-        normalized, fields = _target_fields(support)
-        # _base_manager rather than self: get_queryset() annotates count_event,
-        # and its LEFT JOIN on the events survives .values() — which only drops
-        # the column — leaving the rows to group multiplied by the events. Fifty
-        # missives with 3 recipients and 20 events each: 3 000 rows scanned and
-        # grouped for 150 read. The prefetch it also carries is ignored anyway.
-        qs = self.model._base_manager.filter(missive_id__in=missive_ids)
-        if normalized:
-            qs = qs.filter(recipient_support=normalized)
-            fields = {normalized: SUPPORT_VALUE_FIELD[normalized]}
-
-        by_missive: dict[str, list] = {}
-        columns = ("missive_id", "recipient_support", "name", *fields.values())
-        for row in qs.order_by("name", "id").values(*columns):
-            value = _target_from_row(row, fields)
-            if value:
-                by_missive.setdefault(str(row["missive_id"]), []).append(value)
-        return by_missive
+        return {
+            missive_id: [item["value"] for item in items]
+            for missive_id, items in self.details_by_missive(missive_ids, support=support).items()
+        }
 
     def get_queryset(self):
         return (

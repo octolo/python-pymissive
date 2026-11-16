@@ -39,9 +39,11 @@ from django_pymissive.managers.campaign_step import (
 from django_pymissive.managers import related_object as related_object_manager
 from django_pymissive.managers.related_object import (
     MissiveRelatedQuerySetMixin,
+    missive_breakdowns_by_object,
     missive_related_queryset,
     missive_summaries_by_object,
     object_id_value,
+    recipient_summaries_by_object,
 )
 from django_pymissive.managers.scheduler import (
     count_annotations as run_count_annotations,
@@ -1371,3 +1373,239 @@ def test_summaries_by_object_queries_nothing_for_an_empty_batch():
     with CaptureQueriesContext(connection) as captured:
         assert missive_summaries_by_object(Contact, []) == {}
     assert captured.captured_queries == []
+
+
+# ---------------------------------------------------------------------------
+# Batch pass: missive_breakdowns_by_object and recipient summaries
+# ---------------------------------------------------------------------------
+
+
+def _status(missive, status):
+    Missive.objects.filter(pk=missive.pk).update(status=status)
+    missive.status = status
+    return missive
+
+
+def test_breakdowns_count_each_missive_once_per_campaign_and_type():
+    contact = _contact()
+    other = _contact()
+    bare = _contact()
+    email_campaign = _campaign()
+    sms_campaign = _campaign()
+    success = _status(_missive(email_campaign, missive_type=MissiveType.EMAIL), MissiveStatus.SUCCESS)
+    failed = _status(_missive(email_campaign, missive_type=MissiveType.SMS), MissiveStatus.FAILED)
+    _status(_missive(sms_campaign, missive_type=MissiveType.EMAIL), MissiveStatus.ERROR)
+    draft = _missive(email_campaign, missive_type=MissiveType.EMAIL, status=MissiveStatus.DRAFT)
+    for missive in (success, failed, draft):
+        missive.to_missiveevent.create(event="sent", occurred_at=timezone.now())
+        missive.to_missiverecipient.create(name="Ada", email="ada@example.com")
+        _link(missive, contact)
+        _link(missive, contact)
+    _link(_missive(email_campaign, status=MissiveStatus.SUCCESS), other)
+
+    stats = missive_breakdowns_by_object(Contact, [contact.pk, other.pk, bare.pk])
+    email_bucket = stats[object_id_value(contact.pk)][str(email_campaign.pk)]
+    assert email_bucket[MissiveType.EMAIL] == {"errors": 0, "total": 1}
+    assert email_bucket[MissiveType.SMS] == {"errors": 1, "total": 1}
+    assert stats[object_id_value(other.pk)][str(email_campaign.pk)][MissiveType.EMAIL] == {
+        "errors": 0,
+        "total": 1,
+    }
+    assert stats[object_id_value(bare.pk)] == {}
+
+
+@pytest.mark.parametrize("status", [MissiveStatus.FAILED, MissiveStatus.PARTIALLY_FAILED, MissiveStatus.ERROR])
+def test_breakdowns_count_native_error_statuses_in_errors_and_total(status):
+    contact = _contact()
+    campaign = _campaign()
+    _link(_status(_missive(campaign), status), contact)
+
+    bucket = missive_breakdowns_by_object(Contact, [contact.pk])[object_id_value(contact.pk)]
+    assert bucket[str(campaign.pk)][MissiveType.EMAIL] == {"errors": 1, "total": 1}
+
+
+def test_breakdowns_exclude_draft_and_legacy_empty_status_from_total():
+    contact = _contact()
+    campaign = _campaign()
+    _link(_missive(campaign, status=MissiveStatus.DRAFT), contact)
+    legacy = _missive(campaign)
+    _status(legacy, "")
+    _link(legacy, contact)
+
+    bucket = missive_breakdowns_by_object(Contact, [contact.pk])[object_id_value(contact.pk)]
+    assert bucket[str(campaign.pk)][MissiveType.EMAIL] == {"errors": 0, "total": 0}
+
+
+def test_breakdowns_include_history_until_thread_type_is_set():
+    contact = _contact()
+    campaign = _campaign()
+    _link(
+        _status(
+            _missive(campaign, thread_type=MissiveThreadType.HISTORY),
+            MissiveStatus.SUCCESS,
+        ),
+        contact,
+    )
+
+    key = object_id_value(contact.pk)
+    assert missive_breakdowns_by_object(Contact, [contact.pk])[key][str(campaign.pk)][MissiveType.EMAIL]["total"] == 1
+    filtered = missive_breakdowns_by_object(
+        Contact,
+        [contact.pk],
+        thread_type=MissiveThreadType.MISSIVE,
+    )
+    assert filtered[key] == {}
+
+
+def test_breakdowns_filter_campaign_support_type_and_metadata():
+    contact = _contact()
+    campaign = _campaign()
+    other = _campaign()
+    letter = _missive(campaign, missive_type=MissiveType.LETTER, metadata={"channel": "letter"})
+    address = _missive(
+        campaign,
+        missive_type=MissiveType.REGISTERED_LETTER,
+        metadata={"channel": "address", "address": {"city": "Lyon"}},
+    )
+    _status(letter, MissiveStatus.SUCCESS)
+    _status(address, MissiveStatus.SUCCESS)
+    _link(letter, contact)
+    _link(address, contact)
+    _link(_status(_missive(other, metadata={"channel": "letter"}), MissiveStatus.SUCCESS), contact)
+
+    stats = missive_breakdowns_by_object(
+        Contact,
+        [contact.pk],
+        campaign=campaign,
+        support="address",
+        metadata={"channel__in": ("letter", "address")},
+    )
+    bucket = stats[object_id_value(contact.pk)][str(campaign.pk)]
+    assert set(bucket) == {MissiveType.LETTER, MissiveType.REGISTERED_LETTER}
+    assert other.pk and str(other.pk) not in stats[object_id_value(contact.pk)]
+
+    nested = missive_related_queryset(contact, metadata={"address__city": "Lyon"})
+    assert list(nested.values_list("missive_id", flat=True)) == [address.pk]
+    with pytest.raises(ValueError, match="Unsupported metadata lookup"):
+        missive_related_queryset(contact, metadata={"channel drop": "letter"})
+
+
+def test_breakdowns_follow_group_by_order_and_reject_unknown_dimensions():
+    contact = _contact()
+    campaign = _campaign()
+    _link(_status(_missive(campaign), MissiveStatus.SUCCESS), contact)
+
+    by_status = missive_breakdowns_by_object(Contact, [contact.pk], group_by=("status", "campaign"))
+    assert by_status[object_id_value(contact.pk)][MissiveStatus.SUCCESS][str(campaign.pk)]["total"] == 1
+    with pytest.raises(ValueError, match="Unknown breakdown dimension"):
+        missive_breakdowns_by_object(Contact, [contact.pk], group_by=("channel",))
+
+
+def test_breakdowns_accept_uuid_and_text_object_ids():
+    campaign = _campaign()
+    missive = _status(_missive(campaign), MissiveStatus.SUCCESS)
+    _link(missive, campaign)
+    link = _link(missive, _contact())
+    MissiveRelatedObject.objects.filter(pk=link.pk).update(object_id="order-123")
+
+    uuid_stats = missive_breakdowns_by_object(MissiveCampaign, [campaign])
+    assert uuid_stats[object_id_value(campaign.pk)][str(campaign.pk)][MissiveType.EMAIL]["total"] == 1
+    text_stats = missive_breakdowns_by_object(Contact, ["order-123"])
+    assert text_stats["order-123"][str(campaign.pk)][MissiveType.EMAIL]["total"] == 1
+
+
+def test_breakdowns_use_one_query_per_batch_and_none_for_an_empty_list(monkeypatch):
+    campaign = _campaign()
+    contacts = [_contact() for _ in range(5)]
+    for contact in contacts:
+        missive = _status(_missive(campaign), MissiveStatus.SUCCESS)
+        for _ in range(3):
+            missive.to_missiveevent.create(event="sent", occurred_at=timezone.now())
+        _link(missive, contact)
+
+    with CaptureQueriesContext(connection) as captured:
+        stats = missive_breakdowns_by_object(Contact, [contact.pk for contact in contacts])
+    assert len(captured.captured_queries) == 1
+    assert "missiveevent" not in captured.captured_queries[0]["sql"]
+    assert all(row[str(campaign.pk)][MissiveType.EMAIL] == {"errors": 0, "total": 1} for row in stats.values())
+
+    monkeypatch.setattr(related_object_manager, "_ID_BATCH_SIZE", 2)
+    with CaptureQueriesContext(connection) as batched:
+        assert missive_breakdowns_by_object(Contact, [contact.pk for contact in contacts]) == stats
+    assert len(batched.captured_queries) == 3
+
+    with CaptureQueriesContext(connection) as empty:
+        assert missive_breakdowns_by_object(Contact, []) == {}
+    assert empty.captured_queries == []
+
+
+def test_recipient_summaries_keep_status_sent_at_and_campaign():
+    contact = _contact()
+    other = _contact()
+    campaign = _campaign()
+    sent_at = timezone.now()
+    email = _missive(campaign, missive_type=MissiveType.EMAIL, status=MissiveStatus.SUCCESS)
+    email.to_missiverecipient.create(
+        name="Ada",
+        email="ada@example.com",
+        status=MissiveStatus.SUCCESS,
+        sent_at=sent_at,
+    )
+    email.to_missiverecipient.create(
+        name="Grace",
+        email="grace@example.com",
+        status=MissiveStatus.FAILED,
+        recipient_type="cc",
+    )
+    sms = _missive(campaign, missive_type=MissiveType.SMS, status=MissiveStatus.SUCCESS)
+    sms.to_missiverecipient.create(name="Ada", phone="+33601020304", status=MissiveStatus.SUCCESS)
+    _link(email, contact)
+    _link(email, contact)
+    _link(sms, contact)
+    _link(email, other)
+
+    summaries = recipient_summaries_by_object(Contact, [contact.pk, other.pk, _contact().pk])
+    rows = summaries[object_id_value(contact.pk)]
+    assert [row["missive_id"] for row in rows] == [str(sms.pk), str(email.pk)]
+    email_row = rows[1]
+    assert email_row["campaign_id"] == str(campaign.pk)
+    assert email_row["support"] == "email"
+    assert [(item["value"], item["status"], item["sent_at"]) for item in email_row["recipients"]] == [
+        ("ada@example.com", MissiveStatus.SUCCESS, sent_at),
+        ("grace@example.com", MissiveStatus.FAILED, None),
+    ]
+    assert summaries[object_id_value(other.pk)][0]["missive_id"] == str(email.pk)
+    assert (
+        recipient_summaries_by_object(Contact, [contact.pk], support="email")[object_id_value(contact.pk)][0][
+            "missive_type"
+        ]
+        == MissiveType.EMAIL
+    )
+    assert recipient_summaries_by_object(
+        Contact,
+        [contact.pk],
+        campaign=campaign,
+        thread_type=MissiveThreadType.MISSIVE,
+    )[object_id_value(contact.pk)]
+
+
+def test_recipient_summaries_cost_two_queries_per_batch(monkeypatch):
+    contacts = [_contact() for _ in range(4)]
+    for contact in contacts:
+        missive = _missive(status=MissiveStatus.SUCCESS)
+        missive.to_missiverecipient.create(name="Ada", email=f"{contact.pk}@example.com")
+        _link(missive, contact)
+
+    with CaptureQueriesContext(connection) as captured:
+        summaries = recipient_summaries_by_object(Contact, [contact.pk for contact in contacts])
+    assert len(captured.captured_queries) == 2
+    assert len(summaries) == 4
+
+    monkeypatch.setattr(related_object_manager, "_ID_BATCH_SIZE", 2)
+    with CaptureQueriesContext(connection) as batched:
+        assert recipient_summaries_by_object(Contact, [contact.pk for contact in contacts]) == summaries
+    assert len(batched.captured_queries) == 4
+
+    with CaptureQueriesContext(connection) as empty:
+        assert recipient_summaries_by_object(Contact, []) == {}
+    assert empty.captured_queries == []

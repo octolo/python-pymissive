@@ -29,6 +29,21 @@ from ..utils import (
 )
 
 
+def _step_spec(spec) -> tuple[str, str, int]:
+    if isinstance(spec, dict):
+        missive_type = spec.get("missive_type")
+        label = spec.get("label") or ""
+        position = spec.get("position")
+    else:
+        try:
+            missive_type, label, position = spec
+        except (TypeError, ValueError) as exc:
+            raise ValueError("A step spec is (missive_type, label, position) or a mapping of those keys.") from exc
+    if position is None:
+        raise ValueError("A step spec needs a position.")
+    return str(missive_type or ""), str(label or ""), int(position)
+
+
 def _progress_by_step(campaign) -> list:
     """Per-step totals. Missives with no step stay in the type totals only."""
     from django.db.models import Count
@@ -439,6 +454,76 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
             if support:
                 by_support[support] += count
         return {"total": total, "by_support": by_support, "by_type": by_type}
+
+    def ensure_steps(self, specs) -> dict:
+        """Create each missing step from *specs*. Existing types are kept.
+
+        *specs* is a sequence of ``(missive_type, label, position)`` or of
+        mappings with those keys. A type that already has a step is skipped,
+        so calling this twice does not insert a second row. When the requested
+        position is already taken, the next free position is used, walking
+        upward from the highest position already stored. The result maps each
+        missive type to the first step of that type, ordered by position.
+        """
+        from pymissive.config import normalize_missive_type
+
+        from .campaign_step import CampaignStep
+
+        if self.pk is None:
+            raise ValueError("Save the campaign before creating steps.")
+        parsed = [_step_spec(spec) for spec in specs]
+        canonical_specs = []
+        for missive_type, label, position in parsed:
+            canonical = normalize_missive_type(missive_type)
+            if not canonical:
+                raise ValueError(f"Unknown missive type: {missive_type!r}")
+            if position < 0:
+                raise ValueError(f"Step position must be zero or more, got {position}.")
+            canonical_specs.append((canonical, label, position))
+
+        with transaction.atomic():
+            locked = type(self).objects_plain.select_for_update().get(pk=self.pk)
+            existing: dict = {}
+            taken: set[int] = set()
+            for step in locked.to_campaignstep.all():
+                existing.setdefault(step.missive_type, step)
+                taken.add(step.position)
+            for missive_type, label, position in canonical_specs:
+                if missive_type in existing:
+                    continue
+                while position in taken:
+                    position += 1
+                step = CampaignStep(
+                    campaign=locked,
+                    missive_type=missive_type,
+                    label=label,
+                    position=position,
+                )
+                step.save()
+                existing[missive_type] = step
+                taken.add(position)
+        return existing
+
+    def get_step(self, missive_type: str, *, require_unique: bool = True):
+        """Return the step of *missive_type*.
+
+        With ``require_unique``, more than one step of that type raises
+        ``ValueError``. Otherwise the lowest ``position`` wins, then the
+        primary key. A missing step raises ``ValueError``.
+        """
+        from pymissive.config import normalize_missive_type
+
+        canonical = normalize_missive_type(missive_type)
+        if not canonical:
+            raise ValueError(f"Unknown missive type: {missive_type!r}")
+        steps = list(self.to_campaignstep.filter(missive_type=canonical).order_by("position", "pk"))
+        if not steps:
+            raise ValueError(f"Campaign has no {canonical!r} step.")
+        if require_unique and len(steps) > 1:
+            raise ValueError(
+                f"Campaign has {len(steps)} {canonical!r} steps. Pass require_unique=False to use the first."
+            )
+        return steps[0]
 
     def get_progress_path(self) -> str:
         """Relative URL for the live progress page of this campaign."""

@@ -4,13 +4,13 @@ import pytest
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
-from django.test import Client
+from django.test import Client, override_settings
 from django.urls import reverse
 from django_pymissive.models import CampaignStep, CampaignTarget, Missive, MissiveCampaign, MissiveStatus, MissiveType
 from django_pymissive.models.choices import MissiveRecipientType
 from django_pymissive.processors.build_target import ordered_target_contacts
 from django_pymissive.services import select
-from django_pymissive.services.preview import resolve_preview
+from django_pymissive.services.preview import PreviewRecipient, PreviewRuntimeData, prepare_preview, resolve_preview
 
 from tests.fakeapp.models import Contact
 
@@ -84,6 +84,111 @@ def test_target_resolver_uses_the_same_pure_contacts_as_generation():
     assert preview.runtime_data is preview.missive._preview_runtime
     assert preview.missive._state.adding
     assert Missive.objects.count() == 0
+
+
+def test_prepare_preview_keeps_a_named_recipient_without_an_address():
+    campaign = _campaign()
+    step = campaign.to_campaignstep.get()
+
+    preview = prepare_preview(
+        campaign,
+        step,
+        recipients=[{"name": "Ada Lovelace", "recipient_type": MissiveRecipientType.RECIPIENT}],
+    )
+
+    recipient = preview.runtime_data.recipients[0]
+    assert recipient.name == "Ada Lovelace"
+    assert recipient.email == ""
+    assert recipient.address is None
+    assert preview.missive._state.adding
+    assert Missive.objects.count() == 0
+
+
+@override_settings(PYMISSIVE_ALLOWED_TASK_BACKENDS=None)
+def test_prepare_preview_uses_the_target_contacts_until_a_processor_answers():
+    row, _contact = _row()
+
+    default = prepare_preview(row.campaign, row.campaign_step, row)
+    assert [(item.recipient_type, item.name, item.email) for item in default.runtime_data.recipients] == (
+        ordered_target_contacts(row)
+    )
+
+    def processor(campaign, step, target):
+        assert target is row
+        return {
+            "subject": "Rendered",
+            "recipients": [PreviewRecipient(recipient_type=MissiveRecipientType.RECIPIENT, name="Grace")],
+            "related_objects": (target,),
+        }
+
+    prepared = prepare_preview(row.campaign, row.campaign_step, row, processors=[lambda *args: None, processor])
+    assert prepared.missive.subject == "Rendered"
+    assert prepared.runtime_data.recipients[0].name == "Grace"
+    assert prepared.runtime_data.related_objects == (row,)
+    assert Missive.objects.count() == 0
+
+    dotted = prepare_preview(
+        row.campaign,
+        row.campaign_step,
+        row,
+        processors=["tests.test_target_preview._named_preview"],
+    )
+    assert dotted.runtime_data == PreviewRuntimeData(
+        recipients=(PreviewRecipient(recipient_type=MissiveRecipientType.RECIPIENT, name="Named"),),
+    )
+
+
+def _named_preview(campaign, step, target):
+    return PreviewRuntimeData(
+        recipients=(PreviewRecipient(recipient_type=MissiveRecipientType.RECIPIENT, name="Named"),),
+    )
+
+
+def _subject_preview(campaign, step, target):
+    return {"subject": "Configured preview"}
+
+
+@override_settings(
+    PYMISSIVE_ALLOWED_TASK_BACKENDS=None,
+    PYMISSIVE_PREVIEW_PROCESSORS=["tests.test_target_preview._subject_preview"],
+)
+def test_resolve_preview_runs_the_configured_hook_and_keeps_default_recipients():
+    row, _contact = _row()
+
+    preview = resolve_preview(row)
+    step_preview = resolve_preview(row.campaign_step)
+    campaign_preview = resolve_preview(row.campaign, campaign_step=row.campaign_step)
+
+    assert preview.missive.subject == "Configured preview"
+    assert step_preview.missive.subject == "Configured preview"
+    assert campaign_preview.missive.subject == "Configured preview"
+    assert [(item.recipient_type, item.name, item.email) for item in preview.runtime_data.recipients] == (
+        ordered_target_contacts(row)
+    )
+
+
+def test_prepare_preview_uses_the_step_channel_for_tuple_recipients():
+    campaign = _campaign()
+    sms_step = CampaignStep.objects.create(
+        campaign=campaign,
+        position=2,
+        missive_type=MissiveType.SMS,
+    )
+
+    preview = prepare_preview(
+        campaign,
+        sms_step,
+        recipients=[(MissiveRecipientType.RECIPIENT, "Ada", "+33601020304")],
+        processors=[],
+    )
+
+    assert preview.runtime_data.recipients == (
+        PreviewRecipient(
+            recipient_type=MissiveRecipientType.RECIPIENT,
+            name="Ada",
+            phone="+33601020304",
+        ),
+    )
 
 
 def test_target_preview_is_staff_only():

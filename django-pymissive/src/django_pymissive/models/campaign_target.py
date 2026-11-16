@@ -18,7 +18,7 @@ from __future__ import annotations
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models.deletion import ProtectedError
 from django.urls import reverse
 from django.utils import timezone
@@ -348,6 +348,55 @@ class CampaignTarget(models.Model):
         row.save(update_fields=["values"])
         return values
 
+    def set_recipients(self, values, *, recipient_type=None, clear_other_roles: bool = False) -> list:
+        """Replace one role with *values*. Other roles stay unless asked.
+
+        *values* may be a contact or a list of them, already chosen by the
+        integration. Duplicates use :func:`contact_identity`. An empty list
+        keeps the row, so the role stays owned and the object's own contacts
+        are not filled back in. ``clear_other_roles`` deletes every other role
+        in the same transaction.
+        """
+        from ..processors.build_target import default_recipient_type
+
+        if self.pk is None:
+            raise ValueError("Save the campaign target before replacing recipients.")
+        if recipient_type is None:
+            recipient_type = default_recipient_type(self.missive_type)
+        stored = stored_recipient_values(values, self.missive_type)
+        with transaction.atomic():
+            locked = type(self)._base_manager.select_for_update().get(pk=self.pk)
+            if not locked.is_active():
+                raise ValueError("Recipients can only be replaced on a live selection row.")
+            list(locked.to_campaignrecipienttarget.select_for_update())
+            if clear_other_roles:
+                locked.to_campaignrecipienttarget.exclude(recipient_type=recipient_type).delete()
+            row = locked._recipient_row(recipient_type)
+            row.values = stored
+            row.save(update_fields=["values"])
+        return stored
+
+    def clear_recipients(self, *, recipient_type=None, all_roles: bool = False) -> None:
+        """Drop stored contacts so the object can fill the role again.
+
+        Without ``recipient_type``, the channel's default role is removed.
+        ``all_roles`` removes every role.
+        """
+        from ..processors.build_target import default_recipient_type
+
+        if self.pk is None:
+            raise ValueError("Save the campaign target before clearing recipients.")
+        with transaction.atomic():
+            locked = type(self)._base_manager.select_for_update().get(pk=self.pk)
+            if not locked.is_active():
+                raise ValueError("Recipients can only be cleared on a live selection row.")
+            rows = locked.to_campaignrecipienttarget.select_for_update()
+            if not all_roles:
+                if recipient_type is None:
+                    recipient_type = default_recipient_type(locked.missive_type)
+                rows = rows.filter(recipient_type=recipient_type)
+            rows.delete()
+
     def sync_recipients(self, *, first: bool = False) -> list:
         """Replace the default role with the contacts read on the linked object.
 
@@ -361,10 +410,10 @@ class CampaignTarget(models.Model):
             raise ValueError("Save the campaign target before syncing recipients.")
         obj = _linked_business_object(self)
         values = contacts_for_channel(obj, self.missive_type, first=first) if obj is not None else []
-        row = self._recipient_row(default_recipient_type(self.missive_type))
-        row.values = values
-        row.save(update_fields=["values"])
-        return values
+        return self.set_recipients(
+            values,
+            recipient_type=default_recipient_type(self.missive_type),
+        )
 
     def _recipient_row(self, recipient_type):
         row, _created = CampaignRecipientTarget.objects.get_or_create(
@@ -460,6 +509,25 @@ class CampaignRecipientTarget(models.Model):
         super().clean()
         if not isinstance(self.values, list):
             raise ValidationError({"values": _("Enter a JSON list of contacts.")})
+
+
+def stored_recipient_values(values, missive_type: str) -> list:
+    """*values* deduplicated by :func:`contact_identity`, order kept."""
+    from ..processors.build_target import contact_identity
+
+    if isinstance(values, (str, dict)) or not isinstance(values, (list, tuple)):
+        values = [values]
+    stored = []
+    seen: set[str] = set()
+    for item in values:
+        if item in (None, "", {}, []):
+            continue
+        key = contact_identity(item, missive_type)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        stored.append(item)
+    return stored
 
 
 def active_campaign_target(campaign, target, missive_type, *, campaign_step=None):

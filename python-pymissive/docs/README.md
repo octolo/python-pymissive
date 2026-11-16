@@ -4,6 +4,7 @@ This file provides general guidelines for the AI assistant working on this proje
 
 For detailed information, refer to:
 - `AI.md` - Condensed reference guide for AI assistants (start here)
+- `contracts.md` - Public type, event, recipient and preview contract
 - `purpose.md` - Project purpose and goals
 - `structure.md` - Project structure and module organization
 - `development.md` - Development guidelines and best practices
