@@ -905,6 +905,15 @@ def test_retry_failed_adds_live_errors_to_the_pending_count():
     assert started.count_live_error == 2
     assert started.count_pending == 1
 
+    empty_scope = _scheduled(
+        campaign,
+        retry_failed=True,
+        additional_config={"missive_types": ["branded"], "step_scope": "none"},
+    )
+    untouched = MissiveScheduledCampaign.objects.with_counts().get(pk=empty_scope.pk)
+    assert untouched.count_live_error == 0
+    assert untouched.count_pending == 0
+
 
 def test_every_counter_reaches_a_non_annotated_instance():
     """The fallback reads the very enumeration ``with_counts()`` applies.

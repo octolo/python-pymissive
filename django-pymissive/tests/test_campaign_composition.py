@@ -382,6 +382,43 @@ def test_deleting_a_step_does_not_share_its_private_files():
     assert untouched.pk in letter_ids
 
 
+def test_deleting_every_step_of_a_file_does_not_share_it():
+    campaign = _campaign()
+    email = _step(campaign, 1, MissiveType.EMAIL, "Email")
+    sms = _step(campaign, 2, MissiveType.SMS, "Text")
+    letter = _step(campaign, 3, MissiveType.LETTER, "Letter")
+    both = _file(campaign, "both.txt")
+    kept = _file(campaign, "kept.txt")
+    untouched = _file(campaign, "global.txt")
+    both.campaign_step.add(email, sms)
+    kept.campaign_step.add(email, sms, letter)
+
+    CampaignStep.objects.filter(pk__in=[email.pk, sms.pk]).delete()
+
+    assert not MissiveBaseAttachment.objects.filter(pk=both.pk).exists()
+    assert list(kept.campaign_step.values_list("pk", flat=True)) == [letter.pk]
+    letter_ids = list(_missive(campaign, letter, MissiveType.LETTER).attachments.values_list("pk", flat=True))
+    assert both.pk not in letter_ids
+    assert kept.pk in letter_ids
+    assert untouched.pk in letter_ids
+
+
+def test_deleting_a_typed_step_does_not_share_its_private_file():
+    campaign = _campaign()
+    email = _step(campaign, 1, MissiveType.EMAIL, "Email")
+    letter = _step(campaign, 2, MissiveType.LETTER, "Letter")
+    only_email = _file(campaign, "email-only.txt")
+    untouched = _file(campaign, "global.txt")
+    only_email.campaign_step.add(email)
+
+    EmailCampaignStep.objects.get(pk=email.pk).delete()
+
+    assert not MissiveBaseAttachment.objects.filter(pk=only_email.pk).exists()
+    letter_ids = list(_missive(campaign, letter, MissiveType.LETTER).attachments.values_list("pk", flat=True))
+    assert only_email.pk not in letter_ids
+    assert untouched.pk in letter_ids
+
+
 def test_a_step_with_only_drafts_can_be_deleted():
     campaign = _campaign()
     step = _step(campaign, 1, MissiveType.EMAIL)

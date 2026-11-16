@@ -486,21 +486,21 @@ def active_campaign_target(campaign, target, missive_type, *, campaign_step=None
     return rows.prefetch_related("to_campaignrecipienttarget").first()
 
 
-def resolve_build_target_processors(row=None, *, scheduler=None, campaign=None) -> list:
+def resolve_build_target_processors(row=None, *, scheduler=None, campaign=None, campaign_step=None) -> list:
     """The chain that builds a target's missive; *row* may be ``None`` (no selection row).
 
-    First one set wins: *row*'s, then *scheduler*'s, then the campaign's
-    (*campaign*, or *row*'s), then
-    ``settings.PYMISSIVE_DEFAULT_BUILD_TARGET_PROCESSORS``.
+    First one set wins: *row*'s, then *scheduler*'s, then the step
+    (*campaign_step*, or *row*'s), then the campaign's (*campaign*, or
+    *row*'s), then ``settings.PYMISSIVE_DEFAULT_BUILD_TARGET_PROCESSORS``.
     """
     from ..processors.build_target import get_default_build_target_processors
 
     if campaign is None and row is not None:
         campaign = row.campaign
-    owners = [row, scheduler]
-    if row is not None and getattr(row, "campaign_step_id", None):
-        owners.append(row.campaign_step)
-    owners.append(campaign)
+    step = campaign_step
+    if step is None and row is not None and getattr(row, "campaign_step_id", None):
+        step = row.campaign_step
+    owners = [row, scheduler, step, campaign]
     for owner in owners:
         processors = getattr(owner, "build_target_processors", None)
         if processors:

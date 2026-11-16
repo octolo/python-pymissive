@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+from typing import cast
 
 from django.core.exceptions import ValidationError
 from django.db.models import Count
@@ -54,18 +55,33 @@ def trigger_billings_on_event(sender, instance, created, **kwargs):
         trigger_billings(instance.missive)
 
 
-@receiver(pre_delete, sender=CampaignStep)
 def delete_attachments_exclusive_to_step(sender, instance, **kwargs):
-    """A file limited to this step must not become shared once the step is gone.
+    """A file limited to the steps being deleted must not become shared.
 
-    An attachment with no step link is sent with every step. Deleting the
-    step only drops the link, so a file that belonged to it alone would
-    start riding along with the steps that remain.
+    An attachment with no step link is sent with every step. Drop this
+    step's links first, then delete the files that no longer have one.
+    A file that was already unlinked stays shared. When several steps go
+    in one call, each pass sees the links the previous pass removed.
     """
-    MissiveBaseAttachment.objects.annotate(step_count=Count("campaign_step")).filter(
-        campaign_step=instance,
-        step_count=1,
-    ).delete()
+    linked_ids = list(instance.attachments.values_list("pk", flat=True))
+    if not linked_ids:
+        return
+    instance.attachments.clear()
+    (
+        MissiveBaseAttachment.objects.filter(pk__in=linked_ids)
+        .annotate(step_count=Count("campaign_step"))
+        .filter(step_count=0)
+        .delete()
+    )
+
+
+for _step_model_object in (CampaignStep, *CampaignStep.__subclasses__()):
+    _step_model = cast(type[CampaignStep], _step_model_object)
+    pre_delete.connect(
+        delete_attachments_exclusive_to_step,
+        sender=_step_model,
+        dispatch_uid=f"delete_attachments_exclusive_to_step.{_step_model._meta.label_lower}",
+    )
 
 
 @receiver(m2m_changed, sender=MissiveScheduledCampaign.campaign_steps.through)

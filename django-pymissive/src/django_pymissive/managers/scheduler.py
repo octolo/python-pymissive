@@ -63,10 +63,12 @@ def live_error_count_expr():
     """Live failures this run would requeue, on its selected steps.
 
     ``ERROR``, ``FAILED`` and ``PARTIALLY_FAILED`` with ``thread_type=MISSIVE``.
-    An empty step selection means every step of the campaign. Archived attempts
-    and conversation messages stay out, and the count is not limited to missives
-    already attached to this run: a failure still belongs to the run that
-    produced it until the retry archives it.
+    An empty step selection means every step of the campaign, except when
+    ``additional_config['step_scope']`` is ``none``: that run selected nothing
+    and counts zero. Archived attempts and conversation messages stay out, and
+    the count is not limited to missives already attached to this run: a
+    failure still belongs to the run that produced it until the retry archives
+    it.
     """
     from ..models.missive import Missive
     from ..models.scheduler import MissiveScheduledCampaign
@@ -79,13 +81,17 @@ def live_error_count_expr():
     any_selected_step = through.objects.filter(
         missivescheduledcampaign_id=OuterRef(OuterRef("pk")),
     )
+    scoped_to_nothing = MissiveScheduledCampaign.objects.filter(
+        pk=OuterRef(OuterRef("pk")),
+        additional_config__step_scope="none",
+    )
     rows = (
         Missive._base_manager.filter(
             campaign_step__campaign_id=OuterRef("campaign_id"),
             thread_type=MissiveThreadType.MISSIVE,
             status__in=ERROR_STATUSES,
         )
-        .filter(~Exists(any_selected_step) | Exists(selected_for_this_step))
+        .filter(Exists(selected_for_this_step) | (~Exists(any_selected_step) & ~Exists(scoped_to_nothing)))
         .order_by()
         .values("campaign_step__campaign_id")
         .annotate(n=models.Count("pk"))

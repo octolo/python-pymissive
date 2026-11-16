@@ -901,6 +901,93 @@ def test_send_target_keeps_the_explicit_step_without_a_selection(settings):
 
 
 @pytest.mark.django_db
+def test_send_target_uses_the_step_builder_without_a_selection(settings):
+    settings.PYMISSIVE_DRY_RUN = True
+    settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
+    settings.PYMISSIVE_DEFAULT_BUILD_TARGET_PROCESSORS = []
+    campaign = _campaign()
+    reminder = CampaignStep.objects.create(
+        campaign=campaign,
+        position=4,
+        missive_type=MissiveType.EMAIL,
+        subject="Reminder",
+        body_text="Reminder",
+        build_target_processors=["django_pymissive.processors.build_target.build_target_processor"],
+    )
+    ada = create_campaign_contact("Ada", "Lovelace", emails=["ada@example.com"])
+
+    send_target(campaign, ada, "email", campaign_step=reminder)
+
+    missive = Missive.objects.get(campaign_step__campaign=campaign)
+    assert missive.campaign_step_id == reminder.pk
+    assert missive.subject == "Reminder"
+
+
+@pytest.mark.django_db
+def test_a_target_chain_still_beats_the_explicit_step():
+    campaign = _campaign()
+    step = _email_step(campaign)
+    step.build_target_processors = ["tests.test_campaign_target.build_marked"]
+    ada = create_campaign_contact("Ada", "Lovelace", emails=["ada@example.com"])
+    select(campaign, "email", ada)
+    row = CampaignTarget.objects.get(campaign=campaign)
+    row.build_target_processors = [BUILD]
+    row.save(update_fields=["build_target_processors"])
+
+    assert resolve_build_target_processors(row, campaign_step=step) == [BUILD]
+    assert resolve_build_target_processors(campaign_step=step) == ["tests.test_campaign_target.build_marked"]
+
+
+@pytest.mark.django_db
+def test_start_selection_accepts_a_step_builder_when_nothing_else_is_set(
+    settings, django_capture_on_commit_callbacks
+):
+    settings.PYMISSIVE_DRY_RUN = True
+    settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
+    settings.PYMISSIVE_DEFAULT_BUILD_TARGET_PROCESSORS = []
+    campaign = _campaign()
+    step = _email_step(campaign)
+    step.build_target_processors = ["tests.test_campaign_target.build_marked"]
+    step.save(update_fields=["build_target_processors"])
+    select(campaign, "email", create_campaign_contact("Ada", "Lovelace", emails=["ada@example.com"]))
+
+    with django_capture_on_commit_callbacks(execute=True):
+        start_selection(campaign, ["email"])
+
+    assert Missive.objects.get(campaign_step=step).subject == "from-target-processor"
+
+
+@pytest.mark.django_db
+def test_start_selection_accepts_target_builders_when_nothing_else_is_set(
+    settings, django_capture_on_commit_callbacks
+):
+    settings.PYMISSIVE_DRY_RUN = True
+    settings.PYMISSIVE_DEFAULT_PROVIDER = "fake"
+    settings.PYMISSIVE_DEFAULT_BUILD_TARGET_PROCESSORS = []
+    campaign = _campaign()
+    select(campaign, "email", create_campaign_contact("Ada", "Lovelace", emails=["ada@example.com"]))
+    row = CampaignTarget.objects.get(campaign=campaign)
+    row.build_target_processors = ["tests.test_campaign_target.build_marked"]
+    row.save(update_fields=["build_target_processors"])
+
+    with django_capture_on_commit_callbacks(execute=True):
+        start_selection(campaign, ["email"])
+
+    assert Missive.objects.get(campaign_step=_email_step(campaign)).subject == "from-target-processor"
+
+
+@pytest.mark.django_db
+def test_start_selection_rejects_a_scope_with_no_builder_anywhere(settings):
+    settings.PYMISSIVE_DEFAULT_BUILD_TARGET_PROCESSORS = []
+    campaign = _campaign()
+    select(campaign, "email", create_campaign_contact("Ada", "Lovelace", emails=["ada@example.com"]))
+
+    with pytest.raises(ValidationError, match="No build processor"):
+        start_selection(campaign, ["email"])
+    assert not MissiveScheduledCampaign.objects.filter(campaign=campaign).exists()
+
+
+@pytest.mark.django_db
 def test_campaign_counts_targets_still_without_a_missive():
     campaign = _campaign()
     ada = _contact("ada@example.com")
