@@ -212,12 +212,10 @@ Ajouter au minimum les scénarios suivants :
 
 ## Migrations
 
-1. `0037_campaignstep_and_more` crée `CampaignStep`, les proxies et les
-   nouvelles relations sans supprimer l'ancien schéma ;
-2. `0038_migrate_campaign_steps` crée une étape par type utilisé, copie les
-   contenus et options de canal, puis relie les missives et les cibles ;
-3. `0039_remove_legacy_campaign_fields` supprime `Missive.campaign` et les
-   anciennes colonnes email, téléphone et courrier de `MissiveCampaign`.
+`0036_campaign_steps` crée `CampaignStep` et les relations, copie les
+contenus de canal vers une étape par type utilisé, relie les missives et
+les cibles, puis supprime `Missive.campaign` et les anciennes colonnes
+email, téléphone et courrier de `MissiveCampaign`.
 
 Un fichier sans étape sélectionnée reste joint à toutes les étapes de sa
 campagne.

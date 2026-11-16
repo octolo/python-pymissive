@@ -76,7 +76,7 @@ def test_scheduled_scope_types_keeps_a_wildcard_list_and_a_true_all():
     from importlib import import_module
 
     scope = import_module(
-        "django_pymissive.migrations.0040_delete_phonecampaignstep_delete_postalcampaignstep_and_more"
+        "django_pymissive.migrations.0036_campaign_steps"
     ).scheduled_scope_types
 
     assert scope("email", {}) == ["email"]
