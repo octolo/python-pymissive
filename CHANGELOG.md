@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.10.1 — 2026-11-17
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.10.1,<2`.
+- No migration is required.
+- `pymissive` 1.10.1 has no behavior change.
+
+### Changes
+
+- SMS previews expose `to_recipients` with each recipient's name and phone.
+  Runtime recipients win over persisted rows, and only the recipient role is
+  included.
+- Postal preview addresses expose `text_3lines` for a native address, a
+  structured dictionary, or a legacy address string.
+
 ## 1.10.0 — 2026-11-16
 
 ### Compatibility
