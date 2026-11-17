@@ -39,6 +39,18 @@ POSTAL_PREVIEW_MISSIVE_TYPES = frozenset(
 _PREVIEW_RECIPIENT_FIELDS = ("email", "phone", "address", "notification_id")
 
 
+class _TemplateAddressDict(dict):
+    def __init__(self, value, text_3lines):
+        super().__init__(value)
+        self.text_3lines = text_3lines
+
+
+class _TemplateAddressString(str):
+    @property
+    def text_3lines(self):
+        return ((str(self),),)
+
+
 class AmbiguousPreviewStep(ValueError):
     """Raised when a campaign preview needs an explicit step selection."""
 
@@ -529,7 +541,10 @@ def _phone_from_post(post_data, prefix):
 
 def _build_sms_context(instance, post_data=None):
     sender = getattr(instance, "sender", None) or getattr(instance, "phone_sender", {}) or {}
-    context = {"sender": sender}
+    context = {
+        "sender": sender,
+        "to_recipients": [_sms_recipient(recipient) for recipient in _recipient_rows(instance)],
+    }
     if post_data and (not sender.get("phone") or not sender.get("name")):
         updated = dict(sender)
         if not updated.get("phone"):
@@ -546,7 +561,7 @@ def _build_postal_context(instance, postal_recipient_pk=None):
     recipient, recipient_pk = _select_postal_recipient(recipients, postal_recipient_pk)
     return {
         "sender": sender,
-        "sender_address": _address_value(instance, sender, "sender_address"),
+        "sender_address": _template_address(_address_value(instance, sender, "sender_address")),
         "postal_recipients": recipients,
         "postal_letter_recipient": recipient,
         "postal_letter_recipient_pk": recipient_pk,
@@ -558,19 +573,53 @@ def _address_value(instance, value, fallback_attribute):
     return address or getattr(instance, fallback_attribute, None)
 
 
-def _postal_recipients(instance):
+def _recipient_rows(instance):
+    """Recipient-role rows, runtime first, then persisted rows by name."""
     runtime = getattr(instance, "_preview_runtime", None)
     if runtime is not None:
         return [
-            {"pk": recipient.pk, "name": recipient.name or "", "address": recipient.address}
-            for recipient in runtime.recipients
-            if recipient.recipient_type == MissiveRecipientType.RECIPIENT
+            recipient for recipient in runtime.recipients if recipient.recipient_type == MissiveRecipientType.RECIPIENT
         ]
     recipient_manager = getattr(instance, "to_missiverecipient", None)
     if recipient_manager is None or not getattr(instance, "is_persisted", False):
         return []
-    queryset = recipient_manager.filter(recipient_type=MissiveRecipientType.RECIPIENT).order_by("name", "pk")
-    return [{"pk": recipient.pk, "name": recipient.name or "", "address": recipient.address} for recipient in queryset]
+    return list(recipient_manager.filter(recipient_type=MissiveRecipientType.RECIPIENT).order_by("name", "pk"))
+
+
+def _sms_recipient(recipient) -> dict:
+    return {
+        "pk": recipient.pk,
+        "name": recipient.name or "",
+        "phone": str(recipient.phone or ""),
+    }
+
+
+def _template_address(value):
+    """Address the postal templates can walk through ``text_3lines``."""
+    if hasattr(value, "text_3lines"):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        return _TemplateAddressString(text) if text else None
+    if not isinstance(value, dict) or not value:
+        return None
+    from geoaddress.formatting import format_address_lines
+
+    lines = format_address_lines(value, "text_3lines")
+    if not lines:
+        return None
+    return _TemplateAddressDict(value, tuple((line,) for line in lines))
+
+
+def _postal_recipients(instance):
+    return [
+        {
+            "pk": recipient.pk,
+            "name": recipient.name or "",
+            "address": _template_address(recipient.address),
+        }
+        for recipient in _recipient_rows(instance)
+    ]
 
 
 def _select_postal_recipient(recipients, recipient_pk):
