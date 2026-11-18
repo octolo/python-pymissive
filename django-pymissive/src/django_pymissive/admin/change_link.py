@@ -6,9 +6,10 @@ link opens that admin. The row's primary key is the same.
 """
 
 from django.contrib import admin
+from django.contrib.admin.options import InlineModelAdmin
 
 
-class ShowChangeLinkMixin:
+class ShowChangeLinkMixin(InlineModelAdmin):
     show_change_link = True
     change_link_url_name = ""
 

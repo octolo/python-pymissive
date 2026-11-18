@@ -2,13 +2,14 @@
 
 from datetime import date, datetime
 from functools import lru_cache
+from typing import Any
 
 from django.contrib import admin
 from django.utils import formats, timezone
 from django.utils.translation import gettext_lazy as _
 
 _CACHE_ATTR = "_admin_annotation_values"
-_READERS: dict[str, object] = {}
+_READERS: dict[str, Any] = {}
 
 
 def _flatten_fieldset_fields(fieldsets) -> set[str]:
@@ -41,10 +42,11 @@ def _annotation_reader(name: str):
             return bool(value)
         return _format_annotation(value)
 
-    reader.short_description = name
-    reader.boolean = name.startswith("is_")
-    reader.__name__ = name
-    return reader
+    displayed: Any = reader
+    displayed.short_description = name
+    displayed.boolean = name.startswith("is_")
+    displayed.__name__ = name
+    return displayed
 
 
 def _reader(name: str):

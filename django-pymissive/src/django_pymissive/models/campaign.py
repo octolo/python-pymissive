@@ -556,7 +556,7 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         pending = [campaign for campaign in campaigns if "_type_status_rows" not in campaign.__dict__]
         if not pending:
             return
-        grouped = {}
+        grouped: dict[object, list] = {}
         for row in _live_type_status_rows(campaign.pk for campaign in pending):
             grouped.setdefault(row["campaign_step__campaign_id"], []).append(row)
         for campaign in pending:
