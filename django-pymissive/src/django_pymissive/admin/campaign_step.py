@@ -3,6 +3,7 @@
 from typing import cast
 from urllib.parse import urlencode
 
+from django import forms
 from django.contrib import admin
 from django.forms.formsets import DELETION_FIELD_NAME
 from django.forms.models import BaseInlineFormSet
@@ -37,7 +38,8 @@ from ..models.campaign_step import (
 from ..models.channel_config import ADMIN_MISSIVE_TYPE_FIELDS
 from ..models.choices import get_missive_support_from_type
 from ..models.scheduler import format_average_send_speed
-
+from .annotations import AnnotationFieldsetMixin, campaign_step_annotation_names
+from .change_link import ShowChangeLinkMixin
 
 _COMPACT_FIELD_PAIRS = {
     ("position", "label"),
@@ -88,17 +90,34 @@ def campaign_step_fieldsets(missive_type, *, include_campaign=False, include_con
     return fieldsets
 
 
+class _SuppressedDeletionWidget(forms.Widget):
+    """Render nothing. The admin template still looks the field up by name."""
+
+    def render(self, name, value, attrs=None, renderer=None):
+        return ""
+
+
 class CampaignStepInlineFormSet(BaseInlineFormSet):
-    """Drop the delete box once a step has a missive past draft."""
+    """Hide the delete box once a step has a missive past draft.
+
+    The inline template always resolves ``DELETE`` for an existing row, so the
+    field has to stay on the form. Disabling it also ignores a posted value.
+    """
 
     def add_fields(self, form, index):
         super().add_fields(form, index)
         step = form.instance
-        if step.pk and not step.can_remove:
-            form.fields.pop(DELETION_FIELD_NAME, None)
+        if not step.pk or step.can_remove:
+            return
+        field = form.fields.get(DELETION_FIELD_NAME)
+        if field is None:
+            return
+        field.widget = _SuppressedDeletionWidget()
+        field.label = ""
+        field.disabled = True
 
 
-class CampaignStepInline(admin.StackedInline):
+class CampaignStepInline(ShowChangeLinkMixin, admin.StackedInline):
     """One channel's steps, with that channel's fields, on the campaign page."""
 
     extra = 0
@@ -106,7 +125,6 @@ class CampaignStepInline(admin.StackedInline):
     formset = CampaignStepInlineFormSet
     ordering = ["position", "pk"]
     readonly_fields = ["body_rich_snapshot_html"]
-    show_change_link = True
     missive_type = ""
 
     @property
@@ -219,10 +237,14 @@ CAMPAIGN_STEP_INLINE_BY_TYPE = {
 
 
 @admin.register(CampaignStep)
-class CampaignStepAdmin(AdminBoostModel):
+class CampaignStepAdmin(AnnotationFieldsetMixin, AdminBoostModel):
     """One physical model, with only the fields of its current channel shown."""
 
     form = CampaignStepForm
+
+    def annotation_names(self) -> tuple[str, ...]:
+        return campaign_step_annotation_names()
+
     list_display = [
         "position_type_display",
         "label_display",
@@ -270,7 +292,7 @@ class CampaignStepAdmin(AdminBoostModel):
             return False
         return super().has_delete_permission(request, obj)
 
-    def get_fieldsets(self, request, obj=None):
+    def _base_fieldsets(self, request, obj=None):
         if obj is None or not obj.missive_type:
             return [
                 (None, {"fields": self.common_fields}),

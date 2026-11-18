@@ -18,9 +18,10 @@ from ..services.billings import (
 )
 from ..forms.billing import BillingFilterForm, ExportBillingsForm, RetrieveBillingsForm
 from ..models.billing import MissiveBilling
+from .change_link import ShowChangeLinkMixin
 
 
-class MissiveBillingInline(admin.TabularInline):
+class MissiveBillingInline(ShowChangeLinkMixin, admin.TabularInline):
     """Inline for billing records on missive."""
 
     model = MissiveBilling
@@ -29,7 +30,6 @@ class MissiveBillingInline(admin.TabularInline):
     fields = ["recipient", "billing_amount", "estimate_amount", "currency", "is_billed", "invoice", "created_at"]
     raw_id_fields = ["recipient"]
     can_delete = True
-    show_change_link = True
     readonly_fields = [
         "missive",
         "recipient",

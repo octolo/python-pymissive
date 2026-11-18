@@ -478,7 +478,9 @@ def test_step_admin_hides_delete_once_a_missive_left_draft():
     assert step_admin.has_delete_permission(request, CampaignStep.objects.get(pk=step.pk)) is False
     inline = EmailCampaignStepInline(MissiveCampaign, admin.site)
     formset = inline.get_formset(request, campaign)(instance=campaign)
-    assert DELETION_FIELD_NAME not in formset.forms[0].fields
+    delete_field = formset.forms[0].fields[DELETION_FIELD_NAME]
+    assert delete_field.disabled is True
+    assert delete_field.widget.render(DELETION_FIELD_NAME, False) == ""
 
 
 def test_campaign_step_relation_is_declared_on_attachments():
@@ -1179,3 +1181,41 @@ def test_all_html_snapshots_are_readonly_in_admin():
 
     assert "description_snapshot_html" in admin.site._registry[MissiveCampaign].get_readonly_fields(request)
     assert "body_rich_snapshot_html" in admin.site._registry[Missive].get_readonly_fields(request)
+
+
+def test_campaign_change_page_keeps_delete_field_when_a_step_cannot_be_removed():
+    """The admin template looks up DELETE on every existing inline row."""
+    from django.contrib.auth import get_user_model
+
+    campaign = _campaign()
+    sent = _step(campaign, 1, MissiveType.EMAIL, "Email")
+    draft = _step(campaign, 2, MissiveType.SMS, "SMS")
+    Missive.objects.create(
+        campaign_step=sent,
+        missive_type=MissiveType.EMAIL,
+        subject="sent",
+        status=MissiveStatus.SUCCESS,
+    )
+    user = get_user_model().objects.create_superuser(
+        username="steps-delete",
+        email="steps-delete@example.com",
+        password="x",
+    )
+    request = RequestFactory().get("/")
+    request.user = user
+    formsets, _inlines = admin.site._registry[MissiveCampaign]._create_formsets(request, campaign, change=True)
+    by_step = {form.instance.pk: form for formset in formsets for form in formset.initial_forms}
+
+    locked = by_step[sent.pk]
+    assert DELETION_FIELD_NAME in locked.fields
+    assert locked.fields[DELETION_FIELD_NAME].disabled
+    assert str(locked[DELETION_FIELD_NAME]) == ""
+
+    open_step = by_step[draft.pk]
+    assert open_step.fields[DELETION_FIELD_NAME].disabled is False
+    assert "checkbox" in str(open_step[DELETION_FIELD_NAME])
+
+    client = Client()
+    client.force_login(user)
+    response = client.get(reverse("admin:django_pymissive_missivecampaign_change", args=[campaign.pk]))
+    assert response.status_code == 200

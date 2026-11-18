@@ -85,6 +85,30 @@ def support_count_annotations(lookup: str = _M) -> dict:
     return annotations
 
 
+def type_count_name(kind: str, missive_type: str) -> str:
+    """Annotation name for a live per-type counter."""
+    return f"count_{kind}_{missive_type}"
+
+
+def type_count_annotations(lookup: str = _M) -> dict:
+    """Live ``total``, ``sent`` and ``error`` counters for each missive type."""
+    annotations = {}
+    for missive_type in MISSIVE_TYPES:
+        type_q = Q(**{f"{lookup}__missive_type": missive_type})
+        annotations[type_count_name("total", missive_type)] = count_missive_expr(type_q, lookup=lookup)
+        annotations[type_count_name("sent", missive_type)] = count_missive_expr(
+            type_q,
+            sent_missive_q(prefix=lookup),
+            lookup=lookup,
+        )
+        annotations[type_count_name("error", missive_type)] = count_missive_expr(
+            type_q,
+            error_missive_q(prefix=lookup),
+            lookup=lookup,
+        )
+    return annotations
+
+
 def missive_send_speed_average(parent_lookup: str):
     """Mean missive duration without weighting rows duplicated by other joins."""
     from ..models.missive import Missive
@@ -246,11 +270,7 @@ def campaign_step_ids_for_type(missive_type: str):
     """Campaign-step ids for one type without joining each target subquery."""
     from ..models.campaign_step import CampaignStep
 
-    return Subquery(
-        CampaignStep.objects.filter(missive_type=missive_type)
-        .order_by()
-        .values("pk")
-    )
+    return Subquery(CampaignStep.objects.filter(missive_type=missive_type).order_by().values("pk"))
 
 
 def target_value_count_expr(missive_type: str):
@@ -366,6 +386,7 @@ def count_annotations() -> dict:
     """
     return {
         **missive_count_annotations(),
+        **type_count_annotations(),
         **step_count_annotations(),
         **related_count_annotations(),
         **derived_count_annotations(),
@@ -428,6 +449,7 @@ class MissiveCampaignQuerySet(models.QuerySet):
         """
         counters = {
             **missive_count_annotations(),
+            **type_count_annotations(),
             **step_count_annotations(),
             **related_count_annotations(),
         }

@@ -14,6 +14,7 @@ from django.contrib import messages
 from ..services.events import delay_retrieve_events, retrieve_events as do_retrieve_events
 from ..forms.event import RetrieveEventsForm
 from ..models.event import MissiveEvent
+from .change_link import ShowChangeLinkMixin
 from .permissions import ActionRightsMixin
 
 
@@ -34,7 +35,7 @@ class UntreatedListFilter(admin.SimpleListFilter):
         return queryset
 
 
-class MissiveEventInline(admin.TabularInline, AdminBoostFormat):
+class MissiveEventInline(ShowChangeLinkMixin, admin.TabularInline, AdminBoostFormat):
     """Inline for missive events (read-only)."""
 
     model = MissiveEvent
@@ -47,7 +48,6 @@ class MissiveEventInline(admin.TabularInline, AdminBoostFormat):
         "event_display",
         "recipient_display",
     ]
-    show_change_link = True
     can_delete = False
 
     @admin.display(description=_("Event"))

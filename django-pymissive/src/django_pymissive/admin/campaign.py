@@ -48,24 +48,38 @@ from ..utils import recalculate_attachment_priorities
 from .attachment import CampaignAttachmentBaseInline
 from .related_object import CampaignRelatedObjectInline
 from .scheduler import MissiveScheduledCampaignInline, protect_sending_runs
+from .annotations import AnnotationFieldsetMixin, campaign_annotation_names
 from .permissions import ActionRightsMixin
 
 
 @admin.register(MissiveCampaign)
-class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
+class MissiveCampaignAdmin(
+    AnnotationFieldsetMixin,
+    ActionRightsMixin,
+    AdminBoostModel,
+):
     """Admin for missive campaign model."""
 
     view_on_site = True
 
+    def annotation_names(self) -> tuple[str, ...]:
+        return campaign_annotation_names()
+
     list_display = [
         "subject_display",
+        "related_objects_display",
         "types_display",
         "stats_display",
         "targets_display",
         "last_send_date_display",
         "last_ended_at_display",
     ]
-    search_fields = ["subject", "named_id"]
+    search_fields = [
+        "subject",
+        "named_id",
+        "to_campaignrelatedobject__object_str",
+        "to_campaignrelatedobject__object_id",
+    ]
     ordering = ["-id"]
     readonly_fields = [
         "named_id",
@@ -94,7 +108,7 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
 
     #: Counters the changelist columns below read. Named one by one because
     #: ``with_counts()`` without arguments also annotates the per-status,
-    #: per-support and per-thread breakdowns — some fifty aggregates nothing
+    #: per-support, per-type and per-thread breakdowns — many aggregates nothing
     #: here displays, each one a deduplication pass over the same joined rows.
     #: The percentages bring their own recipient counters along.
     changelist_counters = (
@@ -116,7 +130,7 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
     def get_queryset(self, request):
         """Annotate the counters :attr:`changelist_counters` enumerates."""
         queryset = cast(MissiveCampaignQuerySet, super().get_queryset(request))
-        return queryset.with_counts(*self.changelist_counters)
+        return queryset.with_counts(*self.changelist_counters).prefetch_related("to_campaignrelatedobject")
 
     def get_inline_instances(self, request, obj=None):
         inlines = super().get_inline_instances(request, obj)
@@ -188,6 +202,36 @@ class MissiveCampaignAdmin(ActionRightsMixin, AdminBoostModel):
 
     def subject_display(self, obj):
         return self.format_with_help_text(obj.subject, format_lazy(_("{} step(s)"), obj.count_step))
+
+    @admin.display(description=_("Related objects"))
+    def related_objects_display(self, obj):
+        related_objects = list(obj.to_campaignrelatedobject.all())
+        if not related_objects:
+            return "-"
+
+        labels = format_html_join(
+            "",
+            '<span class="boost-label small info" style="{}" title="{}">{}</span>',
+            (
+                (
+                    "display:block;max-width:9rem;overflow:hidden;text-overflow:ellipsis;",
+                    text,
+                    text,
+                )
+                for related in related_objects[:2]
+                for text in [related.object_str or related.object_id]
+            ),
+        )
+        remaining = obj.count_related_object - min(len(related_objects), 2)
+        more = format_html("<span>+{}</span>", remaining) if remaining > 0 else ""
+        return format_html(
+            '<span style="display:inline-flex;align-items:center;gap:4px;">'
+            '<span style="display:inline-flex;flex-direction:column;gap:2px;min-width:0;">{}</span>'
+            "{}"
+            "</span>",
+            labels,
+            more,
+        )
 
     @admin.display(description=_("Types"))
     def types_display(self, obj):

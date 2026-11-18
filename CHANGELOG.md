@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.11.0 — 2026-11-18
+
+### Compatibility
+
+- `django-pymissive` now requires `pymissive>=1.11.0,<2` and
+  `django-boosted>=1.1.0`.
+
+### Changes
+
+- A campaign reports live totals, sent counts, and errors for each missive
+  type. `counts_by_type()` adds the status breakdown, and the progress page
+  keeps the per-step totals.
+- The admin shows those counters in a collapsed section and links each inline
+  row to its change page, including proxy steps and attachments.
+- The campaign list shows the related objects and can be searched by their
+  label or identifier.
+- A historical campaign that only had a first document now also receives a
+  registered-letter step.
+
 ## 1.10.1 — 2026-11-17
 
 ### Compatibility

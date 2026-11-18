@@ -41,6 +41,7 @@ from .attachment import (
     MissiveAttachmentBaseInline,
     MissiveProofInline,
 )
+from .annotations import AnnotationFieldsetMixin, missive_annotation_names
 from .permissions import ActionRightsMixin
 from ..models.attachment import MissiveBaseAttachment
 from ..utils import recalculate_attachment_priorities
@@ -137,8 +138,11 @@ def _can_read_missive(request) -> bool:
 
 
 @admin.register(Missive)
-class MissiveAdmin(ActionRightsMixin, AdminBoostModel):
+class MissiveAdmin(AnnotationFieldsetMixin, ActionRightsMixin, AdminBoostModel):
     """Admin for missive model."""
+
+    def annotation_names(self) -> tuple[str, ...]:
+        return missive_annotation_names()
 
     list_display = [
         "recipient_display",

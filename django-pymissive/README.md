@@ -288,7 +288,8 @@ campaign as on its runs, so a template can switch between the two:
 MissiveCampaign.objects.with_counts()
 # count_missive, count_sent / count_pending / count_error,
 # count_support_<support> (+ _sent, _error), count_missive_<status>,
-# count_type_<type>, count_thread_<type>,
+# count_type_<type>, count_total_<type> / count_sent_<type> / count_error_<type>,
+# count_thread_<type>,
 # count_recipient (+ _<status>), count_event, count_related_object,
 # count_attachment, count_target_pending_<type>, count_target_pending,
 # count_target_abandoned, pct_recipient_<status>
@@ -314,7 +315,7 @@ annotated and 500 ms through the fallback. Call `with_counts()` as soon as you
 iterate.
 
 Name the ones you display: `with_counts("count_missive", "pct_recipient_success")`
-annotates those two (plus the counters a percentage divides) instead of all sixty.
+annotates those two (plus the counters a percentage divides) instead of the full set.
 They share one scan of the joined rows, so the cost follows the number of
 aggregates — naming the handful the admin changelist shows measured 2,5 times
 faster than taking every counter along. An unknown name raises `ValueError`
@@ -333,6 +334,10 @@ The historical counters keep the archived threads instead — `count_missive` an
 run readable once a later run has retried them (`run.history_count` says how many
 of its attempts were archived that way). Per-status counts may therefore sum
 above `count_total`.
+
+`campaign.counts_by_type()` reads the live `count_total_<type>`,
+`count_sent_<type>` and `count_error_<type>` annotations and adds `by_status`.
+Use `MissiveCampaign.type_count_fields()` with selective `with_counts()` calls.
 
 Never filter on `status="draft"` to tell sent from pending: databases predating
 the `draft` default hold an empty status too. Use the shared predicates:

@@ -15,6 +15,7 @@ from ..models.attachment import (
     CampaignVirtualAttachment,
     MissiveProof,
 )
+from .change_link import ShowChangeLinkMixin
 
 if TYPE_CHECKING:
     from django.contrib.admin.options import _FieldsetSpec
@@ -137,7 +138,7 @@ _CAMPAIGN_ATTACHMENT_INLINE_FIELDSETS = cast(
 )
 
 
-class MissiveAttachmentBaseInline(admin.StackedInline):
+class MissiveAttachmentBaseInline(ShowChangeLinkMixin, admin.StackedInline):
     """Base inline for missive attachments."""
 
     model = MissiveBaseAttachment
@@ -145,7 +146,7 @@ class MissiveAttachmentBaseInline(admin.StackedInline):
     fieldsets = _STANDALONE_ATTACHMENT_INLINE_FIELDSETS
 
 
-class MissiveAttachmentInline(admin.TabularInline):
+class MissiveAttachmentInline(ShowChangeLinkMixin, admin.TabularInline):
     """Inline for missive attachments."""
 
     model = MissiveAttachment
@@ -159,7 +160,7 @@ class MissiveAttachmentInline(admin.TabularInline):
     ]
 
 
-class MissiveVirtualAttachmentInline(admin.TabularInline):
+class MissiveVirtualAttachmentInline(ShowChangeLinkMixin, admin.TabularInline):
     """Inline for missive virtual attachments."""
 
     model = MissiveVirtualAttachment
@@ -185,7 +186,7 @@ class CampaignStepFieldMixin:
         return super().formfield_for_manytomany(db_field, request, **kwargs)  # type: ignore[misc]
 
 
-class CampaignAttachmentBaseInline(CampaignStepFieldMixin, admin.StackedInline):
+class CampaignAttachmentBaseInline(ShowChangeLinkMixin, CampaignStepFieldMixin, admin.StackedInline):
     """Base inline for campaign attachments (same UX as :class:`MissiveAttachmentBaseInline`)."""
 
     model = MissiveBaseAttachment
@@ -205,7 +206,7 @@ class CampaignAttachmentInline(CampaignAttachmentBaseInline):
     pass
 
 
-class CampaignVirtualAttachmentInline(CampaignStepFieldMixin, admin.TabularInline):
+class CampaignVirtualAttachmentInline(ShowChangeLinkMixin, CampaignStepFieldMixin, admin.TabularInline):
     """Inline for campaign virtual attachments."""
 
     model = CampaignVirtualAttachment
@@ -222,7 +223,7 @@ class CampaignVirtualAttachmentInline(CampaignStepFieldMixin, admin.TabularInlin
     ]
 
 
-class MissiveProofInline(admin.TabularInline):
+class MissiveProofInline(ShowChangeLinkMixin, admin.TabularInline):
     """Inline for missive proofs."""
 
     model = MissiveProof

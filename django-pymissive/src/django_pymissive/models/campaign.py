@@ -15,6 +15,7 @@ from ..managers.campaign import (
     MissiveCampaignManager,
     MissiveCampaignQuerySet,
     count_annotation_names,
+    type_count_name,
 )
 from ..models.choices import (
     MissiveStatus,
@@ -89,25 +90,38 @@ def _progress_by_step(campaign) -> list:
     return steps
 
 
-def _progress_counts(rows, labels):
-    by_type = {}
-    totals = {"total": 0, "sent": 0, "error": 0}
+def _live_type_status_rows(campaign_ids):
+    """Live missives of these campaigns, grouped by type and status.
+
+    ``_base_manager`` so a recipient or event join cannot multiply the rows.
+    ``order_by()`` drops the model's default ordering, which would otherwise
+    leak into the ``GROUP BY``.
+    """
+    from django.db.models import Count
+    from pymissive.config import MISSIVE_TYPES
+
+    from .missive import Missive
+
+    return (
+        Missive._base_manager.filter(
+            campaign_step__campaign_id__in=list(campaign_ids),
+            missive_type__in=MISSIVE_TYPES,
+            thread_type=MissiveThreadType.MISSIVE,
+        )
+        .order_by()
+        .values("campaign_step__campaign_id", "missive_type", "status")
+        .annotate(n=Count("id"))
+    )
+
+
+def _status_counts_by_type(rows) -> dict[str, dict[str, int]]:
+    """Build ``{missive_type: {status: count}}`` from grouped rows."""
+    result: dict[str, dict[str, int]] = {}
     for row in rows:
-        missive_type = row["missive_type"]
-        total = row["total"]
-        sent = row["sent"]
-        error = row["error"]
-        totals["total"] += total
-        totals["sent"] += sent
-        totals["error"] += error
-        by_type[missive_type] = {
-            "label": labels.get(missive_type, missive_type),
-            "total": total,
-            "sent": sent,
-            "error": error,
-            "progress": round(sent / total * 100) if total else 0,
-        }
-    return totals, by_type
+        status = row["status"] or ""
+        if status:
+            result.setdefault(row["missive_type"], {})[status] = row["n"] or 0
+    return result
 
 
 SNAPSHOT_VERSION = 1
@@ -535,6 +549,74 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         """Used by Django admin "View on site"."""
         return self.get_progress_path()
 
+    @classmethod
+    def prefetch_type_counts(cls, campaigns) -> None:
+        """Fill the ``by_status`` part of :meth:`counts_by_type` in one query."""
+        campaigns = [campaign for campaign in campaigns if getattr(campaign, "pk", None)]
+        pending = [campaign for campaign in campaigns if "_type_status_rows" not in campaign.__dict__]
+        if not pending:
+            return
+        grouped = {}
+        for row in _live_type_status_rows(campaign.pk for campaign in pending):
+            grouped.setdefault(row["campaign_step__campaign_id"], []).append(row)
+        for campaign in pending:
+            campaign.__dict__["_type_status_rows"] = grouped.get(campaign.pk, [])
+
+    @classmethod
+    def type_count_fields(cls) -> tuple[str, ...]:
+        """The ``with_counts`` annotations consumed by :meth:`counts_by_type`."""
+        from pymissive.config import MISSIVE_TYPES
+
+        return tuple(
+            type_count_name(kind, missive_type) for missive_type in MISSIVE_TYPES for kind in ("total", "sent", "error")
+        )
+
+    def counts_by_type(self, *, only_active=False) -> dict[str, dict]:
+        """Per-type live breakdown, the campaign-wide counterpart of a run's.
+
+        ``{missive_type: {"total", "sent", "error", "progress", "by_status"}}``.
+        ``by_status`` is ``{status: count}`` for that type.
+
+        Same live set as ``count_sent`` and ``count_error`` from
+        ``with_counts()``: ``thread_type=MISSIVE`` only, so an archived attempt
+        is not counted again next to the missive that replaced it, and a
+        conversation message stays out. ``sent`` and ``error`` use those
+        counters' status sets. A legacy empty status stays in ``total`` and in
+        no status, which is why a status sum can sit below ``total``.
+
+        Targets are not included. ``count_target_*`` already counts them.
+
+        ``total``, ``sent`` and ``error`` read the annotations produced by
+        ``with_counts()``. ``by_status`` uses one grouped query rather than one
+        extra aggregate per type/status cell; :meth:`prefetch_type_counts`
+        performs that query once for a list. ``only_active`` drops types, and
+        statuses, whose count is zero.
+        """
+        from pymissive.config import MISSIVE_TYPES
+
+        rows = self.__dict__.get("_type_status_rows")
+        if rows is None:
+            rows = list(_live_type_status_rows([self.pk]))
+            self.__dict__["_type_status_rows"] = rows
+        status_by_type = _status_counts_by_type(rows)
+        result = {}
+        for missive_type in MISSIVE_TYPES:
+            total = self._count(type_count_name("total", missive_type))
+            if only_active and not total:
+                continue
+            sent = self._count(type_count_name("sent", missive_type))
+            statuses = status_by_type.get(missive_type, {})
+            if not only_active:
+                statuses = {status.value: statuses.get(status.value, 0) for status in MissiveStatus}
+            result[missive_type] = {
+                "total": total,
+                "sent": sent,
+                "error": self._count(type_count_name("error", missive_type)),
+                "progress": round(sent / total * 100) if total else 0,
+                "by_status": statuses,
+            }
+        return result
+
     def progress_payload(self) -> dict:
         """JSON-serializable progress snapshot for the campaign front page.
 
@@ -543,34 +625,20 @@ class MissiveCampaign(ConfigMixin, ProcessorsMixin, CommentTimestampedModel):
         as the archive, once as its replacement — and a conversation message
         would inflate the progress of a campaign it is not part of. ``total``
         therefore stays below ``count_missive``, which counts every thread.
+        ``by_type`` is :meth:`counts_by_type`.
         """
-        from django.db.models import Count
         from pymissive.config import MISSIVE_TYPES
 
-        from ..models.choices import error_missive_q
-        from ..models.missive import Missive
-
-        # _base_manager avoids count annotations that would multiply grouped rows.
-        # counts over reverse FKs, and their LEFT JOINs survive .values() — which
-        # only drops the column — so each Count would group multiplied rows and
-        # inflate the progress by recipients x events.
-        rows = (
-            Missive._base_manager.filter(
-                campaign_step__campaign=self,
-                thread_type=MissiveThreadType.MISSIVE,
-            )
-            .values("missive_type")
-            .annotate(
-                total=Count("id"),
-                sent=Count("id", filter=sent_missive_q()),
-                error=Count("id", filter=error_missive_q()),
-            )
-        )
-
-        totals, by_type = _progress_counts(rows, MISSIVE_TYPES)
-        total_count = totals["total"]
-        sent_count = totals["sent"]
-        error_count = totals["error"]
+        total_count = sent_count = error_count = 0
+        by_type = {}
+        for missive_type, counts in self.counts_by_type(only_active=True).items():
+            total_count += counts["total"]
+            sent_count += counts["sent"]
+            error_count += counts["error"]
+            by_type[missive_type] = {
+                "label": MISSIVE_TYPES.get(missive_type, missive_type),
+                **counts,
+            }
         by_step = _progress_by_step(self)
 
         progress = round(sent_count / total_count * 100) if total_count else 0

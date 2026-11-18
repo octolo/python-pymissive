@@ -25,6 +25,8 @@ from ..models.scheduler import (
     MissiveScheduledCampaign,
     format_average_send_speed,
 )
+from .annotations import AnnotationFieldsetMixin, scheduled_campaign_annotation_names
+from .change_link import ShowChangeLinkMixin
 from .permissions import ActionRightsMixin
 
 if TYPE_CHECKING:
@@ -161,10 +163,18 @@ _SCHEDULED_CAMPAIGN_INLINE_FIELDSETS: _FieldsetSpec = (
 
 
 @admin.register(MissiveScheduledCampaign)
-class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
+class MissiveScheduledCampaignAdmin(
+    AnnotationFieldsetMixin,
+    ActionRightsMixin,
+    AdminBoostModel,
+):
     """Admin for missive scheduled campaign model."""
 
     view_on_site = True
+
+    def annotation_names(self) -> tuple[str, ...]:
+        return scheduled_campaign_annotation_names()
+
     form = ScheduledCampaignForm
 
     list_display = [
@@ -584,14 +594,13 @@ class MissiveScheduledCampaignAdmin(ActionRightsMixin, AdminBoostModel):
         return "-"
 
 
-class MissiveScheduledCampaignInline(admin.StackedInline):
+class MissiveScheduledCampaignInline(ShowChangeLinkMixin, admin.StackedInline):
     """Inline for missive scheduled campaign model."""
 
     model = MissiveScheduledCampaign
     form = ScheduledCampaignForm
     formset = ScheduledCampaignInlineFormSet
     extra = 0
-    show_change_link = True
     fieldsets = _SCHEDULED_CAMPAIGN_INLINE_FIELDSETS
     readonly_fields = [
         "send_date",

@@ -91,7 +91,7 @@ def _configured_fallback_types(campaign):
     if campaign.phone_body_rich or campaign.phone_body_text:
         types.add('sms')
     if campaign.first_document:
-        types.add('letter')
+        types.update({'letter', 'registered_letter'})
     return types
 
 

@@ -17,6 +17,7 @@ from ..models.recipient import (
     MissiveRecipientEmail,
     MissiveRecipientPhone,
 )
+from .change_link import ShowChangeLinkMixin
 
 
 def missive_admin_locked(obj) -> bool:
@@ -59,7 +60,7 @@ class TrackingNumberLinkMixin:
         return number
 
 
-class LockedGeoaddressInlineMixin(admin.options.InlineModelAdmin):
+class LockedGeoaddressInlineMixin(ShowChangeLinkMixin, admin.options.InlineModelAdmin):
     """On a locked missive, freeze fields but leave GeoaddressField as a widget."""
 
     def get_formset(self, request, obj=None, **kwargs):

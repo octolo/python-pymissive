@@ -13,6 +13,7 @@ from django_boosted import AdminBoostModel  # type: ignore[import-untyped]
 from django_boosted.decorators import admin_boost_action, admin_boost_view  # type: ignore[import-untyped]
 
 from ..models.campaign_target import CampaignRecipientTarget, CampaignTarget
+from .change_link import ShowChangeLinkMixin
 from .permissions import ActionRightsMixin
 from .related_object import BaseRelatedObjectAdmin
 
@@ -63,12 +64,20 @@ class AbandonTargetForm(forms.Form):
     )
 
 
-class CampaignRecipientTargetInline(admin.TabularInline):
+class CampaignRecipientTargetInline(ShowChangeLinkMixin, admin.TabularInline):
     """Optional contact lists, one row per recipient type."""
 
     model = CampaignRecipientTarget
     extra = 0
     fields = ["recipient_type", "values"]
+
+
+@admin.register(CampaignRecipientTarget)
+class CampaignRecipientTargetAdmin(admin.ModelAdmin):
+    """Change page reached from the campaign target inline."""
+
+    def has_module_permission(self, request):
+        return False
 
 
 @admin.register(CampaignTarget)

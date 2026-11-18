@@ -528,6 +528,8 @@ def test_the_default_queryset_aggregates_nothing():
     default queryset is paid by every lookup, including a ``.get(pk=…)`` that
     reads no counter at all.
     """
+    from pymissive.config import MISSIVE_TYPES
+
     default = MissiveCampaign.objects.all()
     default_sql = str(default.query)
     assert "COUNT(" not in default_sql
@@ -548,14 +550,14 @@ def test_the_default_queryset_aggregates_nothing():
     # Pending targets, stored contact values and send speed use subqueries.
     # Send speed joins each missive to its step inside its isolated subquery.
     assert opted_in.count("JOIN") == 8
-    assert opted_in.count("COUNT(DISTINCT") == 80
+    assert opted_in.count("COUNT(DISTINCT") == 80 + 3 * len(MISSIVE_TYPES)
 
 
 def test_with_counts_annotates_only_the_names_it_is_given():
     """Naming the counters a list displays is what makes the opt-in worth it.
 
     The cost of the query follows the number of aggregates — they all share one
-    scan of the joined rows — so the fifty a changelist never reads are pure
+    scan of the joined rows — so counters a changelist never reads are pure
     overhead. Selecting must not change a single value.
     """
     campaign = _campaign()
@@ -627,7 +629,69 @@ def test_campaign_changelist_still_renders_the_opt_in_counters():
     assert b"100% success" in response.content
 
 
-def test_a_counter_read_without_with_counts_costs_one_query_for_all():
+def test_change_view_shows_every_annotation_collapsed_outside_the_list():
+    """The change page lists with_counts annotations; the changelist does not."""
+    from django.test import RequestFactory
+
+    campaign = _campaign()
+    missive = _missive(campaign, status=MissiveStatus.SUCCESS)
+    step = missive.campaign_step
+    run = MissiveScheduledCampaign.objects.create(campaign=campaign)
+    user = get_user_model().objects.create_superuser(
+        username="annotations-admin",
+        email="annotations-admin@example.com",
+        password="x",
+    )
+    client = Client()
+    client.force_login(user)
+    request = RequestFactory().get("/")
+    request.user = user
+
+    pages = (
+        (MissiveCampaign, campaign, "count_total_email"),
+        (CampaignStep, step, "count_missive"),
+        (Missive, missive, "count_history"),
+        (MissiveScheduledCampaign, run, "count_live_error"),
+    )
+    for model, obj, name in pages:
+        model_admin = admin.site._registry[model]
+        opts = model._meta
+        fieldsets = model_admin.get_fieldsets(request, obj)
+        title, options = fieldsets[-1]
+        assert str(title) == "Annotations"
+        assert "collapse" in options["classes"]
+        assert name in options["fields"]
+        assert name in model_admin.get_readonly_fields(request, obj)
+        assert "Annotations" not in {str(label) for label, _opts in fieldsets[:-1]}
+
+        empty = model_admin.get_fieldsets(request, None)
+        assert all(str(label) != "Annotations" for label, _opts in empty)
+
+        change = client.get(reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[obj.pk]))
+        listing = client.get(reverse(f"admin:{opts.app_label}_{opts.model_name}_changelist"))
+        assert change.status_code == 200
+        assert listing.status_code == 200
+        marker = f"field-{name}".encode()
+        assert marker in change.content
+        assert marker not in listing.content
+
+    run_fields = admin.site._registry[MissiveScheduledCampaign].get_fieldsets(request, run)[-1][1]["fields"]
+    assert "send_speed" in run_fields
+
+    step_admin = admin.site._registry[CampaignStep]
+    unsaved = step_admin.get_fieldsets(request, CampaignStep(missive_type="email"))
+    assert str(unsaved[1][0]) == "Content"
+    assert all(str(label) != "Annotations" for label, _opts in unsaved)
+
+    bare = MissiveCampaign.objects.get(pk=campaign.pk)
+    campaign_admin = admin.site._registry[MissiveCampaign]
+    campaign_admin.get_fieldsets(request, bare)
+    missing = [name for name in campaign_admin.annotation_names() if name not in bare.__dict__]
+    with CaptureQueriesContext(connection) as ctx:
+        for name in missing[:3]:
+            getattr(campaign_admin, name)(bare)
+    assert len(ctx) == 1
+    assert len(missing) > 3
     """Opt-in does not mean unreadable: the fallback fetches the whole set once.
 
     A template reading ``campaign.count_missive`` keeps working; what it must not

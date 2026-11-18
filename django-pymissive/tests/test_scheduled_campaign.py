@@ -15,6 +15,7 @@ Covers:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -83,6 +84,23 @@ def test_scheduled_scope_types_keeps_a_wildcard_list_and_a_true_all():
     assert scope("*", {"missive_types": ["email", "sms"]}) == ["email", "sms"]
     assert scope("*", {}) is None
     assert scope("*", {"missive_types": []}) is None
+
+
+def test_campaign_step_migration_creates_both_postal_types_from_first_document():
+    from importlib import import_module
+
+    fallback_types = import_module(
+        "django_pymissive.migrations.0036_campaign_steps"
+    )._configured_fallback_types
+    campaign = SimpleNamespace(
+        email_body_rich="",
+        email_body_text="",
+        phone_body_rich="",
+        phone_body_text="",
+        first_document="<p>Letter</p>",
+    )
+
+    assert fallback_types(campaign) == {"letter", "registered_letter"}
 
 
 def test_unmatched_step_scope_does_not_widen_to_every_step():

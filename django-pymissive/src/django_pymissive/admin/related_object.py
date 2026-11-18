@@ -7,6 +7,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 
 from ..models.related_object import MissiveRelatedObject, CampaignRelatedObject
+from .change_link import ShowChangeLinkMixin
 
 
 class BaseRelatedObjectAdmin:
@@ -34,7 +35,7 @@ class BaseRelatedObjectAdmin:
         return format_html('<a href="{}">{}</a>', url, label)
 
 
-class MissiveRelatedObjectInline(admin.TabularInline, BaseRelatedObjectAdmin):
+class MissiveRelatedObjectInline(ShowChangeLinkMixin, admin.TabularInline, BaseRelatedObjectAdmin):
     """Inline for missive related objects."""
 
     model = MissiveRelatedObject
@@ -90,7 +91,7 @@ class MissiveRelatedObjectAdmin(AdminBoostModel, BaseRelatedObjectAdmin):
         )
 
 
-class CampaignRelatedObjectInline(admin.TabularInline, BaseRelatedObjectAdmin):
+class CampaignRelatedObjectInline(ShowChangeLinkMixin, admin.TabularInline, BaseRelatedObjectAdmin):
     """Inline for campaign related objects."""
 
     model = CampaignRelatedObject
