@@ -161,9 +161,45 @@ jobs:
               print(cls.__name__)
           PY
 
+  security:
+    name: Security ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: python-pymissive
+            advisory: false
+          - package: django-pymissive
+            advisory: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install security tools
+        run: python -m pip install bandit==1.9.4 pip-audit==2.10.1
+      - name: Static security scan
+        id: bandit
+        continue-on-error: ${{ matrix.advisory }}
+        working-directory: ${{ matrix.package }}
+        run: python -m bandit -q -r src -ll -ii
+      - name: Report security findings
+        if: steps.bandit.outcome == 'failure'
+        run: |
+          echo "::warning::Bandit reported findings or failed for ${{ matrix.package }}; see the security scan."
+          echo "Bandit requires review for ${{ matrix.package }}." >> "$GITHUB_STEP_SUMMARY"
+      - name: Audit runtime dependencies
+        working-directory: ${{ matrix.package }}
+        run: python -m pip_audit . --progress-spinner off
+
   build:
     name: Build ${{ matrix.package_name }}
-    needs: [tests, pymissive-install]
+    needs: [tests, pymissive-install, security]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -198,3 +234,73 @@ jobs:
           python -m twine check dist/*
           python ../.github/scripts/check-wheel-contents.py \
             --package "${{ matrix.package_name }}" dist/*.whl
+
+  maintainability:
+    name: Radon maintainability
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Radon
+        id: radon_install
+        continue-on-error: true
+        run: python -m pip install radon==6.0.1
+      - name: Report installation failure
+        if: steps.radon_install.outcome == 'failure'
+        run: |
+          echo "::warning::Radon could not be installed; maintainability was not checked."
+          echo "Radon could not be installed; maintainability was not checked." >> "$GITHUB_STEP_SUMMARY"
+      - name: Report maintainability
+        if: steps.radon_install.outcome == 'success'
+        continue-on-error: true
+        run: |
+          for source in "django-pymissive/src" "python-pymissive/src"; do
+            if ! report=$(python -m radon mi "$source" -s -e '*/migrations/*'); then
+              echo "::warning::Radon could not generate the report for $source."
+              exit 1
+            fi
+            printf '### Radon maintainability index: %s\n\n```\n%s\n```\n' "$source" "$report" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+  local-audit:
+    name: Full audit (progressive)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install audit dependencies
+        id: audit_setup
+        continue-on-error: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0 libharfbuzz-subset0
+          python -m pip install -e "./python-pymissive[test]" -e "./django-pymissive[test]" "Django==5.2.*"
+          python -m pip install "ruff==0.15.18" mypy bandit pip-audit vulture radon xenon pytest pytest-django pytest-cov build twine
+      - name: Report setup failure
+        if: steps.audit_setup.outcome == 'failure'
+        run: |
+          echo "::warning::Audit dependencies could not be installed; the full audit did not run."
+          echo "Audit dependencies could not be installed; the full audit did not run." >> "$GITHUB_STEP_SUMMARY"
+      - name: Run audit
+        id: audit
+        if: steps.audit_setup.outcome == 'success'
+        continue-on-error: true
+        run: make audit PYTHON=python
+      - name: Report audit findings
+        if: steps.audit.outcome == 'failure'
+        run: |
+          echo "::warning::The full audit reported failures; see the audit step."
+          echo "Full audit reported failures; see the audit step." >> "$GITHUB_STEP_SUMMARY"
